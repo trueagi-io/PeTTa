@@ -43,8 +43,94 @@ petta_log_handler(Level, Msg) :-
     close(Stream).
 
 % Set PeTTa log handler
-remove_log_handler(default_log_handler).
-add_log_handler(petta_log_handler).
+:- remove_log_handler(default_log_handler).
+:- add_log_handler(petta_log_handler).
 
-'logger-info'(Msg, []) :-
+% Get current log level, one of trace, debug, info, warn, error and
+% fatal.
+'logger-level'(LogLvl) :-
+    log4p:get_log_level(LogLvl).
+
+% Get all possible log levels, which are trace, debug, info, warn,
+% error and fatal.
+'logger-levels'(LogLvls) :-
+    log4p:log_levels(LogLvls).
+
+% Change log level globally (across all threads).  Valid log levels
+% are trace, debug, info, warn, error and fatal.
+'logger-set-global-level'(NewLvl, true) :-
+    log4p:set_global_log_level(NewLvl).
+
+% Change log level locally (only the current threads).  Valid log
+% levels are trace, debug, info, warn, error and fatal.
+'logger-set-local-level'(NewLvl, true) :-
+    log4p:set_local_log_level(NewLvl, true).
+'logger-set-level'(NewLvl, true) :-
+    log4p:set_local_log_level(NewLvl).
+
+% Log a message at the trace level
+'logger-trace'(Msg, true) :-
+    log4p:trace(Msg).
+
+% Log a message at the debug level
+'logger-debug'(Msg, true) :-
+    log4p:debug(Msg).
+
+% Log a message at the info level
+'logger-info'(Msg, true) :-
     log4p:info(Msg).
+
+% Log a message at the warn level
+'logger-warn'(Msg, true) :-
+    log4p:warn(Msg).
+
+% Log a message at the error level
+'logger-error'(Msg, true) :-
+    log4p:error(Msg).
+
+% Log a message at the fatal level.  This will NOT halt the process.
+% This responsability is left to the programmer.
+'logger-fatal'(Msg, true) :-
+    log4p:fatal(Msg).
+
+% Log a message at the given level.
+'logger-log'(LogLvl, Msg, true) :-
+    log4p:log(LogLvl, Msg).
+
+% Log a formatted message at the given level.  The format
+% specification can be found
+% [here](https://www.swi-prolog.org/pldoc/man?predicate=format/3)
+'logger-logf'(LogLvl, Msg, Args, true) :-
+    maplist(repr, Args, Strs),
+    log4p:logf(LogLvl, Msg, Strs).
+
+% Log a formatted message at the trace level
+'logger-tracef'(Msg, Args, true) :-
+    maplist(repr, Args, Strs),
+    log4p:logf(trace, Msg, Strs).
+
+% Log a message at the debug level
+'logger-debugf'(Msg, Args, true) :-
+    maplist(repr, Args, Strs),
+    log4p:logf(debug, Msg, Strs).
+
+% Log a message at the info level
+'logger-infof'(Msg, Args, true) :-
+    maplist(repr, Args, Strs),
+    log4p:logf(info, Msg, Strs).
+
+% Log a message at the warn level
+'logger-warnf'(Msg, Args, true) :-
+    maplist(repr, Args, Strs),
+    log4p:logf(warn, Msg, Strs).
+
+% Log a message at the error level
+'logger-errorf'(Msg, Args, true) :-
+    maplist(repr, Args, Strs),
+    log4p:logf(error, Msg, Strs).
+
+% Log a message at the fatal level.  This will NOT halt the process.
+% This responsability is left to the programmer.
+'logger-fatalf'(Msg, Args, true) :-
+    maplist(repr, Args, Strs),
+    log4p:logf(fatal, Msg, Strs).
