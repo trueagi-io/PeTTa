@@ -1,4 +1,4 @@
-FROM swipl:latest
+FROM swipl:9.3.35
 
 # Install system build tools for your Python/native deps
 RUN apt-get update \
