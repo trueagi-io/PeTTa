@@ -14,5 +14,5 @@
 !(ResetBudgetLimit)
 !(InjectBudgetLimitCheck)
 
-;3. Start computation:
+;Start computation:
 !(CallWithBudgetLimit (fib 100))
