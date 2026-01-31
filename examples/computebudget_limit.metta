@@ -9,10 +9,5 @@
 (= (fib $n)
    (fib-tr $n 0 1))
 
-;Setup budget:
-(= (BudgetLimit) 300)
-!(ResetBudgetLimit)
-!(InjectBudgetLimitCheck)
-
 ;Start computation:
-!(CallWithBudgetLimit (fib 100))
+!(CallWithBudgetLimit (fib 100) 300)

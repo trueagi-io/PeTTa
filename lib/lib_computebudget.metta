@@ -39,10 +39,13 @@
                                    (CallWithBudgetLimitInternal $cont $var))
                             (Ok bye and execute "swipl -x continue.p" to continue)))))))
 
-(: CallWithBudgetLimit (-> Expression Atom))
-(= (CallWithBudgetLimit $G)
-   (let $ext (Predicate (union-atom $G ($X)))
-        (CallWithBudgetLimitInternal $ext $X)))
+(: CallWithBudgetLimit (-> Expression Atom Atom))
+(= (CallWithBudgetLimit $G $Limit)
+   (progn (add-atom &self (= (BudgetLimit) $Limit))
+          (ResetBudgetLimit)
+          (collapse (InjectBudgetLimitCheck))
+          (let $ext (Predicate (union-atom $G ($X)))
+               (CallWithBudgetLimitInternal $ext $X))))
 
 ;Function to resume computation with "swipl -x continue.p":
 (= (ResumeComputation $cont $var)
