@@ -25,7 +25,7 @@ pidfile="/tmp/metta_pid_map.$$"
 
 for f in ./examples/*.metta; do
     base=$(basename "$f")
-    case "$base" in inferencelimit.metta|repl.metta|llm_cities.metta|torch.metta|greedy_chess.metta|git_import2.metta)
+    case "$base" in computebudget_limit.metta|repl.metta|llm_cities.metta|torch.metta|greedy_chess.metta|git_import2.metta)
         continue ;;
     esac
     run_test "$f" &
