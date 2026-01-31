@@ -4,18 +4,21 @@
 %vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%
 
 %Serialize continuation:
-serialize(Term, STerm), blob(Term, clause) => nth_clause(Pred, Index, Term),  
-                                              STerm = '$CLAUSE'(Pred, Index).
 serialize(Term, STerm), \+ compound(Term) => STerm = Term.
-serialize(Term, STerm), is_list(Term) => maplist([In, Out]>>serialize(In, Out), Term, STerm).
-serialize(Term, STerm), Term =.. [Name | Args] => maplist([In, Out]>>serialize(In, Out), Args, SArgs),
+serialize(Term, STerm), is_list(Term) => maplist([In, Out] >> serialize(In, Out), Term, STerm).
+serialize(Term, STerm), Term =.. ['$cont$', Module, Clause, PC | Args] => maplist([In, Out] >> serialize(In, Out), Args, SArgs),
+                                                                          nth_clause(Pred, Index, Clause),
+                                                                          STerm =.. ['$cont$', Module, '$CLAUSE'(Pred, Index), PC | SArgs].
+serialize(Term, STerm), Term =.. [Name | Args] => maplist([In, Out] >> serialize(In, Out), Args, SArgs),
                                                   STerm =.. [Name | SArgs].
 
 %Deserialize continuaton:
-deserialize('$CLAUSE'(Pred, Index), Term) => nth_clause(Pred, Index, Term).
 deserialize(STerm, Term), \+ compound(STerm) => Term = STerm.
-deserialize(STerm, Term), is_list(STerm) => maplist([In, Out]>>deserialize(In, Out), STerm, Term).
-deserialize(STerm, Term), STerm =.. [Name | SArgs] => maplist([In, Out]>>deserialize(In, Out), SArgs, Args),
+deserialize(STerm, Term), is_list(STerm) => maplist([In, Out] >> deserialize(In, Out), STerm, Term).
+deserialize(STerm, Term), STerm =.. ['$cont$', Module, '$CLAUSE'(Pred, Index), PC | SArgs] => maplist([In, Out] >> deserialize(In, Out), SArgs, Args),
+                                                                                              nth_clause(Pred, Index, Clause),
+                                                                                              Term =.. ['$cont$', Module, Clause, PC | Args].
+deserialize(STerm, Term), STerm =.. [Name | SArgs] => maplist([In, Out] >> deserialize(In, Out), SArgs, Args),
                                                       Term =.. [Name | Args].
 
 %^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^%
