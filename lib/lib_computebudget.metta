@@ -44,7 +44,7 @@
    (let $ext (Predicate (union-atom $G ($X)))
         (CallWithBudgetLimitInternal $ext $X)))
 
-;Function to resume computation with "swipl -x saveme.p":
+;Function to resume computation with "swipl -x continue.p":
 (= (ResumeComputation $cont $var)
    (progn (ResetBudgetLimit)
           ;Continue computation:
