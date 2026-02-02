@@ -3,6 +3,21 @@
 ;; Import logger library
 !(import! &self (library lib_logger))
 
+;; Get current filepath
+!(test
+  (logger-filepath)
+  "petta.log")
+
+;; Get current stdout flag
+!(test
+  (logger-stdout)
+  False)
+
+;; Get current timestamp flag
+!(test
+  (logger-timestamp)
+  True)
+
 ;; Get current log-level
 !(test
   (logger-level)
@@ -69,4 +84,28 @@
 !(test
   (logger-infof "Log terms %w, %w and %w at the info level"
                 ((+ 21 21) "Hello World!" (R A B)))
+  True)
+
+;; Reset log filepath
+!(test
+  (logger-set-filepath "my-petta.log")
+  True)
+!(test
+  (logger-info "Log message to \"my-petta.log\" file")
+  True)
+
+;; Enable logging to stdout
+!(test
+  (logger-set-stdout True)
+  True)
+!(test
+  (logger-info "Message to stdout as well")
+  True)
+
+;; Disable prefixing the message with timestampe
+!(test
+  (logger-set-timestamp False)
+  True)
+!(test
+  (logger-info "Message without timestamp")
   True)
