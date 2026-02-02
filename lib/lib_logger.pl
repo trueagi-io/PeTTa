@@ -35,8 +35,6 @@
 
 % NEXT: test overhead and see if it possible to minimize it.
 
-% NEXT: add lots of comments in lib_logger.metta.
-
 % Declare global variables
 :- dynamic filepath/1.		% Path where to write
 :- dynamic stdout_flag/1.	% Toggle writing to stdout
