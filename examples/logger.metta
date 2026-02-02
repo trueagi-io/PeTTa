@@ -1,4 +1,10 @@
-;; Test logger library
+;; Test logger library.
+;;
+;; You may need to install log4p by running the following command:
+;;
+;; ```
+;; swipl pack install log4p
+;; ````
 
 ;; Import logger library
 !(import! &self (library lib_logger))

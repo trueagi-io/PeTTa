@@ -3,6 +3,14 @@
 ;; the end of the log file.  The responsability of deleting a log file
 ;; is left the user.
 ;;
+;; This logger library is based on
+;; [log4p](https://www.swi-prolog.org/pack/list?p=log4p).  To install
+;; log4p you may need to run the following command:
+;;
+;; ```
+;; swipl pack install log4p
+;; ```
+;;
 ;; The logger library contains the following methods:
 ;;
 ;; - (logger-filepath) returns a string of the filepath where log
