@@ -17,34 +17,120 @@
 % local) is INFO, meaning that by default all messages logged at the
 % INFO, WARN, ERROR or FATAL level will be logged while the messages
 % logged at the TRACE or DEBUG level will be ignored.
+%
+% The logger always appends messsages to log file and never deletes
+% it.  It is up to the user to delete the log file.
+%
+% To install log4p you may need to run the following command
+%
+% ```
+% swipl pack install log4p
+% ```
+%
+% See https://www.swi-prolog.org/pldoc/man?section=pack-install for
+% more information.
 
 % Import log4p
 :- use_module(library(log4p)).
-
-% NEXT: support resetting stdout, filepath and timestamp.
 
 % NEXT: test overhead and see if it possible to minimize it.
 
 % NEXT: add lots of comments in lib_logger.metta.
 
-% PeTTa log handler, append timestamped messages to a petta.log file
-% under the current folder
+% Declare global variables
+:- dynamic filepath/1.		% Path where to write
+:- dynamic stdout_flag/1.	% Toggle writing to stdout
+:- dynamic timestamp_flag/1.	% Toggle prefixing message with timestamp
+
+% Set global variable defaults
+filepath("petta.log").
+stdout_flag(false).
+timestamp_flag(true).
+
+% Set global variables
+set_filepath(NewFP) :-
+    retractall(filepath(_)),
+    asserta(filepath(NewFP)).
+set_stdout(NewSF) :-
+    retractall(stdout_flag(_)),
+    asserta(stdout_flag(NewSF)).
+set_timestamp(NewTF) :-
+    retractall(timestamp_flag(_)),
+    asserta(timestamp_flag(NewTF)).
+
+% Format message as
+%
+% "[DATETIME] [LOGLEVEL] MESSAGE"
+%
+% or
+%
+% "[LOGLEVEL] MESSAGE"
+format_message(Level, Msg, FmtMsg) :-
+    % Retrieve timestamp flag
+    timestamp_flag(TF),
+    % Format message
+    (TF
+     -> (% Get current time
+         get_time(T),
+         format_time(atom(FmtT), '%F %T:%3f', T),
+         % Format full message as "[DATETIME] [LOGLEVEL] MESSAGE"
+         string_upper(Level, ULvl),
+         swritef(FmtMsg, "[%w] [%w] %w", [FmtT, ULvl, Msg]))
+     ; (% Format full message as "[LOGLEVEL] MESSAGE"
+        string_upper(Level, ULvl),
+        swritef(FmtMsg, "[%w] %w", [ULvl, Msg]))).
+
+write_to_logfile(FmtMsg) :-
+    % Retrieve filepath
+    filepath(FP),
+    % Append formatted message to log file.  TODO: opening then
+    % closing is not optimal, should be optimized.
+    (string_length(FP, 0)
+     -> true
+     ; (open(FP, append, Stream),
+        writeln(Stream, FmtMsg),
+        close(Stream))).
+
+write_to_stdout(FmtMsg) :-
+    % Retrieve stdout_flag
+    stdout_flag(SF),
+    % Write formatted message to stdout.
+    (SF
+     -> writeln(FmtMsg)
+     ; true).
+
+% PeTTa log handler, append formatted messages to log file.
 petta_log_handler(Level, Msg) :-
-    % Get current time
-    get_time(T),
-    format_time(atom(FT), '%F %T:%3f', T),
-    % Format full message as "[DATETIME] [LOGLEVEL] MESSAGE"
-    string_upper(Level, ULvl),
-    swritef(FullMsg, "[%w] [%w] %w", [FT, ULvl, Msg]),
-    % Append full message to petta.log (TODO: should be optimized)
-    open('petta.log', append, Stream),
-    write(Stream, FullMsg),
-    nl(Stream),
-    close(Stream).
+    % Format message for logging
+    format_message(Level, Msg, FmtMsg),
+    % Write formatted message to log file
+    write_to_logfile(FmtMsg),
+    % Write formatted message to stdout
+    write_to_stdout(FmtMsg).
 
 % Set PeTTa log handler
 :- remove_log_handler(default_log_handler).
 :- add_log_handler(petta_log_handler).
+
+%%%%%%%%%%%%%%%
+%% MeTTa API %%
+%%%%%%%%%%%%%%%
+
+% Get global variables
+'logger-filepath'(FP) :-
+    filepath(FP).
+'logger-stdout'(SF) :-
+    stdout_flag(SF).
+'logger-timestamp'(TF) :-
+    timestamp_flag(TF).
+
+% Set global variables
+'logger-set-filepath'(NewFP, true) :-
+    set_filepath(NewFP).
+'logger-set-stdout'(NewSF, true) :-
+    set_stdout(NewSF).
+'logger-set-timestamp'(NewTF, true) :-
+    set_timestamp(NewTF).
 
 % Get current log level, one of trace, debug, info, warn, error and
 % fatal.
