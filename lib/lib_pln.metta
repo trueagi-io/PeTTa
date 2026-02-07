@@ -138,7 +138,10 @@
                 $Rs
                 ;; Otherwise
                 (+ (* $PQs $QRs) (/safe (* (- 1 $PQs) (- $Rs (* $Qs $QRs))) (- 1 $Qs))))
-            (min $Pc (min $Qc (min $Rc (min $PQc $QRc)))))
+            (min $Pc (min $Qc (min $Rc 
+
+               (*   (- (+ $PQs $QRs)  (* $PQs $QRs))    (* $PQc $QRc) )
+            ))))
        ;; Preconditions are not met
        (stv 1 0)))
 
@@ -151,7 +154,12 @@
    (stv (+ (/safe (* (* $sBA $sBC) $sB) $sA)
            (* (- 1 (/safe (* $sBA $sB) $sA))
               (/safe (- $sC (* $sB $sBC)) (- 1 $sB))))
-        (Truth_w2c (min $cBA $cBC)))) ;confidence TODO check
+             
+        (min $cA (min $cB (min $cC
+           (/  (* $sBC (* $cBA $cBC))    (+ (* $sBC (* $cBA $cBC)) 1.0)  )
+        )))
+        
+        ))
 
 ; Abduction formula: PLN book "Appendix A: Comparison of PLN Rules with NARS Rules", page 307
 (= (Truth_Abduction (stv $sA $cA)
@@ -163,7 +171,12 @@
                   $sB)
            (/safe (* $sC (* (- 1 $sAB) (- 1 $sCB)))
                   (- 1 $sB)))
-        (Truth_w2c (min $cAB $cCB)))) ;confidence TODO check
+        
+        (min $cA (min $cB (min $cC
+           (/  (* $sAB (* $cAB $cCB))    (+ (* $sAB (* $cAB $cCB)) 1.0)  )
+        )))
+        
+        ))
 
 ;Modus Ponens: PLN book "5.7.1 Modus Ponens", page 111:
 (= (Truth_ModusPonens (stv $f1 $c1) (stv $f2 $c2)) 
