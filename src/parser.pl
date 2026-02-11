@@ -26,7 +26,7 @@ sread(S, T) :- ( atom_string(A, S),
 %An S-Expression is a parentheses-nesting of S-Expressions that are either numbers, variables, sttrings, or atoms:
 sexpr(S,E,E)  --> blanks, string_lit(S), blanks, !.
 sexpr(T,E0,E) --> blanks, "(", blanks, seq(T,E0,E), blanks, ")", blanks, !.
-sexpr(N,E,E)  --> blanks, number(N), lookahead_any(" ()\t\n\r"), blanks, !.
+sexpr(N,E,E)  --> blanks, number(N), ( lookahead_any(" ()\t\n\r") ; \+ [_] ), blanks, !.
 sexpr(V,E0,E) --> blanks, var_symbol(V,E0,E), blanks, !.
 sexpr(A,E,E)  --> blanks, atom_symbol(A), blanks.
 
