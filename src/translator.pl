@@ -17,7 +17,6 @@ constrain_args(In, Out, Goals) :- maplist(constrain_args, In, Out, NestedGoalsLi
 translate_clause(Input, (Head :- BodyConj)) :- translate_clause(Input, (Head :- BodyConj), true).
 translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                Input = [=, [F|Args0], BodyExpr],
-                                               b_setval(current, F),
                                                ( ConstrainArgs -> maplist(constrain_args, Args0, Args1, GoalsA),
                                                                   flatten(GoalsA,GoalsPrefix)
                                                                 ; Args1 = Args0, GoalsPrefix = [] ),
@@ -386,7 +385,7 @@ build_branch(Con, Val, Out, Goal) :- var(Val) -> Val = Out, Goal = Con
 translate_case([[K,VExpr]|Rs], Kv, Out, Goal, KGo) :- translate_expr_to_conj(VExpr, ConV, VOut),
                                                       constrain_args(K, Kc, Gc),
                                                       build_branch(ConV, VOut, Out, Then),
-                                                      ( Rs == [] -> Goal = ((Kv = Kc) -> Then)
+                                                      ( Rs == [] -> Goal = ((Kv = Kc) -> Then), KGi=[]
                                                                   ; translate_case(Rs, Kv, Out, Next, KGi),
                                                                     Goal = ((Kv = Kc) -> Then ; Next) ),
                                                       append([Gc,KGi], KGo).

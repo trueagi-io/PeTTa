@@ -11,52 +11,49 @@ replace_vars_with_var(Term, NewTerm) :- (is_list(Term) -> maplist(replace_vars_w
                                                         ;  Term = NewTerm).
 
 %Specialize a call by creating and translating a specialized version of the MeTTa code:
-specialize_call(HV, AVs, Out, Goal) :- %1.  Skip specialization when HV is the function currently being compile:
-                                       \+ catch(nb_getval(HV, HV), _, HV = none),
-                                       %2. Retrieve a copy of all meta-clauses stored for HV:
+specialize_call(HV, AVs, Out, Goal) :- %1. Retrieve a copy of all meta-clauses stored for HV:
                                        catch(nb_getval(HV, MetaList0), _, fail),
                                        copy_term(MetaList0, MetaList),
-                                       %3. Copy all clause variables eligible for specialization across all meta-clauses:
+                                       %2. Copy all clause variables eligible for specialization across all meta-clauses:
                                        bagof(HoVar, ArgsNorm^BodyExpr^HoBinds^HoBindsPerArg^
                                                     ( member(fun_meta(ArgsNorm, BodyExpr), MetaList),
                                                       maplist(specializable_vars(BodyExpr), AVs, ArgsNorm, HoBinds),
                                                       member(HoBindsPerArg, HoBinds),
                                                       member(HoVar, HoBindsPerArg),
                                                       nonvar(HoVar) ), BindSet),
-                                       %4. Build the specialization name from the concrete higher-order bind set:
+                                       %3. Build the specialization name from the concrete higher-order bind set:
                                        replace_vars_with_var(BindSet, CleanBindSet),
                                        format(atom(SpecName), "~w_Spec_~w",[HV, CleanBindSet]),
-                                       %5. Specialize, but only if not already specialized:
+                                       %4. Specialize, but only if not already specialized:
                                        ( ho_specialization(HV, SpecName)
-                                         ; ( %5.1. Otherwise register the specialization:
+                                         ; ( %4.1. Otherwise register the specialization:
                                              register_fun(SpecName),
                                              assertz(ho_specialization(HV, SpecName)),
                                              length(AVs, N),
                                              Arity is N + 1,
                                              assertz(arity(SpecName, Arity)),
-                                             ( %5.2. Re-use the type definition of the parent function for the specialization:
+                                             ( %4.2. Re-use the type definition of the parent function for the specialization:
                                                findall(TypeChain, catch(match('&self', [':', HV, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
                                                forall(member(TypeChain, TypeChains), add_sexp('&self', [':', SpecName, TypeChain])),
-                                               %5.3 Translate specialized MeTTa clauseses to Prolog, keeping track of the function we are compiling through recursion:
-                                               b_setval(current, SpecName),
+                                               %4.3 Translate specialized MeTTa clauseses to Prolog, keeping track of the function we are compiling through recursion:
                                                maplist({SpecName}/[fun_meta(ArgsNorm,BodyExpr),clause_info(Input,Clause)]>>
                                                        ( Input = [=,[SpecName|ArgsNorm],BodyExpr], translate_clause(Input,Clause,false) ), MetaList, ClauseInfos),
-                                               %5.4 Only proceeed specializing if this or any recursive call profited from specialization with the specialized function at head position:
+                                               %4.4 Only proceeed specializing if this or any recursive call profited from specialization with the specialized function at head position:
                                                nb_getval(specneeded, true),
-                                               %5.5 Assert and print each of the created specializations:
+                                               %4.5 Assert and print each of the created specializations:
                                                forall(member(clause_info(Input, Clause), ClauseInfos),
                                                ( asserta(Clause, Ref),
                                                  assertz(translated_from(Ref, Input)),
                                                  add_sexp('&self', Input),
                                                  format(atom(Label), "metta specialization (~w)", [SpecName]),
                                                  maybe_print_compiled_clause(Label, Input, Clause) ))
-                                               %5.6 Ok specialized, but if we did not succeed ensure the specialization is retracted:
+                                               %4.6 Ok specialized, but if we did not succeed ensure the specialization is retracted:
                                                -> true ; format("Not specialized ~w~n", [SpecName/Arity]),
                                                          retractall(fun(SpecName)),
                                                          abolish(SpecName, Arity),
                                                          retractall(arity(SpecName,Arity)),
                                                          retractall(ho_specialization(HV, SpecName)), fail ))), !,
-                                       %6. Generate call to the specialized function:
+                                       %5. Generate call to the specialized function:
                                        append(AVs, [Out], CallArgs),
                                        Goal =.. [SpecName|CallArgs].
 
