@@ -13,8 +13,8 @@ process_metta_string(S, Results) :- process_metta_string(S, Results, '&self').
 process_metta_string(S, Results, Space) :- string_codes(S, Cs),
                                            strip(Cs, 0, Codes),
                                            phrase(top_forms(Forms, 1), Codes),
-                                           maplist(parse_form, Forms, ParsedForms), trace,
-                                           maplist(process_form(Space), ParsedForms, ResultsList),
+                                           maplist(parse_form, Forms, ParsedForms),
+                                           maplist(process_form(Space), ParsedForms, ResultsList), !,
                                            append(ResultsList, Results).
 
 %First pass to convert MeTTa to Prolog Terms and register functions:
