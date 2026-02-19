@@ -1,3 +1,7 @@
+!(import! &self (library lib_import))
+!(use-module! heaps)
+!(import_prolog_function (superpose (empty_heap add_to_heap get_from_heap heap_size)))
+
 (= (clamp $v $min $max)
    (min $max (max $v $min)))
 
@@ -83,6 +87,19 @@
 ;             (if (ElementOf $x $Ret)
 ;                 (Unique $rest $Ret)
 ;                 (Unique $rest (TupleConcat ($x) $Ret))))))
+
+;;Incremental tuple dedup helpers.
+(= (PushUnique $L $x)
+   (if (ElementOf $x $L)
+       $L
+       (cons $x $L)))
+
+(= (ConcatUnique $base $items)
+   (if (== $items ())
+       $base
+       (let* (($head (car-atom $items))
+              ($tail (cdr-atom $items)))
+             (ConcatUnique (PushUnique $base $head) $tail))))
 
 ;; Consistency Conditions: PLN book "5.2.2.2 PLN Deduction and Second-Order Probability", page 74:
 
@@ -377,9 +394,13 @@
 
 ;;Whether evidence was just counted once
 (= (StampDisjoint $Ev1 $Ev2)
-   (== () (collapse (let* (($x (superpose $Ev1))
-                           ($y (superpose $Ev2)))
-                          (case (== $x $y) ((True True)))))))
+   (if (== $Ev1 ())
+       True
+       (let* (($x (car-atom $Ev1))
+              ($rest (cdr-atom $Ev1)))
+             (if (ElementOf $x $Ev2)
+                 False
+                 (StampDisjoint $rest $Ev2)))))
 
 ;;Concat stamp with sorting
 (= (StampConcat $stamp $addition)
@@ -402,38 +423,47 @@
 (= (PriorityRank (Sentence ($x (stv $f $c)) $Ev1)) $c)
 (= (PriorityRank ()) -99999.0)
 
-;;candidate elimination based on negated priority
-(= (PriorityRankNeg (Sentence ($x (stv $f $c)) $Ev1)) (- 0.0 $c))
-(= (PriorityRankNeg ()) -99999.0)
+;;task heap helpers (highest confidence first, via negative key)
+(= (TaskHeapPush $heap $item)
+   (let $prio (PriorityRank $item)
+        (add_to_heap $heap (- 0 $prio) $item)))
+
+(= (TaskHeapFromTuple $tuple)
+   (foldl-atom $tuple (empty_heap) TaskHeapPush))
+
+(= (HeapTakeItems $heap $n $acc)
+   (if (or (<= $n 0) (== (heap_size $heap) 0))
+       $acc
+       (let* (($rest (get_from_heap $heap $_priority $item)))
+             (HeapTakeItems $rest (- $n 1) (cons $item $acc)))))
 
 ;;Return limited-sized version of $L (bounded PQ functionality)
 (= (LimitSize $L $size)
-   (if (< (TupleCount $L) $size)
+   (if (<= (TupleCount $L) $size)
        $L
-       (let $lowestPriorityItem (BestCandidate PriorityRankNeg () $L)
-            (LimitSize (Without $L $lowestPriorityItem) $size))))
+       (HeapTakeItems (TaskHeapFromTuple $L) $size ())))
 
 ;;Priority-queue based task ranking deriver with belief buffer
 (= (PLN.Derive $Tasks $Beliefs $steps $maxsteps $taskqueuesize $beliefqueuesize)
    (if (or (> $steps $maxsteps) (== $Tasks ()))
        ($Tasks $Beliefs)
-       (let (Sentence $x $Ev1) (BestCandidate PriorityRank () $Tasks)
-            (let $derivations
-                 (collapse (superpose ((let* (((Sentence $y $Ev2) (superpose $Beliefs))
-                                              ($stamp (InsertionSort (TupleConcat $Ev1 $Ev2) ())))
-                                             (if (StampDisjoint $Ev1 $Ev2)
-                                                 (case (superpose ((|- $x $y)
-                                                                   (|- $y $x)))
-                                                       ((($T $TV) (Sentence ($T $TV) $stamp))))
-                                                 (empty)))
-                                       (case (|- $x) ((($T3 $TV3) (Sentence ($T3 $TV3) $Ev1)))))))
-                 (let $temp (trace! (SELECTED $steps (Sentence $x $Ev1)) 42)
-                            (PLN.Derive (LimitSize (Without (Unique (TupleConcat $Tasks $derivations) ()) (Sentence $x $Ev1)) $taskqueuesize)
-                                        (LimitSize (Unique (TupleConcat $Beliefs $derivations) ()) $beliefqueuesize)
-                                        (+ $steps 1)
-                                        $maxsteps
-                                        $taskqueuesize
-                                        $beliefqueuesize))))))
+        (let (Sentence $x $Ev1) (BestCandidate PriorityRank () $Tasks)
+             (let $derivations
+                  (collapse (superpose ((let* (((Sentence $y $Ev2) (superpose $Beliefs)))
+                                              (if (StampDisjoint $Ev1 $Ev2)
+                                                  (let $stamp (InsertionSort (TupleConcat $Ev1 $Ev2) ())
+                                                       (superpose ((case (|- $x $y)
+                                                                     ((($Txy $TVxy) (Sentence ($Txy $TVxy) $stamp))))
+                                                                   (case (|- $y $x)
+                                                                     ((($Tyx $TVyx) (Sentence ($Tyx $TVyx) $stamp)))))))
+                                                  (empty)))
+                                        (case (|- $x) ((($T3 $TV3) (Sentence ($T3 $TV3) $Ev1)))))))
+                 (PLN.Derive (LimitSize (Without (ConcatUnique $Tasks $derivations) (Sentence $x $Ev1)) $taskqueuesize)
+                             (LimitSize (ConcatUnique $Beliefs $derivations) $beliefqueuesize)
+                             (+ $steps 1)
+                             $maxsteps
+                              $taskqueuesize
+                              $beliefqueuesize)))))
 
 (= (PLN.Derive $Tasks $Beliefs $maxsteps $taskqueuesize $beliefqueuesize)
    (PLN.Derive $Tasks $Beliefs 1 $maxsteps $taskqueuesize $beliefqueuesize))
@@ -448,12 +478,26 @@
 (= (ConfidenceRank ((stv $f $c) $Ev)) $c)
 (= (ConfidenceRank ()) 0)
 
+(= (ConfidenceHeapPush $heap $item)
+   (let $prio (ConfidenceRank $item)
+        (add_to_heap $heap (- 0 $prio) $item)))
+
+(= (ConfidenceHeapFromTuple $tuple)
+   (foldl-atom $tuple (empty_heap) ConfidenceHeapPush))
+
+(= (BestConfidenceCandidate $tuple)
+   (if (== $tuple ())
+       ()
+       (let $_rest (get_from_heap (ConfidenceHeapFromTuple $tuple) $_priority $item)
+            $item)))
+
 ;;Pose a question of a certain term to the system on some knowledge base
 (= (PLN.Query $Tasks $Beliefs $term $maxsteps $taskqueuesize $beliefqueuesize)
-   (BestCandidate ConfidenceRank () (collapse (let ($TasksRet $BeliefsRet) (PLN.Derive $Tasks $Beliefs $maxsteps $taskqueuesize $beliefqueuesize)
-                                                   (case (superpose $BeliefsRet)
-                                                         (((Sentence ($Term $TV) $Ev) (case (== $Term $term)
-                                                                                            ((True ($TV $Ev)))))))))))
+   (BestConfidenceCandidate
+      (collapse (let ($TasksRet $BeliefsRet) (PLN.Derive $Tasks $Beliefs $maxsteps $taskqueuesize $beliefqueuesize)
+                  (case (superpose $BeliefsRet)
+                        (((Sentence ($Term $TV) $Ev) (case (== $Term $term)
+                                                   ((True ($TV $Ev)))))))))))
 
 (= (PLN.Query $kb $term $maxsteps $taskqueuesize $beliefqueuesize)
    (PLN.Query $kb $kb $term $maxsteps $taskqueuesize $beliefqueuesize))
@@ -463,4 +507,3 @@
 
 (= (PLN.Query $kb $term)
    (PLN.Query $kb $term (PLN.Config.MaxSteps))) ;default steps bound
-
