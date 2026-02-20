@@ -84,5 +84,8 @@
 
 ;Utils
 
+(= (fst ($a $b)) $a)
+(= (snd ($a $b)) $b)
+
 ;(= (prog1 (cons $x $xs)) $x)
 ;(= (progn (rcons $xs $x)) $x)

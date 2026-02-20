@@ -46,6 +46,9 @@ replace_all(P, R, S, O) :- split_string(S, P, "", Parts),
                                             qcompile(PlFile),
                                             consult(QlfFile) ).
 
+
+'use-module!'(Module, true) :- use_module(library(Module)).
+
 %%% Git Import: %%%
 'git-import!'(GitPath, true) :- 'git-import!'(GitPath, '', './repos', true).
      
