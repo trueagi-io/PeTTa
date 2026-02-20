@@ -1,7 +1,4 @@
 !(import! &self (library lib_import))
-!(use-module! heaps)
-!(import_prolog_function (superpose (empty_heap add_to_heap get_from_heap heap_size)))
-
 (= (clamp $v $min $max)
    (min $max (max $v $min)))
 
@@ -423,25 +420,16 @@
 (= (PriorityRank (Sentence ($x (stv $f $c)) $Ev1)) $c)
 (= (PriorityRank ()) -99999.0)
 
-;;task heap helpers (highest confidence first, via negative key)
-(= (TaskHeapPush $heap $item)
-   (let $prio (PriorityRank $item)
-        (add_to_heap $heap (- 0 $prio) $item)))
-
-(= (TaskHeapFromTuple $tuple)
-   (foldl-atom $tuple (empty_heap) TaskHeapPush))
-
-(= (HeapTakeItems $heap $n $acc)
-   (if (or (<= $n 0) (== (heap_size $heap) 0))
-       $acc
-       (let* (($rest (get_from_heap $heap $_priority $item)))
-             (HeapTakeItems $rest (- $n 1) (cons $item $acc)))))
+;;candidate elimination based on negated priority
+(= (PriorityRankNeg (Sentence ($x (stv $f $c)) $Ev1)) (- 0.0 $c))
+(= (PriorityRankNeg ()) -99999.0)
 
 ;;Return limited-sized version of $L (bounded PQ functionality)
 (= (LimitSize $L $size)
-   (if (<= (TupleCount $L) $size)
+   (if (< (TupleCount $L) $size)
        $L
-       (HeapTakeItems (TaskHeapFromTuple $L) $size ())))
+       (let $lowestPriorityItem (BestCandidate PriorityRankNeg () $L)
+            (LimitSize (Without $L $lowestPriorityItem) $size))))
 
 ;;Priority-queue based task ranking deriver with belief buffer
 (= (PLN.Derive $Tasks $Beliefs $steps $maxsteps $taskqueuesize $beliefqueuesize)
@@ -478,18 +466,8 @@
 (= (ConfidenceRank ((stv $f $c) $Ev)) $c)
 (= (ConfidenceRank ()) 0)
 
-(= (ConfidenceHeapPush $heap $item)
-   (let $prio (ConfidenceRank $item)
-        (add_to_heap $heap (- 0 $prio) $item)))
-
-(= (ConfidenceHeapFromTuple $tuple)
-   (foldl-atom $tuple (empty_heap) ConfidenceHeapPush))
-
 (= (BestConfidenceCandidate $tuple)
-   (if (== $tuple ())
-       ()
-       (let $_rest (get_from_heap (ConfidenceHeapFromTuple $tuple) $_priority $item)
-            $item)))
+   (BestCandidate ConfidenceRank () $tuple))
 
 ;;Pose a question of a certain term to the system on some knowledge base
 (= (PLN.Query $Tasks $Beliefs $term $maxsteps $taskqueuesize $beliefqueuesize)
