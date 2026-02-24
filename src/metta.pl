@@ -38,7 +38,13 @@ parse(Str, R) :- sread(Str, R).
 '%'(A,B,R)  :- R is A mod B.
 '<'(A,B,R)  :- (A<B -> R=true ; R=false).
 '>'(A,B,R)  :- (A>B -> R=true ; R=false).
-'=='(A,B,R) :- (A==B -> R=true ; R=false).
+'=='(A,B,R) :-
+    ( A == B
+    ; (number(A), number(B), A =:= B)
+    ),
+    !,
+    R = true.
+'=='(_,_,false).
 '!='(A,B,R) :- (A==B -> R=false ; R=true).
 '='(A,B,R) :-  (A=B -> R=true ; R=false).
 '=?'(A,B,R) :- (\+ \+ A=B -> R=true ; R=false).
