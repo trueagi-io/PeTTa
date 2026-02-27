@@ -33,6 +33,14 @@
           ($_ (cut)))
          $text))
 
+;Function to prompt a model via OpenRouter API:
+(= (useOpenRouter $model $prompt)
+   (let* (($apikey (once (py-eval "__import__('os').environ.get('OPENROUTER_API_KEY','')")))
+          ($expr (py-str ("__import__('json').loads(__import__('urllib.request',fromlist=['urlopen','Request']).urlopen(__import__('urllib.request',fromlist=['Request']).Request('https://openrouter.ai/api/v1/chat/completions',__import__('json').dumps({'model':'" $model "','messages':[{'role':'user','content':'" $prompt "'}]}).encode('utf-8'),{'Authorization':'Bearer " $apikey "','Content-Type':'application/json'})).read())['choices'][0]['message']['content']")))
+          ($text (once (py-eval $expr)))
+          ($_ (cut)))
+         $text))
+
 (= (sread-safe $w)
    (case (catch (sread $w))
          (((Error $A $B) (empty))
