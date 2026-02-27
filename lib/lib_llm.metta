@@ -17,8 +17,10 @@
 ;Add to builtins a function that can access by index:
 !(py-eval "setattr(__import__('builtins'),'index', (lambda o,i: o[i])) or 0")
 
-;Helper: POST JSON to OpenRouter and return the assistant reply text
+;Add to builtins a function that POST JSON to OpenRouter and return the assistant reply text
 !(py-eval "setattr(__import__('builtins'),'or_post',(lambda model,prompt,key: __import__('json').loads(__import__('urllib.request',fromlist=['urlopen','Request']).urlopen(__import__('urllib.request',fromlist=['Request']).Request('https://openrouter.ai/api/v1/chat/completions',__import__('json').dumps({'model':model,'messages':[{'role':'user','content':prompt}]}).encode('utf-8'),{'Authorization':'Bearer '+key,'Content-Type':'application/json'})).read())['choices'][0]['message']['content'])) or 0")
+;Add to builtins a function that POST to OpenRouter embeddings endpoint and return the embedding vector
+!(py-eval "setattr(__import__('builtins'),'or_embed',(lambda model,text,key: __import__('json').loads(__import__('urllib.request',fromlist=['urlopen','Request']).urlopen(__import__('urllib.request',fromlist=['Request']).Request('https://openrouter.ai/api/v1/embeddings',__import__('json').dumps({'model':model,'input':text}).encode('utf-8'),{'Authorization':'Bearer '+key,'Content-Type':'application/json'})).read())['data'][0]['embedding'])) or 0")
 
 ;Function to prompt GPT via OpenAI API:
 (= (useGPT $prompt)
@@ -58,4 +60,9 @@
           ($item       (py-call (builtins.index $data 0)))
           ($vector     (py-call (getattr $item "embedding")))
           ($_ (cut)))
+         $vector))
+
+(= (useOpenRouterEmbedding $model $text)
+   (let* (($apikey (once (py-eval "__import__('os').environ.get('OPENROUTER_API_KEY','')")))
+          ($vector (once (py-call (builtins.or_embed $model $text $apikey)))))
          $vector))
