@@ -67,13 +67,6 @@ The following projects are cloned and built by build.sh:
 ### Extension libraries
 Please check out [Extension libraries](https://github.com/trueagi-io/PeTTa/wiki/Extension-libraries) for a set of extension libraries that can be invoked from MeTTa files directly from the git repository.
 
-### Documentation
-Please see [PeTTa Wiki](https://github.com/patham9/PeTTa/wiki).
-
-### Authors
-* Hammer Patrick — SingularityNET Foundation
-* Isaev Peter — SingularityNET Foundation
-
 
 ## Notebooks, Servers, Browser
 
@@ -111,3 +104,11 @@ Please see the [MettaWamJam README](https://github.com/jazzbox35/MettaWamJam/blo
 Since Swi-Prolog can be compiled to Web Assembly, one can embed PeTTa into websites.
 
 Please see [Execution-in-browser](https://github.com/patham9/PeTTa/wiki/Execution-in-browser) for more information.
+
+### Documentation
+Please see [PeTTa Wiki](https://github.com/patham9/PeTTa/wiki).
+
+### Authors
+* Hammer Patrick — SingularityNET Foundation
+* Isaev Peter — SingularityNET Foundation
+
