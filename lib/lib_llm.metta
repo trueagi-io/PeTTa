@@ -19,10 +19,12 @@
 
 ;Function to prompt GPT via OpenAI API:
 (= (useGPT $prompt)
+   (useGPT gpt-5 1000000 $prompt))
+(= (useGPT $model $max_tokens $prompt)
    (let* (($client    (py-call (openai.OpenAI)))
           ($responses (py-call (getattr $client "responses")))
           ($create    (py-call (getattr $responses "create")))
-          ($mydict    (py-str  ("{'model':'gpt-5','input':\"" $prompt "\"}")))
+          ($mydict (py-str ("{'model':'" $model "'," "'input':\"" $prompt "\"," "'max_output_tokens':" $max_tokens "}")))
           ($kwargs    (once (py-eval $mydict)))
           ($res       (py-call (builtins.apply_kwargs $create $kwargs)))
           ($output    (py-call (getattr $res "output")))
