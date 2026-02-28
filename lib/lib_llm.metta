@@ -32,11 +32,7 @@
           ($mydict (py-str ("{'model':'" $model "'," "'input':\"" $prompt "\"," "'max_output_tokens':" $max_tokens "}")))
           ($kwargs    (once (py-eval $mydict)))
           ($res       (py-call (builtins.apply_kwargs $create $kwargs)))
-          ($output    (py-call (getattr $res "output")))
-          ($outmsg    (py-call (builtins.index $output 1))) ;0 is ResponseReasoningItem
-          ($content   (py-call (getattr $outmsg "content")))
-          ($part      (py-call (builtins.index $content 0)))
-          ($text      (py-call (getattr $part "text")))
+          ($text      (py-call (getattr $res "output_text")))
           ($_ (cut)))
          $text))
 
