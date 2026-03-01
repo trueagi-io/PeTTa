@@ -24,17 +24,18 @@
 
 ;Function to prompt GPT via OpenAI API:
 (= (useGPT $prompt)
-   (useGPT gpt-5 1000000 $prompt))
-(= (useGPT $model $max_tokens $prompt)
+   (useGPT gpt-5.2 1000000 medium $prompt))
+(= (useGPT $model $max_tokens $effort $prompt)
    (let* (($client    (py-call (openai.OpenAI)))
           ($responses (py-call (getattr $client "responses")))
           ($create    (py-call (getattr $responses "create")))
-          ($mydict (py-str ("{'model':'" $model "'," "'input':\"" $prompt "\"," "'max_output_tokens':" $max_tokens "}")))
-          ($kwargs    (once (py-eval $mydict)))
-          ($res       (py-call (builtins.apply_kwargs $create $kwargs)))
-          ($text      (py-call (getattr $res "output_text")))
+          ($mydict (py-str ("{" "'model':'" $model "'," "'input':\"" $prompt "\","
+                            "'max_output_tokens':" $max_tokens "," "'reasoning':{'effort':'" $effort "'}" "}")))
+          ($kwargs (once (py-eval $mydict)))
+          ($res    (py-call (builtins.apply_kwargs $create $kwargs)))
+          ($text   (py-call (getattr $res "output_text")))
           ($_ (cut)))
-         $text))
+     $text))
 
 ;Function to prompt a model via OpenRouter API:
 (= (useOpenRouter $model $prompt)
