@@ -246,9 +246,10 @@ translate_expr([H0|T0], Goals, Out) :-
                                            ( FreeVars == [] -> Out = F
                                                              ; Out = partial(F, FreeVars) )
         %--- Spaces ---:
-        ; ( HV == 'add-atom' ; HV == 'remove-atom' ), T = [_,_] -> append(T, [Out], RawArgs),
-                                                                   Goal =.. [HV|RawArgs],
-                                                                   append(GsH, [Goal], Goals)
+        ; ( HV == 'add-atom' ; HV == 'remove-atom' ), T = [Space,Atom] -> 
+                                                                   translate_expr(Space, G1, S),
+                                                                   Goal =.. [HV,S,Atom,Out],
+                                                                   append([GsH,G1,[Goal]], Goals)
         ; HV == match, T = [Space, Pattern, Body] -> translate_expr(Space, G1, S),
                                                      translate_expr(Body, GsB, Out),
                                                      append(G1, [match(S, Pattern, Out, Out)], G2),
