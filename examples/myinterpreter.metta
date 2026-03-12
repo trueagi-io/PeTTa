@@ -1,4 +1,4 @@
-(: myinterpreter (-> Expression %Undefined%))
+(: myinterpreter (-> Atom %Undefined%))
 (= (myinterpreter $code)
    (let $temp (println! ("Runtime-interpreting code" $code))
         (eval $code)))
