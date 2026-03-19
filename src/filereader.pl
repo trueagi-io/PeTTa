@@ -74,5 +74,5 @@ strip([], _, []).
 strip([0'"|R], 0, [0'"|O]) :- !, strip(R, 1, O).
 strip([0'"|R], 1, [0'"|O]) :- !, strip(R, 0, O).
 strip([0'\n|R], In, [0'\n|O]) :- !, strip(R, In, O).
-strip([0';|R], 0, Out) :- !, append(_, [0'\n|Rest], R), strip(Rest, 0, Out).
+strip([0';|R], 0, Out) :- !, (append(_, [0'\n|Rest], R) -> strip(Rest, 0, Out) ; Out = []).
 strip([C|R], In, [C|O]) :- strip(R, In, O).
