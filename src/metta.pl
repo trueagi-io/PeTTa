@@ -159,6 +159,7 @@ get_type_candidate(X, T) :- match('&self', [':',X,T], T, _).
 'get-metatype'(X, 'Symbol') :- atom(X), !.            % e.g., a
 
 'is-var'(A,R) :- var(A) -> R=true ; R=false.
+'is-ground'(A,R) :- ground(A) -> R=true ; R=false.
 'is-expr'(A,R) :- is_list(A) -> R=true ; R=false.
 'is-space'(A,R) :- atom(A), atom_concat('&', _, A) -> R=true ; R=false.
 
