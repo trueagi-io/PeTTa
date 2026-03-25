@@ -15,23 +15,75 @@ pop_working_dir.
 
 %Read Filename into string S and process it (S holds MeTTa code):
 load_metta_file(Filename, Results) :- load_metta_file(Filename, Results, '&self').
-load_metta_file(Filename, Results, Space) :- setup_call_cleanup(push_working_dir(Filename),
+load_metta_file(Filename, Results, Space) :- catch(load_metta_file_impl(Filename, Results, Space),
+                                                   Error,
+                                                   rethrow_metta_file_error(Filename, Error)).
+
+load_metta_file_impl(Filename, Results, Space) :- setup_call_cleanup(push_working_dir(Filename),
                                                                 ( read_file_to_string(Filename, S, []),
                                                                   process_metta_string(S, Results, Space) ),
                                                                 pop_working_dir).
 
+with_working_dir(Dir, Goal) :- ( retract(working_dir(PrevDir)) -> HadPrev = true ; HadPrev = false ),
+                               assertz(working_dir(Dir)),
+                               call_cleanup(Goal,
+                                            ( retractall(working_dir(_)),
+                                              ( HadPrev == true -> assertz(working_dir(PrevDir)) ; true ) )).
+
+rethrow_metta_file_error(_, Error) :- Error = error(_, context(_, _)), !,
+                                      throw(Error).
+rethrow_metta_file_error(Filename, error(Type, _)) :- !,
+                                                      throw(error(Type, context(Filename, 'while loading MeTTa file'))).
+rethrow_metta_file_error(_, Error) :- throw(Error).
+
 %Extract function definitions, call invocations, and S-expressions part of &self space:
 process_metta_string(S, Results) :- process_metta_string(S, Results, '&self').
-process_metta_string(S, Results, Space) :- string_codes(S, Cs),
-                                           strip(Cs, 0, Codes),
-                                           phrase(top_forms(Forms, 1), Codes),
-                                           maplist(parse_form, Forms, ParsedForms),
+process_metta_string(S, Results, Space) :- parse_metta_forms(S, ParsedForms),
+                                           prescan_import_signatures(ParsedForms, []),
                                            maplist(process_form(Space), ParsedForms, ResultsList), !,
                                            append(ResultsList, Results).
 
+parse_metta_forms(S, ParsedForms) :- string_codes(S, Cs),
+                                     strip(Cs, 0, Codes),
+                                     phrase(top_forms(Forms, 1), Codes),
+                                     maplist(parse_form, Forms, ParsedForms).
+
+prescan_import_signatures([], _).
+prescan_import_signatures([Parsed|Rest], Visited) :- prescan_import_signature(Parsed, Visited),
+                                                     prescan_import_signatures(Rest, Visited).
+
+prescan_import_signature(parsed(runnable, _, ['import!', _, FileExpr]), Visited) :- !,
+                                                                             prescan_imported_metta_file(FileExpr, Visited).
+prescan_import_signature(_, _).
+
+prescan_imported_metta_file(FileExpr, Visited) :- resolve_import_file_expr(FileExpr, File),
+                                                  resolve_metta_import_path(File, PathWithExt), !,
+                                                  prescan_metta_file(PathWithExt, Visited).
+prescan_imported_metta_file(_, _).
+
+resolve_import_file_expr(FileExpr, File) :- translate_expr(FileExpr, Goals, File),
+                                            call_goals(Goals).
+
+prescan_metta_file(Path, Visited) :- memberchk(Path, Visited), !.
+prescan_metta_file(Path, Visited) :- catch(prescan_metta_file_impl(Path, [Path|Visited]),
+                                           Error,
+                                           rethrow_metta_file_error(Path, Error)).
+
+prescan_metta_file_impl(Path, Visited) :- file_directory_name(Path, Dir),
+                                          with_working_dir(Dir,
+                                                           ( read_file_to_string(Path, S, []),
+                                                             parse_metta_forms(S, ParsedForms),
+                                                             prescan_import_signatures(ParsedForms, Visited) )).
+
+register_function_signature(F, Arity) :- register_fun(F),
+                                         ( catch(arity(F, Arity), _, fail) -> true ; assertz(arity(F, Arity)) ).
+
 %First pass to convert MeTTa to Prolog Terms and register functions:
 parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
-                                           ( Term = [=, [F|W], _], atom(F) -> register_fun(F), length(W, N), Arity is N + 1, assertz(arity(F,Arity)), T=function
+                                           ( Term = [=, [F|W], _], atom(F) -> length(W, N),
+                                                                                Arity is N + 1,
+                                                                                register_function_signature(F, Arity),
+                                                                                T=function
                                                                             ; T=expression ).
 parse_form(runnable(S), parsed(runnable, S, Term)) :- sread(S, Term).
 
