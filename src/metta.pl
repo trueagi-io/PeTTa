@@ -246,7 +246,14 @@ retractPredicate(_, false).
 ensure_metta_ext(Path, Path) :- file_name_extension(_, metta, Path), !.
 ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWithExt).
 
-'import!'(Space, File, true) :- catch(importer_helper(Space, File), _, fail).
+resolve_metta_import_path(File, PathWithExt) :- atom_string(File, SFile),
+                                                \+ file_name_extension(_, 'py', SFile),
+                                                working_dir(Base),
+                                                ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
+                                                ensure_metta_ext(Path, PathWithExt),
+                                                exists_file(PathWithExt), !.
+
+'import!'(Space, File, true) :- importer_helper(Space, File).
 importer_helper(Space, File) :- atom_string(File, SFile),
                                 working_dir(Base),
                                 ( file_name_extension(ModPath, 'py', SFile)
@@ -255,9 +262,7 @@ importer_helper(Space, File) :- atom_string(File, SFile),
                                      file_base_name(ModPath, ModuleName),
                                      py_call(sys:path:append(Dir), _),
                                      py_call(builtins:'__import__'(ModuleName), _)
-                                   ; ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
-                                     ensure_metta_ext(Path, PathWithExt),
-                                     exists_file(PathWithExt), !,
+                                   ; resolve_metta_import_path(File, PathWithExt),
                                      load_metta_file(PathWithExt, _, Space) ).
 
 :- dynamic translator_rule/1.
