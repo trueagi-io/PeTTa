@@ -112,6 +112,20 @@ empty(_) :- fail.
 first([A, _], A).
 'second-from-pair'([_, A], A).
 'unique-atom'(A, B) :- list_to_set(A, B).
+'alpha-unique-atom'(A, B) :- alpha_list_to_set(A, B).
+% Helper: like list_to_set/2 but uses =@= (structural equality)
+alpha_list_to_set([], []).
+alpha_list_to_set([H|T], R) :-
+  ( alpha_member_eq(H, T) ->
+    alpha_list_to_set(T, R)
+  ;
+    alpha_list_to_set(T, RT),
+    R = [H|RT]
+  ).
+
+% Checks if X is structurally equal to any element in the list
+alpha_member_eq(X, [H|_]) :- X =@= H, !.
+alpha_member_eq(X, [_|T]) :- alpha_member_eq(X, T).
 'sort-atom'(List, Sorted) :- msort(List, Sorted).
 'size-atom'(List, Size) :- length(List, Size).
 'car-atom'([H|_], H).
@@ -271,7 +285,7 @@ importer_helper(Space, File) :- atom_string(File, SFile),
 register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
 :- maplist(register_fun, [superpose, empty, let, 'let*', '+','-','*','/', '%', min, max, 'change-state!', 'get-state', 'bind!',
                           '<','>','==', '!=', '=', '=?', '<=', '>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
-                          'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom',
+                          'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom', 'alpha-unique-atom',
                           repr, repra, parse, 'println!', 'readln!', test, assert, 'mm2-exec', atom_concat, atom_chars, copy_term, term_hash,
                           foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!',
                           'add-atom', 'remove-atom', 'get-atoms', match, 'is-var', 'is-expr', 'is-space', 'get-mettatype',
