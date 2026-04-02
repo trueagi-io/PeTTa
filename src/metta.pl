@@ -112,6 +112,29 @@ empty(_) :- fail.
 first([A, _], A).
 'second-from-pair'([_, A], A).
 'unique-atom'(A, B) :- list_to_set(A, B).
+
+%%% Alpha-equivalence unique atom %%%
+'alpha-unique-atom'(A, B) :-
+    must_be(list, A),
+    alpha_list_to_set(A, B).
+
+alpha_list_to_set(List, Set) :-
+    empty_assoc(Seen0),
+    alpha_list_to_set_assoc(List, Seen0, Set).
+
+alpha_list_to_set_assoc([], _, []).
+alpha_list_to_set_assoc([H|T], SeenIn, R) :-
+    copy_term(H, HCopy),
+    numbervars(HCopy, 0, _),
+    term_hash(HCopy, Key),
+    ( get_assoc(Key, SeenIn, _) ->
+        alpha_list_to_set_assoc(T, SeenIn, R)
+    ;
+        put_assoc(Key, SeenIn, true, SeenOut),
+        R = [H|RT],
+        alpha_list_to_set_assoc(T, SeenOut, RT)
+    ).
+
 'sort-atom'(List, Sorted) :- msort(List, Sorted).
 'size-atom'(List, Size) :- length(List, Size).
 'car-atom'([H|_], H).
@@ -271,7 +294,7 @@ importer_helper(Space, File) :- atom_string(File, SFile),
 register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
 :- maplist(register_fun, [superpose, empty, let, 'let*', '+','-','*','/', '%', min, max, 'change-state!', 'get-state', 'bind!',
                           '<','>','==', '!=', '=', '=?', '<=', '>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
-                          'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom',
+                          'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom', 'alpha-unique-atom',
                           repr, repra, parse, 'println!', 'readln!', test, assert, 'mm2-exec', atom_concat, atom_chars, copy_term, term_hash,
                           foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!',
                           'add-atom', 'remove-atom', 'get-atoms', match, 'is-var', 'is-expr', 'is-space', 'get-mettatype',
