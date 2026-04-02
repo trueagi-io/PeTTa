@@ -12,7 +12,6 @@ constrain_args([F|Args], Var, Goals) :- atom(F),
                                         flatten(GoalsExpr, Goals).
 constrain_args(In, Out, Goals) :- maplist(constrain_args, In, Out, NestedGoalsList),
                                   flatten(NestedGoalsList, Goals), !.
-constrain_args([A, F, B], [A|B], []) :- F == '.', !.
 
 %Flatten (= Head Body) MeTTa function into Prolog Clause:
 translate_clause(Input, (Head :- BodyConj)) :- translate_clause(Input, (Head :- BodyConj), true).
