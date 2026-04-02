@@ -1,21 +1,23 @@
 :- use_module(library(readutil)). % read_file_to_string/3
 :- use_module(library(pcre)). % re_replace/4
-:- current_prolog_flag(argv, Args), ( (memberchk(silent, Args) ; memberchk('--silent', Args) ; memberchk('-s', Args))
-                                      -> assertz(silent(true)) ; assertz(silent(false)) ).
 
-%Read Filename into string S and process it (S holds MeTTa code):
-load_metta_file(Filename, Results) :- load_metta_file(Filename, Results, '&self').
-load_metta_file(Filename, Results, Space) :- read_file_to_string(Filename, S, []),
-                                             process_metta_string(S, Results, Space).
+% Read Filename into string S and process it (S holds MeTTa code):
+% Execution results are stored in Results, while compiled Prolog output is
+% placed in Output.
+load_metta_file(Filename, Results, Output) :- load_metta_file(Filename, Results, Output, '&self').
+load_metta_file(Filename, Results, Output, Space) :- read_file_to_string(Filename, S, []),
+                                                     process_metta_string(S, Results, Output, Space).
 
 %Extract function definitions, call invocations, and S-expressions part of &self space:
-process_metta_string(S, Results) :- process_metta_string(S, Results, '&self').
-process_metta_string(S, Results, Space) :- string_codes(S, Cs),
-                                           strip(Cs, 0, Codes),
-                                           phrase(top_forms(Forms, 1), Codes),
-                                           maplist(parse_form, Forms, ParsedForms),
-                                           maplist(process_form(Space), ParsedForms, ResultsList), !,
-                                           append(ResultsList, Results).
+process_metta_string(S, Results, Output) :- process_metta_string(S, Results, Output, '&self').
+process_metta_string(S, Results, Output, Space) :-
+  string_codes(S, Cs),
+  strip(Cs, 0, Codes),
+  phrase(top_forms(Forms, 1), Codes),
+  maplist(parse_form, Forms, ParsedForms),
+  maplist(process_form(Space), ParsedForms, ResultsList, OutputsList), !,
+  append(ResultsList, Results),
+  atomic_list_concat(OutputsList, Output).
 
 %First pass to convert MeTTa to Prolog Terms and register functions:
 parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
@@ -24,25 +26,51 @@ parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
 parse_form(runnable(S), parsed(runnable, S, Term)) :- sread(S, Term).
 
 %Second pass to compile / run / add the Terms:
-process_form(Space, parsed(expression, _, Term), []) :- 'add-atom'(Space, Term, true),
-                                                        ( silent(true) -> true ; swrite(Term,STerm),
-                                                                                 format("\e[33m--> metta sexpr -->~n\e[36m~w~n", [STerm]),
-                                                                                 format("\e[33m^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
-process_form(_, parsed(runnable, FormStr, Term), Result) :- translate_expr([collapse, Term], Goals, Result),
-                                                            ( silent(true) -> true ; format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
-                                                                                     forall(member(G, Goals), portray_clause((:- G))),
-                                                                                     format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ),
-                                                            call_goals(Goals).
-process_form(Space, parsed(function, FormStr, Term), []) :- add_sexp(Space, Term),
-                                                            translate_clause(Term, Clause),
-                                                            assertz(Clause, Ref),
-                                                            assertz(translated_from(Ref, Term)),
-                                                            ( silent(true) -> true ; format("\e[33m--> metta function -->~n\e[36m~w~n\e[33m--> prolog clause -->~n\e[32m", [FormStr]),
-                                                                                     clause(Head, Body, Ref),
-                                                                                     ( Body == true -> Show = Head; Show = (Head :- Body) ),
-                                                                                     portray_clause(current_output, Show),
-                                                                                     format("\e[33m^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
-process_form(_, In, _) :- format(atom(Msg), "failed to process form: ~w", [In]), throw(error(syntax_error(Msg), none)).
+process_form(Space, parsed(expression, _, Term), [], Output) :-
+  ( silent(false) ->
+      swrite(Term, STerm),
+      format("\e[33m--> metta sexpr -->~n\e[36m~w~n", [STerm]),
+      format("\e[33m^^^^^^^^^^^^^^^^^^^~n\e[0m")
+    ; true),
+  ( execute(true) ->
+    'add-atom'(Space, Term, true)
+    ; true),
+  with_output_to(string(Output), portray_clause('add-atom'(Space, Term, true))).
+
+process_form(_, parsed(runnable, FormStr, Term), Result, Output) :-
+  translate_expr([collapse, Term], Goals, Result),
+  ( silent(false) ->
+      format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
+      forall(member(G, Goals), portray_clause((:- G))),
+      format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m")
+  ; true),
+  ( execute(true) ->
+      call_goals(Goals)
+  ; Result = []),
+  findall(
+    GoalOutput,
+    (member(G, Goals), with_output_to(string(GoalOutput), portray_clause((:- G)))),
+    GoalOutputs),
+  atomic_list_concat(GoalOutputs, Output).
+
+process_form(Space, parsed(function, FormStr, Term), [], Output) :-
+  translate_clause(Term, Clause),
+  assertz(Clause, Ref),
+  assertz(translated_from(Ref, Term)),
+  clause(Head, Body, Ref),
+  ( Body == true -> Show = Head; Show = (Head :- Body) ),
+  with_output_to(string(Output), portray_clause(Show)),
+  ( silent(false) ->
+      format("\e[33m--> metta function -->~n\e[36m~w~n\e[33m--> prolog clause -->~n\e[32m", [FormStr]),
+      write(current_output, Output),
+      format("\e[33m^^^^^^^^^^^^^^^^^^^^^^~n\e[0m")
+  ; true),
+  ( execute(true) ->
+      add_sexp(Space, Term)
+  ; true
+  ).
+
+process_form(_, In, _, _) :- format(atom(Msg), "failed to process form: ~w", [In]), throw(error(syntax_error(Msg), none)).
 
 %Like blanks but counts newlines:
 newlines(C0, C2) --> blanks_to_nl, !, {C1 is C0+1}, newlines(C1,C2).
