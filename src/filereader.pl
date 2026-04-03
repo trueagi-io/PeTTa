@@ -1,23 +1,39 @@
 :- use_module(library(readutil)). % read_file_to_string/3
 :- use_module(library(pcre)). % re_replace/4
 
-% Read Filename into string S and process it (S holds MeTTa code):
-% Execution results are stored in Results, while compiled Prolog output is
-% placed in Output.
-load_metta_file(Filename, Results, Output) :- load_metta_file(Filename, Results, Output, '&self').
-load_metta_file(Filename, Results, Output, Space) :- read_file_to_string(Filename, S, []),
-                                                     process_metta_string(S, Results, Output, Space).
+% Read Filename into string S and compile it to Prolog (S holds MeTTa code)
+compile_metta_file(Filename, Output) :- compile_metta_file(Filename, Output, '&self').
+compile_metta_file(Filename, Output, Space) :-
+  read_file_to_string(Filename, S, []),
+  compile_metta_string(S, Output, Space).
+
+% Read Filename into string S and process it:
+load_metta_file(Filename, Results) :- load_metta_file(Filename, Results, '&self').
+load_metta_file(Filename, Results, Space) :-
+  read_file_to_string(Filename, S, []),
+  process_metta_string(S, Results, Space).
+
+% Compile function definitions, invocations and S-expression part of &self space
+compile_metta_string(S, Output) :- compile_metta_string(S, Output, '&self').
+compile_metta_string(S, Output, Space) :-
+  extract_forms(S, Forms),
+  maplist(parse_form, Forms, ParsedForms),
+  maplist(process_form(false, Space), ParsedForms, _, OutputsList), !,
+  atomic_list_concat(OutputsList, Output).
 
 %Extract function definitions, call invocations, and S-expressions part of &self space:
-process_metta_string(S, Results, Output) :- process_metta_string(S, Results, Output, '&self').
-process_metta_string(S, Results, Output, Space) :-
+process_metta_string(S, Results) :- process_metta_string(S, Results, '&self').
+process_metta_string(S, Results, Space) :-
+  extract_forms(S, Forms),
+  maplist(parse_form, Forms, ParsedForms),
+  maplist(process_form(true, Space), ParsedForms, ResultsList, _), !,
+  append(ResultsList, Results).
+
+% Extract top forms from MeTTa string
+extract_forms(S, Forms) :-
   string_codes(S, Cs),
   strip(Cs, 0, Codes),
-  phrase(top_forms(Forms, 1), Codes),
-  maplist(parse_form, Forms, ParsedForms),
-  maplist(process_form(Space), ParsedForms, ResultsList, OutputsList), !,
-  append(ResultsList, Results),
-  atomic_list_concat(OutputsList, Output).
+  phrase(top_forms(Forms, 1), Codes).
 
 %First pass to convert MeTTa to Prolog Terms and register functions:
 parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
@@ -25,26 +41,27 @@ parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
                                                                             ; T=expression ).
 parse_form(runnable(S), parsed(runnable, S, Term)) :- sread(S, Term).
 
-%Second pass to compile / run / add the Terms:
-process_form(Space, parsed(expression, _, Term), [], Output) :-
+% Second pass to compile / run / add the Terms. If Execute = true, we run the goals and
+% return them in Results (otherwise, we just return the compilation result in  Output):
+process_form(Execute, Space, parsed(expression, _, Term), [], Output) :-
   ( silent(false) ->
       swrite(Term, STerm),
       format("\e[33m--> metta sexpr -->~n\e[36m~w~n", [STerm]),
       format("\e[33m^^^^^^^^^^^^^^^^^^^~n\e[0m")
     ; true),
-  ( execute(true) ->
+  ( Execute ->
     'add-atom'(Space, Term, true)
     ; true),
   with_output_to(string(Output), portray_clause('add-atom'(Space, Term, true))).
 
-process_form(_, parsed(runnable, FormStr, Term), Result, Output) :-
+process_form(Execute, _, parsed(runnable, FormStr, Term), Result, Output) :-
   translate_expr([collapse, Term], Goals, Result),
   ( silent(false) ->
       format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
       forall(member(G, Goals), portray_clause((:- G))),
       format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m")
   ; true),
-  ( execute(true) ->
+  ( Execute ->
       call_goals(Goals)
   ; Result = []),
   findall(
@@ -53,7 +70,7 @@ process_form(_, parsed(runnable, FormStr, Term), Result, Output) :-
     GoalOutputs),
   atomic_list_concat(GoalOutputs, Output).
 
-process_form(Space, parsed(function, FormStr, Term), [], Output) :-
+process_form(Execute, Space, parsed(function, FormStr, Term), [], Output) :-
   translate_clause(Term, Clause),
   assertz(Clause, Ref),
   assertz(translated_from(Ref, Term)),
@@ -65,7 +82,7 @@ process_form(Space, parsed(function, FormStr, Term), [], Output) :-
       write(current_output, Output),
       format("\e[33m^^^^^^^^^^^^^^^^^^^^^^~n\e[0m")
   ; true),
-  ( execute(true) ->
+  ( Execute ->
       add_sexp(Space, Term)
   ; true
   ).

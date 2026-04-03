@@ -28,7 +28,6 @@ prolog_interop_example :- register_fun(prologfunc),
 
 % Globals:
 % * silent(true|false): Whether to print each MeTTa form as it is parsed, followed by its Prolog translation.
-% * execute(true|false): Whether to execute any runnables parsed in the MeTTa program.
 main :- current_prolog_flag(argv, Args),
         options_spec(Spec),
         opt_parse(Spec, Args, Opts, PositionalArgs),
@@ -47,16 +46,14 @@ main :- current_prolog_flag(argv, Args),
         ; (Mode = 'INTERPRETER', [File|_] = PositionalArgs) ->
                 file_directory_name(File, Dir),
                 assertz(working_dir(Dir)),
-                assertz(execute(true)),
-                load_metta_file(File,Results, _),
+                load_metta_file(File,Results),
                 maplist(swrite,Results,ResultsR),
                 maplist(format("~w~n"), ResultsR)
         ; (Mode = 'COMPILER', [File|_] = PositionalArgs) ->
                 option(output_file(OutputFile), Opts),
                 file_directory_name(File, Dir),
                 assertz(working_dir(Dir)),
-                assertz(execute(false)),
-                load_metta_file(File,_, Output),
+                compile_metta_file(File,Output),
                 ( OutputFile = 'NADA' ->
                     write(current_output, Output)
                 ; open(OutputFile, write, OutputFd),
