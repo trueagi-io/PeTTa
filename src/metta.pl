@@ -272,6 +272,9 @@ ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWith
 
 :- dynamic imported_file/1.
 
+clear_imported_files :-
+    retractall(imported_file(_)).
+
 absolute_import_path(Base, File, AbsPath, python) :-
     file_name_extension(_, py, File),
     !,
