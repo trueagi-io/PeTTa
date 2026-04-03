@@ -275,13 +275,19 @@ ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWith
 clear_imported_files :-
     retractall(imported_file(_)).
 
+resolve_import_path(Base, File, AbsPath) :-
+    absolute_file_name(File, AbsPath, [relative_to(Base), access(read), file_errors(fail)]),
+    !.
+resolve_import_path(_, File, AbsPath) :-
+    absolute_file_name(File, AbsPath, [access(read), file_errors(fail)]).
+
 absolute_import_path(Base, File, AbsPath, python) :-
     file_name_extension(_, py, File),
     !,
-    absolute_file_name(File, AbsPath, [relative_to(Base), access(read), file_errors(fail)]).
+    resolve_import_path(Base, File, AbsPath).
 absolute_import_path(Base, File, AbsPath, metta) :-
     ensure_metta_ext(File, FileWithExt),
-    absolute_file_name(FileWithExt, AbsPath, [relative_to(Base), access(read), file_errors(fail)]).
+    resolve_import_path(Base, FileWithExt, AbsPath).
 
 prolog:message(error(duplicate_import(AbsPath), _Context)) -->
     [ 'Duplicate import detected for file ~q'-[AbsPath] ].
