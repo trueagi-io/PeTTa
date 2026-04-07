@@ -4,8 +4,8 @@
 ;;; Test 1: Empty list should return false  
 !(test (is-alpha-member x ()) false)  
   
-;;; Test 2: Variable in list should unify  
-!(test (is-alpha-member $x (a b c)) true)  
+;;; Test 2: Variable in list of atoms should not match  
+!(test (is-alpha-member $x (a b c)) false)  
   
 ;;; Test 3: Ground term membership  
 !(test (is-alpha-member a (a b c)) true)  
@@ -52,3 +52,13 @@
 ;;; Test 15: Empty complex terms  
 !(test (is-alpha-member () (() a b) ) true)  
 !(test (is-alpha-member () (a b c) ) false)
+
+!(let*
+    (
+        ($pat (hi name boss))
+        ($dummy1 (println! (pattern:- $pat)))
+        ($bool (is-alpha-member $new $pat))
+        ($dummy2 (println! (is member:- $bool in pattern:- $pat)))
+    )
+    ()
+)
