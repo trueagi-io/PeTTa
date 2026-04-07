@@ -52,7 +52,7 @@ process_form(Execute, Space, parsed(expression, _, Term), [], Output) :-
   ( Execute ->
     'add-atom'(Space, Term, true)
     ; true),
-  with_output_to(string(Output), portray_clause('add-atom'(Space, Term, true))).
+  with_output_to(string(Output), portray_clause(:- 'add-atom'(Space, Term, true))).
 
 process_form(Execute, _, parsed(runnable, FormStr, Term), Result, Output) :-
   translate_expr([collapse, Term], Goals, Result),
