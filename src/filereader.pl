@@ -8,7 +8,9 @@ push_working_dir(Filename) :- file_directory_name(Filename, Dir0),
                               ( absolute_file_name(Dir0, Dir, [file_type(directory), file_errors(fail)])
                                 -> true
                                  ; Dir = Dir0 ),
-                              asserta(working_dir(Dir)).
+                              push_working_dir_path(Dir).
+
+push_working_dir_path(Dir) :- asserta(working_dir(Dir)).
 
 pop_working_dir :- retract(working_dir(_)), !.
 pop_working_dir.
@@ -24,11 +26,9 @@ load_metta_file_impl(Filename, Results, Space) :- setup_call_cleanup(push_workin
                                                                   process_metta_string(S, Results, Space) ),
                                                                 pop_working_dir).
 
-with_working_dir(Dir, Goal) :- ( retract(working_dir(PrevDir)) -> HadPrev = true ; HadPrev = false ),
-                               assertz(working_dir(Dir)),
-                               call_cleanup(Goal,
-                                            ( retractall(working_dir(_)),
-                                              ( HadPrev == true -> assertz(working_dir(PrevDir)) ; true ) )).
+with_working_dir(Dir, Goal) :- setup_call_cleanup(push_working_dir_path(Dir),
+                                                  once(Goal),
+                                                  pop_working_dir).
 
 rethrow_metta_file_error(_, Error) :- Error = error(_, context(_, _)), !,
                                       throw(Error).

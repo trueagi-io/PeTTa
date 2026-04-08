@@ -44,3 +44,19 @@ def test_nested_relative_imports_use_importer_directory(petta_instance, tmp_path
 
     results = petta_instance.load_metta_file(str(root_file))
     assert any(result == "42" for result in results), f"Expected sibling import to resolve; got {results}"
+
+def test_sequential_imports_after_nested_import_keep_working_directory(petta_instance, tmp_path):
+    root_file = tmp_path / "root.metta"
+    first_file = tmp_path / "first.metta"
+    second_file = tmp_path / "second.metta"
+    nested_dir = tmp_path / "nested"
+    nested_dir.mkdir()
+    helper_file = nested_dir / "helper.metta"
+
+    root_file.write_text("!(import! &self first)\n!(import! &self second)\n!(from-second)\n")
+    first_file.write_text("!(import! &self nested/helper)\n")
+    second_file.write_text("(= (from-second) 42)\n")
+    helper_file.write_text("(= (from-helper) 1)\n")
+
+    results = petta_instance.load_metta_file(str(root_file))
+    assert any(result == "42" for result in results), f"Expected second import to remain resolvable; got {results}"

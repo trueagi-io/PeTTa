@@ -25,9 +25,7 @@ main :- current_prolog_flag(argv, RawArgs),
         ( Args = [] -> prolog_interop_example
         ; Args = [mork] -> prolog_interop_example,
                            mork_test
-        ; Args = [File|_] -> file_directory_name(File, Dir),
-                             assertz(working_dir(Dir)),
-                             load_metta_file(File,Results),
+        ; Args = [File|_] -> load_metta_file(File,Results),
                              ( memberchk(silent, RawArgs) ; memberchk("--silent", RawArgs) ; memberchk("-s", RawArgs)
                              -> true
                              ; maplist(swrite,Results,ResultsR),
