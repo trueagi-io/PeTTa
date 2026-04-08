@@ -18,7 +18,16 @@ compile_metta_string(S, Output) :- compile_metta_string(S, Output, '&self').
 compile_metta_string(S, Output, Space) :-
   extract_forms(S, Forms),
   maplist(parse_form, Forms, ParsedForms),
-  maplist(process_form(false, Space), ParsedForms, _, OutputsList), !,
+  maplist(process_form(false, Space), ParsedForms, _, CompiledForms), !,
+  Prologue = [
+    ':- ensure_loaded(\'src/metta\').\n',
+    ':- use_module(library(memfile)).\n',
+    ':- new_memory_file(MF), open_memory_file(MF, write, ResultsStream), assertz(resultsMemFile(MF)), assertz(resultsStream(ResultsStream)).\n',
+    'write_result(Result) :- resultsStream(ResultsStream), format(ResultsStream, "~w~n", [Result]).\n'],
+  Epilogue = [
+    ':- resultsStream(S), close(S), resultsMemFile(MF), memory_file_to_string(MF, ResultsOutput), write(ResultsOutput), free_memory_file(MF).\n'
+  ],
+  append([Prologue, CompiledForms, Epilogue], OutputsList),
   atomic_list_concat(OutputsList, Output).
 
 %Extract function definitions, call invocations, and S-expressions part of &self space:
@@ -41,8 +50,10 @@ parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
                                                                             ; T=expression ).
 parse_form(runnable(S), parsed(runnable, S, Term)) :- sread(S, Term).
 
-% Second pass to compile / run / add the Terms. If Execute = true, we run the goals and
-% return them in Results (otherwise, we just return the compilation result in  Output):
+% Second pass to compile / run / add the Terms.
+% Output will always contain the compilation output as a result.
+% If Execute = true, the goals are run and return in Results.
+% If Execute = false, no goals are run and Results = [].
 process_form(Execute, Space, parsed(expression, _, Term), [], Output) :-
   ( silent(false) ->
       swrite(Term, STerm),
@@ -55,20 +66,24 @@ process_form(Execute, Space, parsed(expression, _, Term), [], Output) :-
   with_output_to(string(Output), portray_clause(:- 'add-atom'(Space, Term, true))).
 
 process_form(Execute, _, parsed(runnable, FormStr, Term), Result, Output) :-
-  translate_expr([collapse, Term], Goals, Result),
-  ( silent(false) ->
-      format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
-      forall(member(G, Goals), portray_clause((:- G))),
-      format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m")
-  ; true),
+  translate_expr([collapse, Term], true, true, Goals, Result), 
+  % Conditional goal execution
   ( Execute ->
       call_goals(Goals)
-  ; Result = []),
+  ; true),
+  % We generate all goals and print them to Output.
   findall(
     GoalOutput,
     (member(G, Goals), with_output_to(string(GoalOutput), portray_clause((:- G)))),
     GoalOutputs),
-  atomic_list_concat(GoalOutputs, Output).
+  
+  atomic_list_concat(GoalOutputs, Output),
+  % We must print to the console at the end, in case the goals were actually called.
+  ( silent(false) ->
+      format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
+      forall(member(G, Goals), portray_clause((:- G))),
+      format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m")
+  ; true).
 
 process_form(Execute, Space, parsed(function, FormStr, Term), [], Output) :-
   translate_clause(Term, Clause),
