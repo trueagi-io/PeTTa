@@ -87,5 +87,12 @@
 (= (fst ($a $b)) $a)
 (= (snd ($a $b)) $b)
 
+(= (first $f ($a $b)) (($f $a) $b))
+(= (second $f ($a $b)) ($a ($f $b)))
+
+(= (cns ($a $b)) (cons $a $b))
+
+(= (flip ($a $b)) ($b $a))
+
 ;(= (prog1 (cons $x $xs)) $x)
 ;(= (progn (rcons $xs $x)) $x)
