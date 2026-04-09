@@ -8,7 +8,7 @@ constrain_args([F, A, B], Out, Goals) :- nonvar(F),
                                          append(G1, G2, Goals), !.
 constrain_args([F|Args], Var, Goals) :- atom(F),
                                         fun(F), !,
-                                        translate_expr([F|Args], GoalsExpr, Var),
+                                        translate_expr([F|Args], false, false, GoalsExpr, Var),
                                         flatten(GoalsExpr, Goals).
 constrain_args(In, Out, Goals) :- maplist(constrain_args, In, Out, NestedGoalsList),
                                   flatten(NestedGoalsList, Goals), !.
@@ -22,7 +22,7 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                                 ; Args1 = Args0, GoalsPrefix = [] ),
                                                catch(nb_getval(F, Prev), _, Prev = []),
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
-                                               translate_expr(BodyExpr, GoalsBody, ExpOut),
+                                               translate_expr(BodyExpr, false, false, GoalsBody, ExpOut),
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
                                                -> current_predicate(Base/Arity), length(Bound, N), M is (Arity - N) - 1,
                                                   length(ExtraArgs, M), append([Bound,ExtraArgs,[Out]],CallArgs), Goal =.. [Base|CallArgs],
@@ -67,7 +67,7 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
 agg_reduce(AF, Acc, Val, NewAcc) :- reduce([AF, Acc, Val], NewAcc).
 
 %Combined expr translation to goals list
-translate_expr_to_conj(Input, Conj, Out) :- translate_expr(Input, Goals, Out),
+translate_expr_to_conj(Input, Conj, Out) :- translate_expr(Input, false, false, Goals, Out),
                                             goals_list_to_conj(Goals, Conj).
 
 %Special stream operation rewrite rules before main translation
@@ -90,32 +90,39 @@ rewrite_streamops(X, X).
 safe_rewrite_streamops(In, Out) :- ( compound(In), In = [Op|_], atom(Op) -> rewrite_streamops(In, Out)
                                                                           ; Out = In).
 
+% Wrapper for interpreter mode: translate_expr/3 defaults to TopLevel=false, PrintResults=false
+translate_expr(X, Goals, Out) :- translate_expr(X, false, false, Goals, Out).
 %Turn MeTTa code S-expression into goals list:
-translate_expr(X, [], X)          :- ((var(X) ; atomic(X)) ; X = partial(_,_)), !.
-translate_expr([H0|T0], Goals, Out) :-
+translate_expr(X, _TopLevel, _PrintResults, [], X)          :- ((var(X) ; atomic(X)) ; X = partial(_,_)), !.
+translate_expr([H0|T0], TopLevel, PrintResults, Goals, Out) :-
         safe_rewrite_streamops([H0|T0],[H|T]),
-        translate_expr(H, GsH, HV),
+        translate_expr(H, false, PrintResults, GsH, HV),
         %--- Translator rules ---:
         ( nonvar(HV), translator_rule(HV) -> ( catch(match('&self', [':', HV, TypeChain], TypeChain, TypeChain), _, fail)
                                                -> TypeChain = [->|Xs],
                                                   append(ArgTypes, [_], Xs),
                                                   translate_args_by_type(T, ArgTypes, GsT, T1)
                                                 ; translate_args(T, GsT, T1) ),
-                                             append(T1,[Gs],Args),
-                                             HookCall =.. [HV|Args],
-                                             call(HookCall),
-                                             translate_expr(Gs, GsE, Out),
-                                             append([GsH,GsT,GsE],Goals)
+                                              append(T1,[Gs],Args),
+                                              HookCall =.. [HV|Args],
+                                              call(HookCall),
+                                              translate_expr(Gs, false, PrintResults, GsE, Out),
+                                              append([GsH,GsT,GsE],Goals)
         %--- Non-determinism ---:
         ; HV == superpose, T = [Args], is_list(Args) -> build_superpose_branches(Args, Out, Branches),
                                                         disj_list(Branches, Disj),
                                                         append(GsH, [Disj], Goals)
         ; HV == collapse, T = [E] -> translate_expr_to_conj(E, Conj, EV),
-                                     append(GsH, [findall(EV, Conj, Out)], Goals)
+                                     % We only print if PrintResults = true and this is a top-level form
+                                     ( (TopLevel, PrintResults) -> 
+                                         append(GsH, [(findall(EV, (Conj, write_result(EV)), Out))], Goals)
+                                     ; 
+                                         append(GsH, [(findall(EV, Conj, Out))], Goals)
+                                     )
         ; HV == cut, T = [] -> append(GsH, [(!)], Goals),
                                Out = true
         ; HV == test, T = [Expr, Expected] -> translate_expr_to_conj(Expr, Conj, Val),
-                                              translate_expr(Expected, GsE, ExpVal),
+                                              translate_expr(Expected, false, PrintResults, GsE, ExpVal),
                                               Goal1 = ( findall(Val, Conj, Results),
                                                         (Results = [Actual] -> true
                                                                              ; Actual = Results ) ),
@@ -136,13 +143,13 @@ translate_expr([H0|T0], Goals, Out) :-
         ; HV == transaction, T = [X] -> translate_expr_to_conj(X, Conj, Out),
                                         append(GsH, [transaction(Conj)], Goals)
         %--- Sequential execution ---:
-        ; HV == progn, T = Exprs -> translate_args(Exprs, GsList, Outs),
+        ; HV == progn, T = Exprs -> translate_args(Exprs, false, PrintResults, GsList, Outs),
                                     append(GsH, GsList, Tmp),
                                     last(Outs, Out),
                                     Goals = Tmp
         ; HV == prog1, T = Exprs -> Exprs = [First|Rest],
-                                    translate_expr(First, GsF, Out),
-                                    translate_args(Rest, GsRest, _),
+                                    translate_expr(First, false, PrintResults, GsF, Out),
+                                    translate_args(Rest, false, PrintResults, GsRest, _),
                                     append(GsH, GsF, Tmp1),
                                     append(Tmp1, GsRest, Goals)
         %--- Conditionals ---:
@@ -173,24 +180,24 @@ translate_expr([H0|T0], Goals, Out) :-
                                                        translate_case(PairsExpr, Kv, Out, IfGoal, KeyGoal),
                                                        append([GsH, Gk, KeyGoal, [IfGoal]], Goals) )
         %--- Unification constructs ---:
-        ; (HV == let ; HV == chain), T = [Pat, Val, In] -> translate_expr(Pat, Gp, Pv),
-                                                           translate_expr(Val, Gv, V),
-                                                           translate_expr(In,  Gi, Out),
+        ; (HV == let ; HV == chain), T = [Pat, Val, In] -> translate_expr(Pat, false, PrintResults, Gp, Pv),
+                                                           translate_expr(Val, false, PrintResults, Gv, V),
+                                                           translate_expr(In,  false, PrintResults, Gi, Out),
                                                            append([GsH,[(Pv=V)],Gp,Gv,Gi], Goals)
         ; HV == 'let*', T = [Binds, Body] -> letstar_to_rec_let(Binds,Body,RecLet),
-                                             translate_expr(RecLet,  Goals, Out)
+                                             translate_expr(RecLet, false, PrintResults, Goals, Out)
         ; HV == sealed, T = [Vars, Expr] -> translate_expr_to_conj(Expr, Con, Val),
                                             Goals = [copy_term(Vars,[Con,Val],_,[Ncon,Out]),Ncon]
         %--- Iterating over non-deterministic generators without reification ---:
         ; HV == 'forall', T = [GF, TF]
           -> ( is_list(GF) -> GF = [GFH|GFA],
-                              translate_expr(GFH, GsGFH, GFHV),
-                              translate_args(GFA, GsGFA, GFAv),
+                              translate_expr(GFH, false, PrintResults, GsGFH, GFHV),
+                              translate_args(GFA, false, PrintResults, GsGFA, GFAv),
                               append(GsGFH, GsGFA, GsGF),
                               GenList = [GFHV|GFAv]
-                            ; translate_expr(GF, GsGF, GFHV),
+                            ; translate_expr(GF, false, PrintResults, GsGF, GFHV),
                               GenList = [GFHV] ),
-             translate_expr(TF, GsTF, TFHV),
+             translate_expr(TF, false, PrintResults, GsTF, TFHV),
              TestList = [TFHV, V],
              goals_list_to_conj(GsGF, GPre),
              GenGoal = (GPre, reduce(GenList, V)),
@@ -198,16 +205,16 @@ translate_expr([H0|T0], Goals, Out) :-
              append(Tmp0, [( forall(GenGoal, ( reduce(TestList, Truth), Truth == true )) -> Out = true ; Out = false )], Goals)
         ; HV == 'foldall', T = [AF, GF, InitS]
           -> translate_expr_to_conj(InitS, ConjInit, Init),
-             translate_expr(AF, GsAF, AFV),
+             translate_expr(AF, false, PrintResults, GsAF, AFV),
              ( GF = [M|_], (M==match ; M==let ; M=='let*') -> LambdaGF = ['|->', [], GF],
-                                                              translate_expr(LambdaGF, GsGF, GFHV),
+                                                              translate_expr(LambdaGF, false, PrintResults, GsGF, GFHV),
                                                               GenList = [GFHV]
              ; is_list(GF) -> GF = [GFH|GFA],
-                              translate_expr(GFH, GsGFH, GFHV),
-                              translate_args(GFA, GsGFA, GFAv),
+                              translate_expr(GFH, false, PrintResults, GsGFH, GFHV),
+                              translate_args(GFA, false, PrintResults, GsGFA, GFAv),
                               append(GsGFH, GsGFA, GsGF),
                               GenList = [GFHV|GFAv]
-                            ; translate_expr(GF, GsGF, GFHV),
+                            ; translate_expr(GF, false, PrintResults, GsGF, GFHV),
                               GenList = [GFHV] ),
              append(GsH, GsAF, Tmp1),
              append(Tmp1, GsGF, Tmp2),
@@ -254,29 +261,29 @@ translate_expr([H0|T0], Goals, Out) :-
         ; ( HV == 'add-atom' ; HV == 'remove-atom' ), T = [_,_] -> append(T, [Out], RawArgs),
                                                                    Goal =.. [HV|RawArgs],
                                                                    append(GsH, [Goal], Goals)
-        ; HV == match, T = [Space, Pattern, Body] -> translate_expr(Space, G1, S),
-                                                     translate_expr(Body, GsB, Out),
+        ; HV == match, T = [Space, Pattern, Body] -> translate_expr(Space, false, PrintResults, G1, S),
+                                                     translate_expr(Body, false, PrintResults, GsB, Out),
                                                      append(G1, [match(S, Pattern, Out, Out)], G2),
                                                      append(G2, GsB, Goals)
         %--- Predicate to compiled goal ---:
         ; HV == translatePredicate, T = [Expr] -> Expr = [S|Args],
-                                                  translate_args(Args, GsArgs, ArgsOut),
+                                                  translate_args(Args, false, PrintResults, GsArgs, ArgsOut),
                                                   Goal =.. [S|ArgsOut],
                                                   append(GsH, GsArgs, Inner),
                                                   append(Inner, [Goal], Goals)
         %--- Manual dispatch options: ---
         %Generate a predicate call on compilation, translating Args for nesting:
         ; HV == call,  T = [Expr] -> Expr = [F|Args],
-                                     translate_args(Args, GsArgs, ArgsOut),
+                                     translate_args(Args, false, PrintResults, GsArgs, ArgsOut),
                                      append(GsH, GsArgs, Inner),
                                      append(ArgsOut, [Out], CallArgs),
                                      Goal =.. [F|CallArgs],
                                      append(Inner, [Goal], Goals)
         %Produce a dynamic dispatch, translating Args for nesting:
-        ; HV == reduce, T = [Expr] -> ( var(Expr) -> translate_expr(Expr, GsH, ExprOut),
+        ; HV == reduce, T = [Expr] -> ( var(Expr) -> translate_expr(Expr, false, PrintResults, GsH, ExprOut),
                                                      Goals = [reduce(ExprOut, Out)|GsH]
                                                    ; Expr = [F|Args],
-                                                     translate_args(Args, GsArgs, ArgsOut),
+                                                     translate_args(Args, false, PrintResults, GsArgs, ArgsOut),
                                                      append(GsH, GsArgs, Inner),
                                                      ExprOut = [F|ArgsOut],
                                                      append(Inner, [reduce(ExprOut, Out)], Goals) )
@@ -289,7 +296,7 @@ translate_expr([H0|T0], Goals, Out) :-
                                      Out = Expr,
                                      Goals = Inner
         ; HV == 'catch', T = [Expr] ->
-          translate_expr(Expr, GsExpr, ExprOut),
+          translate_expr(Expr, false, PrintResults, GsExpr, ExprOut),
           append(GsH, [], Inner),
           goals_list_to_conj(GsExpr, Conj),
           Goal = catch((Conj, Out = ExprOut),
@@ -298,7 +305,7 @@ translate_expr([H0|T0], Goals, Out) :-
                                                       ; Out = ['Error', Exception])),
           append(Inner, [Goal], Goals)
         %--- Automatic 'smart' dispatch, translator deciding when to create a predicate call, data list, or dynamic dispatch: ---
-        ; translate_args(T, GsT, AVs),
+        ; translate_args(T, false, PrintResults, GsT, AVs),
           append(GsH, GsT, Inner),
           %Known function => direct call:
           ( is_list(AVs), 
@@ -352,7 +359,7 @@ typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchG
 translate_args_by_type([], _, [], []) :- !.
 translate_args_by_type([A|As], [T|Ts], GsOut, [AV|AVs]) :-
                       ( T == 'Expression' -> AV = A, GsA = []
-                                           ; translate_expr(A, GsA1, AV),
+                                           ; translate_expr(A, false, false, GsA1, AV),
                                              ( (T == '%Undefined%' ; T == 'Atom')
                                                -> GsA = GsA1
                                                 ; append(GsA1, [('get-type'(AV, T) *-> true ; 'get-metatype'(AV, T))], GsA))),
@@ -361,7 +368,7 @@ translate_args_by_type([A|As], [T|Ts], GsOut, [AV|AVs]) :-
 
 %Handle data list:
 eval_data_term(X, [], X) :- (var(X); atomic(X)), !.
-eval_data_term([F|As], Goals, Val) :- ( atom(F), fun(F) -> translate_expr([F|As], Goals, Val)
+eval_data_term([F|As], Goals, Val) :- ( atom(F), fun(F) -> translate_expr([F|As], false, false, Goals, Val)
                                                          ; eval_data_list([F|As], Goals, Val) ).
 
 %Handle data list entry:
@@ -395,11 +402,14 @@ translate_case([[K,VExpr]|Rs], Kv, Out, Goal, KGo) :- translate_expr_to_conj(VEx
                                                                     Goal = ((Kv = Kc) -> Then ; Next) ),
                                                       append([Gc,KGi], KGo).
 
+% Wrapper for interpreter mode
+translate_args(Xs, Goals, Vs) :- translate_args(Xs, false, false, Goals, Vs).
 %Translate arguments recursively:
-translate_args([], [], []).
-translate_args([X|Xs], Goals, [V|Vs]) :- translate_expr(X, G1, V),
-                                         translate_args(Xs, G2, Vs),
-                                         append(G1, G2, Goals).
+translate_args([], _TopLevel, _PrintResults, [], []).
+translate_args([X|Xs], TopLevel, PrintResults, Goals, [V|Vs]) :- 
+    translate_expr(X, TopLevel, PrintResults, G1, V),
+    translate_args(Xs, TopLevel, PrintResults, G2, Vs),
+    append(G1, G2, Goals).
 
 %Build A ; B ; C ... from a list:
 disj_list([G], G).
