@@ -65,25 +65,20 @@ process_form(Execute, Space, parsed(expression, _, Term), [], Output) :-
     ; true),
   with_output_to(string(Output), portray_clause(:- 'add-atom'(Space, Term, true))).
 
-process_form(Execute, _, parsed(runnable, FormStr, Term), Result, Output) :-
+% When executing, we need to call the goals. We also don't need to include print
+% statements in the translations, as we will print the Result later on.
+process_form(true, _, parsed(runnable, FormStr, Term), Result, Output) :-
+  translate_expr([collapse, Term], true, false, Goals, Result), 
+  call_goals(Goals),
+  write_to_output(Goals, Output),
+  debug_print_goals(Goals, FormStr).
+
+% When compiling, we must NOT call the goals and must include print statements
+% in the translations.
+process_form(false, _, parsed(runnable, FormStr, Term), Result, Output) :-
   translate_expr([collapse, Term], true, true, Goals, Result), 
-  % Conditional goal execution
-  ( Execute ->
-      call_goals(Goals)
-  ; true),
-  % We generate all goals and print them to Output.
-  findall(
-    GoalOutput,
-    (member(G, Goals), with_output_to(string(GoalOutput), portray_clause((:- G)))),
-    GoalOutputs),
-  
-  atomic_list_concat(GoalOutputs, Output),
-  % We must print to the console at the end, in case the goals were actually called.
-  ( silent(false) ->
-      format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
-      forall(member(G, Goals), portray_clause((:- G))),
-      format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m")
-  ; true).
+  write_to_output(Goals, Output),
+  debug_print_goals(Goals, FormStr).
 
 process_form(Execute, Space, parsed(function, FormStr, Term), [], Output) :-
   translate_clause(Term, Clause),
@@ -99,10 +94,24 @@ process_form(Execute, Space, parsed(function, FormStr, Term), [], Output) :-
   ; true),
   ( Execute ->
       add_sexp(Space, Term)
-  ; true
-  ).
+  ; true).
 
 process_form(_, In, _, _) :- format(atom(Msg), "failed to process form: ~w", [In]), throw(error(syntax_error(Msg), none)).
+
+write_to_output(Goals, Output) :-
+  findall(
+    GoalOutput,
+    (member(G, Goals), with_output_to(string(GoalOutput), portray_clause((:- G)))),
+    GoalOutputs),
+  atomic_list_concat(GoalOutputs, Output).
+
+debug_print_goals(Goals, FormStr) :-
+  (silent(false) -> 
+    format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
+    forall(member(G, Goals), portray_clause((:- G))),
+    format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m")
+  ; true).
+  
 
 %Like blanks but counts newlines:
 newlines(C0, C2) --> blanks_to_nl, !, {C1 is C0+1}, newlines(C1,C2).
