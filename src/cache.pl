@@ -1,16 +1,25 @@
 :- use_module(library(lists)).
 
-%%%===================================================================
-%%% Dynamic Predicates (Cache Storage)
-%%%===================================================================
-
 :- dynamic metta_memo_entry/6.
 :- dynamic metta_memo_generation/3.
 :- dynamic metta_call_freq/4.
 
-%%%===================================================================
-%%% Counter Management
-%%%===================================================================
+:- dynamic memo_enabled/1.
+
+enable_memoization(Fun) :-
+    ( memo_enabled(Fun) -> true ; assertz(memo_enabled(Fun)) ).
+
+disable_memoization(Fun) :-
+    retractall(memo_enabled(Fun)),
+    retractall(memo_disabled_runtime(Fun)).
+
+:- dynamic memo_disabled_runtime/1.
+
+runtime_disable(Fun) :-
+    ( memo_disabled_runtime(Fun) -> true
+    ; assertz(memo_disabled_runtime(Fun))
+    ).
+
 
 ensure_metta_memo_counters :-
     ( catch(nb_current(metta_memo_seq, _), _, fail) -> true ; nb_setval(metta_memo_seq, 0) ),
@@ -35,10 +44,6 @@ memo_size_dec :-
     Next is max(0, Prev - 1),
     nb_setval(metta_memo_size, Next).
 
-%%%===================================================================
-%%% Generation Management
-%%%===================================================================
-
 memo_current_generation(Fun, Arity, Gen) :-
     ( metta_memo_generation(Fun, Arity, Found) -> Gen = Found ; Gen = 0 ).
 
@@ -48,9 +53,6 @@ bump_metta_memo_generation(Fun, Arity) :-
     retractall(metta_memo_generation(Fun, Arity, _)),
     assertz(metta_memo_generation(Fun, Arity, Next)).
 
-%%%===================================================================
-%%% Cache Invalidation
-%%%===================================================================
 
 cache_invalidate(Fun) :-
     findall(Arity, arity(Fun, Arity), RawArities),
@@ -66,13 +68,10 @@ cache_clear :-
     retractall(metta_memo_entry(_, _, _, _, _, _)),
     retractall(metta_memo_generation(_, _, _)),
     retractall(metta_call_freq(_, _, _, _)),
+    retractall(memo_disabled_runtime(_)),
     nb_setval(metta_memo_seq, 0),
     nb_setval(metta_memo_size, 0),
     nb_setval(metta_memo_oldest, 1).
-
-%%%===================================================================
-%%% LRU Eviction
-%%%===================================================================
 
 memo_evict_one_oldest :-
     ensure_metta_memo_counters,
@@ -101,77 +100,72 @@ memo_store(Fun, Arity, Gen, AVs, CachedResults) :-
     memo_size_inc,
     memo_evict_if_needed.
 
-%%%===================================================================
-%%% Memoizable Function Check
-%%%===================================================================
-
 memoizable_fun(Fun, Arity) :-
-    catch(nb_current(Fun, _), _, fail),
+    memo_enabled(Fun),
+    \+ memo_disabled_runtime(Fun),          % permanently ruled out at runtime
     arity(Fun, Arity),
     current_predicate(Fun/Arity),
     length(HeadArgs, Arity),
     Head =.. [Fun | HeadArgs],
     \+ predicate_property(Head, built_in).
 
-%%%===================================================================
-%%% Main Cache Call Predicate
-%%%===================================================================
 
-%%%===================================================================
-%%% Adaptive Threshold Configuration
-%%%===================================================================
+memo_arg_size_limit(200).
+
+args_contain_float(AVs) :-
+    sub_term(X, AVs),
+    float(X), !.
+
+args_too_complex(AVs) :-
+    memo_arg_size_limit(Limit),
+    term_size(AVs, S),
+    S > Limit.
+
+args_worth_caching(AVs) :-
+    \+ args_contain_float(AVs),
+    \+ args_too_complex(AVs).
+
 
 :- dynamic cache_unique_threshold/1.
-cache_unique_threshold(100). % Stop caching after 100 unique argument patterns
+cache_unique_threshold(100).
 
-%%%===================================================================
-%%% Main Cache Call Predicate with Adaptive Logic
-%%%===================================================================
+should_cache(Fun, Arity, AVs) :-
+    metta_memo_entry(Fun, Arity, _, AVs, _, _), !.
+
+should_cache(Fun, Arity, _AVs) :-
+    aggregate_all(count, metta_memo_entry(Fun, Arity, _, _, _, _), Count),
+    cache_unique_threshold(Max),
+    Count < Max.
+
 
 cache_call(Fun, AVs, Out) :-
     append(AVs, [Out], GoalArgs),
     Goal =.. [Fun | GoalArgs],
     length(AVs, NArgs),
     Arity is NArgs + 1,
-    ( ground(AVs),
-      memoizable_fun(Fun, Arity)
-    -> ( should_cache(Fun, Arity, AVs)
-       -> memo_current_generation(Fun, Arity, Gen),
-          ( metta_memo_entry(Fun, Arity, Gen, AVs, _, CachedResults)
-          -> member(Out, CachedResults)
-          ; findall(Result,
-              ( append(AVs, [Result], RawArgs),
-                RawGoal =.. [Fun | RawArgs],
-                call(RawGoal)
-              ),
-              RawResults),
+        \+ memo_disabled_runtime(Fun),
+        ground(AVs),
+        args_worth_caching(AVs),            % rejects floats and oversized terms
+        memoizable_fun(Fun, Arity),
+        should_cache(Fun, Arity, AVs)       % threshold checked BEFORE findall
+    ->  memo_current_generation(Fun, Arity, Gen),
+        ( metta_memo_entry(Fun, Arity, Gen, AVs, _, CachedResults)
+        ->  member(Out, CachedResults)
+        ;   findall(Result,
+                ( append(AVs, [Result], RawArgs),
+                  RawGoal =.. [Fun | RawArgs],
+                  call(RawGoal) ),
+                RawResults),
             list_to_set(RawResults, CachedResults),
             memo_store(Fun, Arity, Gen, AVs, CachedResults),
             member(Out, CachedResults)
-          )
-       ; call(Goal) % Skip caching for functions with too many unique args
-       )
-    ; call(Goal)
+        )
+        ( memo_enabled(Fun),
+          \+ memo_disabled_runtime(Fun),
+          ground(AVs),
+          \+ args_worth_caching(AVs)
+        ->  runtime_disable(Fun)
+        ;   true
+        ),
+        call(Goal)
     ).
-
-%%%===================================================================
-%%% Adaptive Decision Logic
-%%%===================================================================
-
-should_cache(Fun, Arity, AVs) :-
-    % Check if we've seen this argument pattern before
-    metta_memo_entry(Fun, Arity, _, AVs, _, _),
-    !. % Yes - allow caching
-    
-should_cache(Fun, Arity, AVs) :-
-    % No existing entry - check how many unique entries we have
-    findall(Args, metta_memo_entry(Fun, Arity, _, Args, _, _), UniqueArgs),
-    length(UniqueArgs, Count),
-    cache_unique_threshold(MaxUnique),
-    Count < MaxUnique, % Only cache if below threshold
-    !.
-
-should_cache(Fun, Arity, _AVs) :-
-    % Too many unique patterns - disable caching for this function
-    format('[CACHE] DISABLED ~w/~w (too many unique patterns)~n', [Fun, Arity]),
-    !, fail.
