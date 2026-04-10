@@ -36,11 +36,28 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                           cache_invalidate(F),
                                           invalidate_specializations(F),
                                          ( \+ ( current_predicate(F/A), functor(H2, F, A), clause(H2, _, _) )
-                                           -> retractall(fun(F)) ; true ),
+                                           -> retractall(fun(F)),
+                                              disable_memoization(F)
+                                           ; true ),
                                          ( Refs = [] -> Removed = false ; Removed = true ).
 
 %Remove all same atoms:
 'remove-atom'(Space, Term, true) :- remove_sexp(Space, Term).
+
+:- dynamic translated_from/2.
+
+% Explicit Memoization Annotators:
+'memoize!'(Fun, 'Empty') :-
+    findall(Term, (translated_from(_, Term), Term = [=, [Fun|_], _]), Terms),
+    forall(member(Term, Terms), 'remove-atom'('&self', Term, _)),
+    enable_memoization(Fun),
+    forall(member(Term, Terms), 'add-atom'('&self', Term, _)).
+
+'unmemoize!'(Fun, 'Empty') :-
+    findall(Term, (translated_from(_, Term), Term = [=, [Fun|_], _]), Terms),
+    forall(member(Term, Terms), 'remove-atom'('&self', Term, _)),
+    disable_memoization(Fun),
+    forall(member(Term, Terms), 'add-atom'('&self', Term, _)).
 
 %Match for conjunctive pattern
 match(_, LComma, OutPattern, Result) :- LComma == [','], !,
