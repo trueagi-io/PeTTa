@@ -307,4 +307,4 @@ register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
                           'acos-math', 'atan-math', 'isnan-math', 'isinf-math', 'min-atom', 'max-atom',
                           'foldl-atom', 'map-atom', 'filter-atom','current-time','format-time', library, exists_file,
                           import_prolog_function, 'Predicate', callPredicate, assertaPredicate, assertzPredicate, retractPredicate,
-                          'add-translator-rule!', 'remove-translator-rule!', argv]).
+                          'add-translator-rule!', 'remove-translator-rule!', argv, 'memoize!', 'unmemoize!']).
