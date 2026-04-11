@@ -4,6 +4,7 @@
 :- dynamic metta_memo_generation/3.
 :- dynamic memo_enabled/1.
 :- dynamic memo_disabled_runtime/1.
+:- dynamic arity/2.
 
 :- dynamic metta_memo_count/3.
 :- dynamic metta_memo_head/3.
@@ -54,6 +55,7 @@ cache_clear :-
     retractall(metta_memo_tail(_, _, _)),
     retractall(metta_memo_q(_, _, _, _)),
     ( catch(nb_current(metta_cms, _), _, fail) -> nb_delete(metta_cms) ; true ),
+    ( catch(nb_current(metta_cms_size, _), _, fail) -> nb_delete(metta_cms_size) ; true ),
     ( catch(nb_current(metta_memo_accesses, _), _, fail) -> nb_delete(metta_memo_accesses) ; true ).
 
 % ======================================================================
@@ -62,25 +64,36 @@ cache_clear :-
 % ======================================================================
 
 ensure_cms :-
-    ( catch(nb_current(metta_cms, _), _, fail) -> true
-    ; functor(CMS, v, 8192),
-      forall(between(1, 8192, I), nb_setarg(I, CMS, 0)),
+    ( catch(nb_current(metta_cms, _), _, fail),
+      catch(nb_current(metta_cms_size, _), _, fail) -> true
+    ; current_prolog_flag(max_arity, MaxArity0),
+      ( integer(MaxArity0), MaxArity0 > 0 -> MaxArity = MaxArity0 ; MaxArity = 1024 ),
+      SketchSize is min(8192, MaxArity),
+      functor(CMS, v, SketchSize),
+      forall(between(1, SketchSize, I), nb_setarg(I, CMS, 0)),
       nb_setval(metta_cms, CMS),
+      nb_setval(metta_cms_size, SketchSize),
       nb_setval(metta_memo_accesses, 0)
     ).
 
 get_freq(AVs, Freq) :-
     ( catch(nb_current(metta_cms, CMS), _, fail) ->
+        ( catch(nb_current(metta_cms_size, SketchSize), _, fail)
+        -> true
+        ; functor(CMS, _, SketchSize) ),
         term_hash(AVs, HashRaw),
-        Hash is (abs(HashRaw) mod 8192) + 1,
+        Hash is (abs(HashRaw) mod SketchSize) + 1,
         arg(Hash, CMS, Val),
         ( integer(Val) -> Freq = Val ; Freq = 0 )
     ; Freq = 0 ).
 
 record_hit(AVs) :-
     ( catch(nb_current(metta_cms, CMS), _, fail) ->
+        ( catch(nb_current(metta_cms_size, SketchSize), _, fail)
+        -> true
+        ; functor(CMS, _, SketchSize) ),
         term_hash(AVs, HashRaw),
-        Hash is (abs(HashRaw) mod 8192) + 1,
+        Hash is (abs(HashRaw) mod SketchSize) + 1,
         arg(Hash, CMS, Val),
         ( integer(Val) -> NextVal is Val + 1 ; NextVal = 1 ),
         nb_setarg(Hash, CMS, NextVal)
@@ -88,8 +101,9 @@ record_hit(AVs) :-
 
 record_miss(AVs) :-
     ensure_cms,
+    nb_getval(metta_cms_size, SketchSize),
     term_hash(AVs, HashRaw),
-    Hash is (abs(HashRaw) mod 8192) + 1,
+    Hash is (abs(HashRaw) mod SketchSize) + 1,
     nb_getval(metta_cms, CMS),
     arg(Hash, CMS, Val),
     ( integer(Val) -> NextVal is Val + 1 ; NextVal = 1 ),
@@ -98,12 +112,13 @@ record_miss(AVs) :-
     nb_getval(metta_memo_accesses, Acc),
     NextAcc is Acc + 1,
     nb_setval(metta_memo_accesses, NextAcc),
-    ( NextAcc > 8192 -> halve_cms ; true ).
+    ( NextAcc > SketchSize -> halve_cms ; true ).
 
 halve_cms :-
     nb_setval(metta_memo_accesses, 0),
+    nb_getval(metta_cms_size, SketchSize),
     nb_getval(metta_cms, CMS),
-    forall(between(1, 8192, I),
+    forall(between(1, SketchSize, I),
         ( arg(I, CMS, Val),
           ( integer(Val) -> NewVal is Val // 2 ; NewVal = 0 ),
           nb_setarg(I, CMS, NewVal)
