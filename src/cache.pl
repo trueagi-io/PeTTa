@@ -37,6 +37,7 @@ cache_invalidate(Fun) :-
     ( Arities == [] -> true
     ; forall(member(Arity, Arities),
         ( bump_metta_memo_generation(Fun, Arity),
+          retractall(metta_memo_entry(Fun, Arity, _, _, _)),
           retractall(metta_memo_count(Fun, Arity, _)),
           retractall(metta_memo_head(Fun, Arity, _)),
           retractall(metta_memo_tail(Fun, Arity, _)),
@@ -204,19 +205,19 @@ cache_call(Fun, AVs, Out) :-
         ground(AVs),
         args_worth_caching(AVs),
         memoizable_fun(Fun, Arity)
-    ->  ( metta_memo_entry(Fun, Arity, _Gen, AVs, CachedResults)
+    ->  memo_current_generation(Fun, Arity, CurGen),
+        ( metta_memo_entry(Fun, Arity, CurGen, AVs, CachedResults)
         ->  % O(1) FAST HIT
             record_hit(AVs),
             member(Out, CachedResults)
         ;   % CACHE MISS
-            memo_current_generation(Fun, Arity, MissGen),
             findall(Result,
                 ( append(AVs, [Result], RawArgs),
                   RawGoal =.. [Fun | RawArgs],
                   call(RawGoal) ),
                 RawResults),
             list_to_set(RawResults, CachedResults),
-            memo_store(Fun, Arity, MissGen, AVs, CachedResults),
+            memo_store(Fun, Arity, CurGen, AVs, CachedResults),
             record_miss(AVs),
             member(Out, CachedResults)
         )
