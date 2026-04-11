@@ -32,18 +32,29 @@ bump_metta_memo_generation(Fun, Arity) :-
     retractall(metta_memo_generation(Fun, Arity, _)),
     assertz(metta_memo_generation(Fun, Arity, Next)).
 
+cache_fun_mutex_id(Fun, Arity, Mutex) :-
+    atomic_list_concat(['metta_cache_fun_', Fun, '_', Arity], Mutex).
+
+with_cache_fun_mutex(Fun, Arity, Goal) :-
+    cache_fun_mutex_id(Fun, Arity, Mutex),
+    with_mutex(Mutex, Goal).
+
+with_cms_mutex(Goal) :-
+    with_mutex(metta_cache_cms, Goal).
+
 cache_invalidate(Fun) :-
     findall(Arity, arity(Fun, Arity), RawArities),
     sort(RawArities, Arities),
     ( Arities == [] -> true
     ; forall(member(Arity, Arities),
-        ( bump_metta_memo_generation(Fun, Arity),
-          retractall(metta_memo_entry(Fun, Arity, _, _, _)),
-          retractall(metta_memo_count(Fun, Arity, _)),
-          retractall(metta_memo_head(Fun, Arity, _)),
-          retractall(metta_memo_tail(Fun, Arity, _)),
-          retractall(metta_memo_q(Fun, Arity, _, _))
-        ))
+        with_cache_fun_mutex(Fun, Arity,
+            ( bump_metta_memo_generation(Fun, Arity),
+              retractall(metta_memo_entry(Fun, Arity, _, _, _)),
+              retractall(metta_memo_count(Fun, Arity, _)),
+              retractall(metta_memo_head(Fun, Arity, _)),
+              retractall(metta_memo_tail(Fun, Arity, _)),
+              retractall(metta_memo_q(Fun, Arity, _, _))
+            )))
     ).
 
 cache_clear :-
@@ -57,11 +68,6 @@ cache_clear :-
     ( catch(nb_current(metta_cms, _), _, fail) -> nb_delete(metta_cms) ; true ),
     ( catch(nb_current(metta_cms_size, _), _, fail) -> nb_delete(metta_cms_size) ; true ),
     ( catch(nb_current(metta_memo_accesses, _), _, fail) -> nb_delete(metta_memo_accesses) ; true ).
-
-% ======================================================================
-% W-TinyLFU Frequency Sketch (Count-Min Sketch approximation)
-% O(1) in-place array updates via nb_setarg (Zero database assertions)
-% ======================================================================
 
 ensure_cms :-
     ( catch(nb_current(metta_cms, _), _, fail),
@@ -77,42 +83,44 @@ ensure_cms :-
     ).
 
 get_freq(AVs, Freq) :-
-    ( catch(nb_current(metta_cms, CMS), _, fail) ->
-        ( catch(nb_current(metta_cms_size, SketchSize), _, fail)
-        -> true
-        ; functor(CMS, _, SketchSize) ),
-        term_hash(AVs, HashRaw),
-        Hash is (abs(HashRaw) mod SketchSize) + 1,
-        arg(Hash, CMS, Val),
-        ( integer(Val) -> Freq = Val ; Freq = 0 )
-    ; Freq = 0 ).
+    with_cms_mutex(
+        ( catch(nb_current(metta_cms, CMS), _, fail) ->
+            ( catch(nb_current(metta_cms_size, SketchSize), _, fail)
+            -> true
+            ; functor(CMS, _, SketchSize) ),
+            term_hash(AVs, HashRaw),
+            Hash is (abs(HashRaw) mod SketchSize) + 1,
+            arg(Hash, CMS, Val),
+            ( integer(Val) -> Freq = Val ; Freq = 0 )
+        ; Freq = 0 )).
 
 record_hit(AVs) :-
-    ( catch(nb_current(metta_cms, CMS), _, fail) ->
-        ( catch(nb_current(metta_cms_size, SketchSize), _, fail)
-        -> true
-        ; functor(CMS, _, SketchSize) ),
-        term_hash(AVs, HashRaw),
-        Hash is (abs(HashRaw) mod SketchSize) + 1,
-        arg(Hash, CMS, Val),
-        ( integer(Val) -> NextVal is Val + 1 ; NextVal = 1 ),
-        nb_setarg(Hash, CMS, NextVal)
-    ; true ).
+    with_cms_mutex(
+        ( catch(nb_current(metta_cms, CMS), _, fail) ->
+            ( catch(nb_current(metta_cms_size, SketchSize), _, fail)
+            -> true
+            ; functor(CMS, _, SketchSize) ),
+            term_hash(AVs, HashRaw),
+            Hash is (abs(HashRaw) mod SketchSize) + 1,
+            arg(Hash, CMS, Val),
+            ( integer(Val) -> NextVal is Val + 1 ; NextVal = 1 ),
+            nb_setarg(Hash, CMS, NextVal)
+        ; true )).
 
 record_miss(AVs) :-
-    ensure_cms,
-    nb_getval(metta_cms_size, SketchSize),
-    term_hash(AVs, HashRaw),
-    Hash is (abs(HashRaw) mod SketchSize) + 1,
-    nb_getval(metta_cms, CMS),
-    arg(Hash, CMS, Val),
-    ( integer(Val) -> NextVal is Val + 1 ; NextVal = 1 ),
-    nb_setarg(Hash, CMS, NextVal),
-    
-    nb_getval(metta_memo_accesses, Acc),
-    NextAcc is Acc + 1,
-    nb_setval(metta_memo_accesses, NextAcc),
-    ( NextAcc > SketchSize -> halve_cms ; true ).
+    with_cms_mutex(
+        ( ensure_cms,
+          nb_getval(metta_cms_size, SketchSize),
+          term_hash(AVs, HashRaw),
+          Hash is (abs(HashRaw) mod SketchSize) + 1,
+          nb_getval(metta_cms, CMS),
+          arg(Hash, CMS, Val),
+          ( integer(Val) -> NextVal is Val + 1 ; NextVal = 1 ),
+          nb_setarg(Hash, CMS, NextVal),
+          nb_getval(metta_memo_accesses, Acc),
+          NextAcc is Acc + 1,
+          nb_setval(metta_memo_accesses, NextAcc),
+          ( NextAcc > SketchSize -> halve_cms ; true ) )).
 
 halve_cms :-
     nb_setval(metta_memo_accesses, 0),
@@ -123,10 +131,6 @@ halve_cms :-
           ( integer(Val) -> NewVal is Val // 2 ; NewVal = 0 ),
           nb_setarg(I, CMS, NewVal)
         )).
-
-% ======================================================================
-% O(1) Gapless Queue & Admission Policy (Per-Function TinyLFU)
-% ======================================================================
 
 :- dynamic cache_unique_threshold/1.
 cache_unique_threshold(100).
@@ -183,14 +187,9 @@ memo_store(Fun, Arity, Gen, AVs, CachedResults) :-
         )
     ).
 
-% ======================================================================
-% Core Memoization Logic
-% ======================================================================
-
 memoizable_fun(Fun, Arity) :-
     memo_enabled(Fun),
     \+ memo_disabled_runtime(Fun),          % permanently ruled out at runtime
-    arity(Fun, Arity),
     current_predicate(Fun/Arity),
     length(HeadArgs, Arity),
     Head =.. [Fun | HeadArgs],
@@ -232,7 +231,8 @@ cache_call(Fun, AVs, Out) :-
                   call(RawGoal) ),
                 RawResults),
             CachedResults = RawResults,
-            memo_store(Fun, Arity, CurGen, AVs, CachedResults),
+            with_cache_fun_mutex(Fun, Arity,
+                memo_store(Fun, Arity, CurGen, AVs, CachedResults)),
             record_miss(AVs),
             member(Out, CachedResults)
         )
