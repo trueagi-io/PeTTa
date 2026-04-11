@@ -1,4 +1,5 @@
 :- use_module(library(lists)).
+:- use_module(library(solution_sequences)).
 
 :- dynamic metta_memo_entry/5.
 :- dynamic metta_memo_generation/3.
@@ -33,6 +34,7 @@ bump_metta_memo_generation(Fun, Arity) :-
     assertz(metta_memo_generation(Fun, Arity, Next)).
 
 cache_fun_mutex_id(Fun, Arity, Mutex) :-
+    % Per Fun/Arity lock name.
     atomic_list_concat(['metta_cache_fun_', Fun, '_', Arity], Mutex).
 
 with_cache_fun_mutex(Fun, Arity, Goal) :-
@@ -43,7 +45,18 @@ with_cms_mutex(Goal) :-
     with_mutex(metta_cache_cms, Goal).
 
 cache_invalidate(Fun) :-
-    findall(Arity, arity(Fun, Arity), RawArities),
+    % Discover arities from metadata and cache state.
+    findall(Arity,
+        ( arity(Fun, Arity)
+        ; metta_memo_generation(Fun, Arity, _)
+        ; metta_memo_entry(Fun, Arity, _, _, _)
+        ; metta_memo_count(Fun, Arity, _)
+        ; metta_memo_head(Fun, Arity, _)
+        ; metta_memo_tail(Fun, Arity, _)
+        ; metta_memo_q(Fun, Arity, _, _)
+        ; current_predicate(Fun/Arity)
+        ),
+        RawArities),
     sort(RawArities, Arities),
     ( Arities == [] -> true
     ; forall(member(Arity, Arities),
@@ -83,6 +96,7 @@ ensure_cms :-
     ).
 
 get_freq(Fun, Arity, AVs, Freq) :-
+    % Key by Fun/Arity/AVs
     with_cms_mutex(
         ( catch(nb_current(metta_cms, CMS), _, fail) ->
             ( catch(nb_current(metta_cms_size, SketchSize), _, fail)
@@ -172,7 +186,7 @@ memo_store(Fun, Arity, Gen, AVs, CachedResults) :-
                 assertz(metta_memo_entry(Fun, Arity, Gen, AVs, CachedResults)),
                 set_memo_queue_state(Fun, Arity, Count, Head1, Tail1)
             ;
-                % Reject new item. Give Victim a Second Chance (moved to tail)
+                % Reject new item, give Victim a Second Chance
                 _ = Gen,
                 Tail1 is Tail + 1,
                 assertz(metta_memo_q(Fun, Arity, Tail1, VictimAVs)),
@@ -188,6 +202,7 @@ memo_store(Fun, Arity, Gen, AVs, CachedResults) :-
     ).
 
 store_if_current_generation(Fun, Arity, ExpectedGen, AVs, CachedResults) :-
+    % Re-check generation inside lock
     with_cache_fun_mutex(Fun, Arity,
         ( memo_current_generation(Fun, Arity, CurGen),
           ( CurGen =:= ExpectedGen
@@ -196,7 +211,7 @@ store_if_current_generation(Fun, Arity, ExpectedGen, AVs, CachedResults) :-
 
 memoizable_fun(Fun, Arity) :-
     memo_enabled(Fun),
-    \+ memo_disabled_runtime(Fun),          % permanently ruled out at runtime
+    \+ memo_disabled_runtime(Fun),
     current_predicate(Fun/Arity),
     length(HeadArgs, Arity),
     Head =.. [Fun | HeadArgs],
@@ -217,6 +232,12 @@ args_worth_caching(AVs) :-
     \+ args_contain_float(AVs),
     \+ args_too_complex(AVs).
 
+memo_probe_results(Fun, AVs, ProbeResults) :-
+    % Probe up to 2 results (deterministic-only memo)
+    append(AVs, [Result], RawArgs),
+    RawGoal =.. [Fun | RawArgs],
+    findnsols(2, Result, call(RawGoal), ProbeResults).
+
 cache_call(Fun, AVs, Out) :-
     append(AVs, [Out], GoalArgs),
     Goal =.. [Fun | GoalArgs],
@@ -228,20 +249,20 @@ cache_call(Fun, AVs, Out) :-
         memoizable_fun(Fun, Arity)
     ->  memo_current_generation(Fun, Arity, CurGen),
         ( metta_memo_entry(Fun, Arity, CurGen, AVs, CachedResults)
-        ->  % O(1) FAST HIT
+        ->  % O(1) hit
             record_hit(Fun, Arity, AVs),
             member(Out, CachedResults)
-        ;   % CACHE MISS
-            findall(Result,
-                ( append(AVs, [Result], RawArgs),
-                  RawGoal =.. [Fun | RawArgs],
-                  call(RawGoal) ),
-                RawResults),
-            CachedResults = RawResults,
-            store_if_current_generation(Fun, Arity, CurGen, AVs, CachedResults),
-            record_miss(Fun, Arity, AVs),
-            member(Out, CachedResults)
+        ;   % Cache miss
+            memo_probe_results(Fun, AVs, ProbeResults),
+            ( ProbeResults = [_, _|_]
+            % Non-deterministic bypass memo
+            -> call(Goal)
+            ; CachedResults = ProbeResults,
+              store_if_current_generation(Fun, Arity, CurGen, AVs, CachedResults),
+              record_miss(Fun, Arity, AVs),
+              member(Out, CachedResults)
+            )
         )
-    ;   % FALLBACK / RUNTIME DISABLE
+    ;   % Fallback
         call(Goal)
     ).
