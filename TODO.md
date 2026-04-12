@@ -1,38 +1,45 @@
 # PeTTa Status
 
 ## Current State (branch `swipl_b`)
-- ✅ Rust subprocess wrapper works (24/24 unit tests, 139/139 example tests)
-- ✅ SWI-Prolog `.pl` files are untouched originals
-- ✅ Python files removed, scripts updated
-- ✅ Typed MeTTa values (`MettaValue` enum) with S-expression parser
+- ✅ Rust + persistent SWI-Prolog subprocess via binary protocol
+- ✅ 24/24 unit tests passing (15 original + 9 new)
+- ✅ SWI loaded once (~70ms) instead of per-call (~73ms × N)
+- ✅ Typed MeTTa values (`MettaValue` enum)
 - ✅ Human-readable error messages (`SwiplErrorKind`)
-- ✅ CLI: `--time` flag, colored output, batch file loading
-- ❌ Still depends on external `swipl` binary (not self-contained)
-- ❌ No persistent state between calls (one process per query)
+- ✅ CLI: `--time` flag, colored output
+- ✅ Binary length-prefixed protocol over stdin/stdout pipes
+- ❌ MeTTa test output ("is X, should Y") goes to stderr, not CLI stdout
 
 ## Architecture
 ```
-Rust binary (petta) + Rust library (petta crate)
-  └── SWI-Prolog subprocess (swipl, one per call)
-        └── MeTTa runtime (7 Prolog files in src/)
-              └── MeTTa code (.metta files)
+Rust PeTTaEngine (persistent)
+  └── SWI-Prolog subprocess
+        └── 7 Prolog files consulted once at startup
+              └── server_loop reads binary protocol on stdin
+                    └── responds with [status][count][results...] on stdout
+                    └── all MeTTa output (format, writeln) → stderr
+```
+
+## Protocol
+```
+Ready:          Prolog sends 0xFF after startup
+Request:        [type:1][len:4][payload:N]
+                  type: 'F'(70)=file, 'S'(83)=string, 'Q'(81)=quit
+Response:       [status:1]
+                  0 = success: [count:4][str_len:4][str:N]...
+                  1 = error: [msg_len:4][msg:N]
 ```
 
 ## Migration Attempts (Not Viable)
+- **Scryer Prolog in-process**: crashes with complex codebases
+- **Scryer Prolog subprocess**: directive compatibility issues
+- **SWI embedding via `swipl` crate**: bindgen type mismatches, won't compile
 
-### Scryer Prolog (0.10.0)
-- **In-process Rust API**: Crashes with `index out of bounds` on complex Prolog codebases (internal Scryer heap/trail bug)
-- **Scryer subprocess**: `:- dynamic` and `:- discontiguous` directives cause `syntax_error(incomplete_reduction)` when loading via `consult/1`
-- **DCG incompatibility**: Scryer's `library(dcgs)` uses different semantics than SWI's `library(dcg/basics)`
-
-### SWI-Prolog embedding via `swipl` crate (0.3.16)
-- **Compilation errors**: bindgen-generated bindings return `i32` where crate expects `bool`
-- **Root cause**: Version incompatibility between swipl-rs and installed SWI-Prolog
-- **The `swipl` crate is designed for writing Proloadable Rust libraries, not embedding SWI in Rust binaries**
-
-### What the Python version had that we don't
-- **Persistent engine**: Python uses `janus_swi` — SWI-Prolog's official Python FFI that loads SWI as a `.so` into the Python process. One startup, one engine, all queries share state.
-- **No Rust equivalent exists**: The `swipl-fli` crate provides raw FFI bindings but requires manual `PL_initialise()`/`PL_open_query()`/`PL_next_solution()` calls — essentially re-implementing janus_swi in Rust.
+## Performance
+- **Engine startup**: ~70ms (once per PeTTaEngine instance)
+- **Per-query overhead**: <1ms (binary protocol on pipes)
+- **139 example tests**: ~20s wall time (limited by slowest single file at 16s)
+- **Sequential 4 files**: ~1.3s (70ms startup + 1.2s computation)
 
 ## Running
 ```bash
@@ -40,11 +47,5 @@ cargo test            # 24 unit tests
 sh test.sh            # 139 example tests (~20s parallel)
 cargo run -- file.metta        # Run a MeTTa file
 cargo run -- -t file.metta     # With timing
+cargo run -- -v file.metta     # Verbose (debug output)
 ```
-
-## Performance
-- **SWI startup**: ~73ms per subprocess call
-- **Small file (identity.metta)**: 92ms total (73ms startup + ~19ms overhead)
-- **Large file (matespace2.metta)**: 16.2s (startup is negligible)
-- **139 tests parallel**: ~20s wall time (limited by slowest single file)
-- **Startup overhead dominates small files** — ~12s of 76s total CPU time is subprocess startup
