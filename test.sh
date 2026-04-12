@@ -3,7 +3,7 @@
 run_test() {
     f="$1"
     echo "Running $f"
-    output=$(cargo run --quiet -- "$f" | grep "is " | grep " should ")
+    output=$(cargo run --quiet -- "$f" 2>&1 | grep "is " | grep " should ")
     echo "$output" | grep -q "❌"
     fail=$?
     echo "$output" | grep -q "✅"

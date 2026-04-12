@@ -1,4 +1,18 @@
-:- use_module(library(dcg/basics)). %blanks/0, number/1, string_without/2
+:- use_module(library(dcg/basics)).
+:- use_module(library(plunit)).
+:- begin_tests(parser).
+
+test(simple_atom) :- sread("a", T), T = a.
+test(number) :- sread("42", T), T = 42.
+test(negative_number) :- sread("-3.14", T), T = -3.14.
+test(string_literal) :- sread("\"hello\"", T), T = "hello".
+test(single_var) :- sread("$x", T), var(T), !.
+test(list_simple) :- sread("(a b c)", T), T = [a, b, c].
+test(list_nested) :- sread("((a b) c)", T), T = [[a, b], c].
+test(expression) :- sread("(+ 1 2)", T), T = [+ , 1, 2].
+test(mixed_expr) :- sread("(if (= 1 1) $x $y)", T), T = [if, ['=' , 1, 1], ('$x'), ('$y')].
+
+:- end_tests(parser).
 
 %Generate a MeTTa S-expression string from the Prolog list (inverse parsing):
 swrite(Term, String) :- phrase(swrite_exp(Term), Codes),

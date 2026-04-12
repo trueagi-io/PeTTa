@@ -184,6 +184,29 @@ get_type_candidate(X, T) :- match('&self', [':',X,T], T, _).
 'is-expr'(A,R) :- is_list(A) -> R=true ; R=false.
 'is-space'(A,R) :- atom(A), atom_concat('&', _, A) -> R=true ; R=false.
 
+:- dynamic type_declared/2.
+
+declare_type(Fun, TypeChain) :- retractall(type_declared(Fun, _)),
+                                assertz(type_declared(Fun, TypeChain)).
+
+get_declared_type(Fun, TypeChain) :- type_declared(Fun, TypeChain), !.
+get_declared_type(_, []).
+
+infer_type(Expr, Inferred) :- number(Expr), !, Inferred = 'Number'.
+infer_type(Expr, Inferred) :- string(Expr), !, Inferred = 'String'.
+infer_type(Expr, Inferred) :- var(Expr), !, Inferred = 'Variable'.
+infer_type(Expr, Inferred) :- (Expr == true ; Expr == false), !, Inferred = 'Bool'.
+infer_type([Op|Args], Inferred) :- atom(Op), type_declared(Op, [->|TypeChain]),
+                                   append(ArgTypes, [OutType], TypeChain),
+                                   maplist(infer_type, Args, InferredTypes),
+                                   ( InferredTypes = ArgTypes -> Inferred = OutType
+                                     ; Inferred = 'Unknown' ).
+infer_type([_|Args], Inferred) :- maplist(infer_type, Args, Types),
+                                  list_to_set(Types, Unique),
+                                  length(Unique, 1), !,
+                                  Inferred = Unique.
+infer_type(_, Inferred) :- Inferred = 'Unknown'.
+
 %%% Diagnostics / Testing: %%%
 'println!'(Arg, true) :- swrite(Arg, RArg),
                          format('~w~n', [RArg]).
@@ -288,6 +311,20 @@ importer_helper(Space, File) :- atom_string(File, SFile),
 
 'remove-translator-rule!'(HV, true) :- retractall(translator_rule(HV)).
 
+:- dynamic loaded_library/1.
+
+lazy_load_library(Lib) :-
+    \+ loaded_library(Lib),
+    assertz(loaded_library(Lib)),
+    atomic_list_concat(['library/', Lib], LibFile),
+    consult(LibFile).
+
+reload_library(Lib) :-
+    retractall(loaded_library(Lib)),
+    lazy_load_library(Lib).
+
+list_loaded_libraries(Libs) :- findall(Lib, loaded_library(Lib), Libs).
+
 %%% Registration: %%%
 :- dynamic fun/1.
 register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
@@ -305,4 +342,47 @@ register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
                           'acos-math', 'atan-math', 'isnan-math', 'isinf-math', 'min-atom', 'max-atom',
                           'foldl-atom', 'map-atom', 'filter-atom','current-time','format-time', library, exists_file,
                           import_prolog_function, 'Predicate', callPredicate, assertaPredicate, assertzPredicate, retractPredicate,
-                          'add-translator-rule!', 'remove-translator-rule!', argv]).
+                          'add-translator-rule!', 'remove-translator-rule!', argv, lazy_load_library, reload_library, list_loaded_libraries,
+                          declare_type, get_declared_type, infer_type]).
+
+'get-error-location'(error(ErrType, context(Location, _)), Location).
+'get-error-location'(_, none).
+
+'error-type-mismatch'(Expected, Found, Context) :-
+    format(atom(Context), 'Type mismatch: expected ~w, got ~w', [Expected, Found]).
+
+'error-undefined-function'(Name, Arity, Suggestions) :-
+    findall(Sim, (current_predicate(Sim/Arity), similarity(Name, Sim, Score), Score > 0.5), Suggestions0),
+    list_to_set(Suggestions0, Suggestions).
+
+similarity(S1, S2, Score) :-
+    atom_chars(S1, Chars1),
+    atom_chars(S2, Chars2),
+    longest_common_subsubstring(Chars1, Chars2, LCSLen),
+    length(Chars1, Len1),
+    length(Chars2, Len2),
+    MaxLen is max(Len1, Len2),
+    MaxLen > 0,
+    Score is LCSLen / MaxLen.
+
+longest_common_subsubstring([], _, 0) :- !.
+longest_common_subsubstring(_, [], 0) :- !.
+longest_common_subsubstring([H|T1], [H|T2], Len) :- !,
+    longest_common_subsubstring(T1, T2, SubLen),
+    Len is SubLen + 1.
+longest_common_subsubstring([_|T1], [_|T2], Len) :-
+    longest_common_subsubstring(T1, T2, Len1),
+    longest_common_subsubstring(T1, [_|T2], Len2),
+    longest_common_subsubstring([_|T1], T2, Len3),
+    Len is max(max(Len1, Len2), Len3).
+longest_common_subsubstring(_, _, 0).
+
+'error-syntax'(Location, Detail, Recoverable) :-
+    format(atom(Detail), 'Syntax error at ~w', [Location]),
+    Recoverable = false.
+
+get_error_type(Err, Type) :- nonvar(Err), Err = error(Type, _), !.
+get_error_type(_, unknown).
+
+get_error_context(Err, Ctx) :- nonvar(Err), Err = error(_, Ctx), !.
+get_error_context(_, none).
