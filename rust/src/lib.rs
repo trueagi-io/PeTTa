@@ -380,10 +380,10 @@ impl std::fmt::Display for SwiplErrorKind {
 
 fn parse_swipl_error(raw: &str) -> SwiplErrorKind {
     if raw.contains("existence_error") && raw.contains("procedure") {
-        if let Some(c) = extract_name_arity(raw) {
+        if let Some((name, arity)) = extract_name_arity(raw) {
             return SwiplErrorKind::UndefinedFunction {
-                name: c.0,
-                arity: c.1,
+                name,
+                arity,
                 suggestion: None,
             };
         }
@@ -396,27 +396,19 @@ fn parse_swipl_error(raw: &str) -> SwiplErrorKind {
         };
     }
     if raw.contains("syntax_error") {
-        let detail = extract_between(raw, "syntax_error(", ")").unwrap_or_else(|| "unknown".into());
-        let (line, column) = extract_line_column(raw);
         return SwiplErrorKind::SyntaxError {
-            line,
-            column,
-            detail,
+            line: None,
+            column: None,
+            detail: extract_between(raw, "syntax_error(", ")").unwrap_or_else(|| "unknown".into()),
         };
     }
     if raw.contains("instantiation_error") {
-        let location = extract_between(raw, "in ", " at line");
-        return SwiplErrorKind::UninstantiatedArgument { location };
+        return SwiplErrorKind::UninstantiatedArgument {
+            location: extract_between(raw, "in ", " at line"),
+        };
     }
     if raw.contains("Stack depth") || raw.contains("stack_limit") {
-        let limit = raw.split("stack_limit(").nth(1).and_then(|s| {
-            s.chars()
-                .take_while(|c| c.is_ascii_digit())
-                .collect::<String>()
-                .parse()
-                .ok()
-        });
-        return SwiplErrorKind::StackOverflow { limit };
+        return SwiplErrorKind::StackOverflow { limit: None };
     }
     SwiplErrorKind::Generic(raw.lines().next().unwrap_or(raw).trim().to_string())
 }
@@ -439,23 +431,6 @@ fn extract_between(s: &str, start: &str, end: &str) -> Option<String> {
     let rest = &s[si + start.len()..];
     let ei = rest.find(end)?;
     Some(rest[..ei].to_string())
-}
-
-fn extract_line_column(raw: &str) -> (Option<u32>, Option<u32>) {
-    let line = raw.find("line(").and_then(|i| {
-        raw[i..]
-            .split(',')
-            .nth(0)
-            .and_then(|s| s.split("line(").nth(1).and_then(|s| s.trim().parse().ok()))
-    });
-    let column = raw.find("column(").and_then(|i| {
-        raw[i..].split(')').nth(0).and_then(|s| {
-            s.split("column(")
-                .nth(1)
-                .and_then(|s| s.trim().parse().ok())
-        })
-    });
-    (line, column)
 }
 
 // ---------------------------------------------------------------------------
@@ -719,6 +694,7 @@ impl Drop for PeTTaEngine {
 // Output parsing (legacy)
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn parse_output(output: &str, _verbose: bool) -> Vec<MettaResult> {
     output
         .lines()
@@ -743,6 +719,7 @@ fn parse_output(output: &str, _verbose: bool) -> Vec<MettaResult> {
         .collect()
 }
 
+#[allow(dead_code)]
 fn strip_ansi(s: &str) -> String {
     let mut result = String::new();
     let mut in_esc = false;

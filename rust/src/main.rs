@@ -3,21 +3,20 @@
 use std::path::Path;
 use std::time::Instant;
 
-/// Apply ANSI color code to string
-fn color(s: &str, code: u8) -> String {
-    format!(concat!("\x1b[{}m{}\x1b[0m"), code, s)
+fn ansi_color(s: &str, code: u8) -> String {
+    format!("\x1b[{}m{}\x1b[0m", code, s)
 }
 fn green(s: &str) -> String {
-    color(s, 32)
+    ansi_color(s, 32)
 }
 fn red(s: &str) -> String {
-    color(s, 31)
+    ansi_color(s, 31)
 }
 fn yellow(s: &str) -> String {
-    color(s, 33)
+    ansi_color(s, 33)
 }
 fn cyan(s: &str) -> String {
-    color(s, 36)
+    ansi_color(s, 36)
 }
 
 fn main() {
@@ -124,11 +123,10 @@ fn run_demo(project_root: &Path) {
     }
 }
 
-fn run_files(project_root: &Path, files: &[&String], verbose: bool) {
-    use petta::PeTTaEngine;
-    let paths: Vec<&Path> = files
+fn filter_valid_paths<'a>(files: &[&'a String]) -> Vec<&'a Path> {
+    files
         .iter()
-        .map(|f| Path::new(f))
+        .map(|f| Path::new(*f))
         .filter(|p| {
             if !p.exists() {
                 eprintln!("Error: file not found: {}", p.display());
@@ -137,19 +135,20 @@ fn run_files(project_root: &Path, files: &[&String], verbose: bool) {
                 true
             }
         })
-        .collect();
-    if paths.is_empty() {
-        std::process::exit(1);
-    }
+        .collect()
+}
+
+fn run_engine_files(project_root: &Path, paths: &[&Path], verbose: bool) -> Result<(), ()> {
+    use petta::PeTTaEngine;
     let mut engine = match PeTTaEngine::new(project_root, verbose) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("{}", red(&e.to_string()));
-            std::process::exit(1);
+            return Err(());
         }
     };
     let mut had_failure = false;
-    for path in &paths {
+    for path in paths {
         match engine.load_metta_file(path) {
             Ok(results) => {
                 for r in &results {
@@ -163,58 +162,37 @@ fn run_files(project_root: &Path, files: &[&String], verbose: bool) {
         }
     }
     if had_failure {
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
+fn run_files(project_root: &Path, files: &[&String], verbose: bool) {
+    let paths = filter_valid_paths(files);
+    if paths.is_empty() {
+        std::process::exit(1);
+    }
+    if run_engine_files(project_root, &paths, verbose).is_err() {
         std::process::exit(1);
     }
 }
 
 fn run_files_timed(project_root: &Path, files: &[&String], verbose: bool) {
-    use petta::PeTTaEngine;
     let start = Instant::now();
-    let paths: Vec<&Path> = files
-        .iter()
-        .map(|f| Path::new(f))
-        .filter(|p| {
-            if !p.exists() {
-                eprintln!("Error: file not found: {}", p.display());
-                false
-            } else {
-                true
-            }
-        })
-        .collect();
+    let paths = filter_valid_paths(files);
     if paths.is_empty() {
         std::process::exit(1);
     }
-    let mut engine = match PeTTaEngine::new(project_root, verbose) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("{}", red(&e.to_string()));
-            std::process::exit(1);
-        }
-    };
-    let engine_time = start.elapsed();
-    let mut had_failure = false;
-    for path in &paths {
-        match engine.load_metta_file(path) {
-            Ok(results) => {
-                for r in &results {
-                    println!("{}", r.value);
-                }
-            }
-            Err(e) => {
-                eprintln!("Error processing {}: {}", path.display(), e);
-                had_failure = true;
-            }
-        }
-    }
+    let result = run_engine_files(project_root, &paths, verbose);
     let elapsed = start.elapsed();
     eprintln!(
         "\n{} engine: {:.3}ms, total: {:.3}ms",
         yellow("Timing:"),
-        engine_time.as_secs_f64() * 1000.0,
+        elapsed.as_secs_f64() * 1000.0,
         elapsed.as_secs_f64() * 1000.0
     );
-    if had_failure {
+    if result.is_err() {
         std::process::exit(1);
     }
 }
