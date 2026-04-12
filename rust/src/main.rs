@@ -25,7 +25,6 @@ fn main() {
         return;
     }
 
-    // Parse flags
     let verbose = args.iter().any(|a| a == "-v" || a == "--verbose");
     let show_time = args.iter().any(|a| a == "-t" || a == "--time");
     let files: Vec<&String> = args
@@ -34,7 +33,7 @@ fn main() {
         .collect();
 
     if files.is_empty() {
-        eprintln!("PeTTa: MeTTa language implementation (Rust + SWI-Prolog)");
+        eprintln!("PeTTa: MeTTa language implementation (Rust + SWI-Prolog embedded)");
         eprintln!("Usage: petta [-v] [-t] <file.metta> [file2.metta] ...");
         eprintln!("       petta                    (run demo)");
         eprintln!("");
@@ -96,7 +95,7 @@ fn run_demo(project_root: &Path) {
         Ok(engine) => {
             println!("{}\n{}\n===========",
                      cyan("PeTTa Demo"),
-                     yellow("Rust + SWI-Prolog"));
+                     yellow("Rust + SWI-Prolog (embedded)"));
             let cases = [
                 ("Identity", "(= (myid $x) $x) !(myid 42)"),
                 ("Arithmetic", "!(+ 1 2)"),
@@ -169,6 +168,7 @@ fn run_files(project_root: &Path, files: &[&String], verbose: bool) {
 fn run_files_timed(project_root: &Path, files: &[&String], verbose: bool) {
     use petta::PeTTaEngine;
 
+    let start = Instant::now();
     let engine = match PeTTaEngine::new(project_root, verbose) {
         Ok(e) => e,
         Err(e) => {
@@ -176,10 +176,9 @@ fn run_files_timed(project_root: &Path, files: &[&String], verbose: bool) {
             std::process::exit(1);
         }
     };
+    let engine_time = start.elapsed();
 
-    let start = Instant::now();
     let mut had_failure = false;
-
     for file_path in files {
         let path = Path::new(file_path);
         if !path.exists() {
@@ -201,7 +200,10 @@ fn run_files_timed(project_root: &Path, files: &[&String], verbose: bool) {
     }
 
     let elapsed = start.elapsed();
-    eprintln!("\n{} {:.3}ms", yellow("Time:"), elapsed.as_secs_f64() * 1000.0);
+    eprintln!("\n{} engine: {:.3}ms, total: {:.3}ms",
+              yellow("Timing:"),
+              engine_time.as_secs_f64() * 1000.0,
+              elapsed.as_secs_f64() * 1000.0);
 
     if had_failure {
         std::process::exit(1);
