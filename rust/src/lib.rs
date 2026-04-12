@@ -1,21 +1,323 @@
 //! PeTTa - MeTTa language implementation in Rust + SWI-Prolog
 //!
-//! This crate provides a Rust wrapper around SWI-Prolog to execute
-//! MeTTa (Metalanguage for Transformation) programs.
+//! This crate provides a MeTTa (Metalanguage for Transformation) engine
+//! using SWI-Prolog as a subprocess.
 //!
-//! Each call to `load_metta_file` or `process_metta_string` spawns a
-//! fresh SWI-Prolog subprocess. For multi-call state persistence,
-//! collect all MeTTa code into a single call.
+//! # Architecture
+//! ```text
+//! Rust PeTTaEngine
+//!   └── SWI-Prolog subprocess (one per call)
+//!         └── MeTTa runtime (7 Prolog files)
+//! ```
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
-/// Represents a result from executing MeTTa code.
+// ---------------------------------------------------------------------------
+// Typed MeTTa values
+// ---------------------------------------------------------------------------
+
+/// A typed MeTTa value parsed from S-expression output.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MettaValue {
+    /// Integer
+    Integer(String),
+    /// Float
+    Float(f64),
+    /// Boolean
+    Bool(bool),
+    /// Atom / symbol
+    Atom(String),
+    /// List of values
+    List(Vec<MettaValue>),
+    /// S-expression / function application
+    Expression(String, Vec<MettaValue>),
+}
+
+impl MettaValue {
+    /// Parse an S-expression string into a typed value.
+    pub fn parse(s: &str) -> Option<Self> {
+        parse_sexpr(s.trim())
+    }
+}
+
+fn parse_sexpr(s: &str) -> Option<MettaValue> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+
+    // Boolean
+    if s == "true" {
+        return Some(MettaValue::Bool(true));
+    }
+    if s == "false" {
+        return Some(MettaValue::Bool(false));
+    }
+
+    // Integer
+    if s.parse::<i64>().is_ok() {
+        return Some(MettaValue::Integer(s.to_string()));
+    }
+
+    // Float
+    if let Ok(f) = s.parse::<f64>() {
+        return Some(MettaValue::Float(f));
+    }
+
+    // Not a parenthesized form → atom
+    if !s.starts_with('(') {
+        return Some(MettaValue::Atom(s.to_string()));
+    }
+
+    // S-expression: strip outer parens
+    if let Some(inner) = strip_parens(s) {
+        let items = split_top_level(inner);
+        if items.is_empty() {
+            return Some(MettaValue::List(Vec::new()));
+        }
+        let parsed: Vec<MettaValue> = items.iter().filter_map(|x| parse_sexpr(x)).collect();
+        if parsed.len() == items.len() && !parsed.is_empty() {
+            // First item as head, rest as args
+            if let MettaValue::Atom(head) = &parsed[0] {
+                if parsed.len() > 1 {
+                    return Some(MettaValue::Expression(head.clone(), parsed[1..].to_vec()));
+                }
+            }
+            return Some(MettaValue::List(parsed));
+        }
+    }
+
+    Some(MettaValue::Atom(s.to_string()))
+}
+
+/// Strip outer parens from "(...)" returning inner content.
+fn strip_parens(s: &str) -> Option<&str> {
+    if s.starts_with('(') && s.ends_with(')') && is_balanced(&s[1..s.len() - 1]) {
+        Some(&s[1..s.len() - 1])
+    } else {
+        None
+    }
+}
+
+fn is_balanced(s: &str) -> bool {
+    let mut depth = 0;
+    for ch in s.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    depth == 0
+}
+
+/// Split string by top-level whitespace (respecting nested parens and quotes).
+fn split_top_level(s: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+    let mut in_quote = false;
+    let mut escape = false;
+
+    for ch in s.chars() {
+        if escape {
+            current.push(ch);
+            escape = false;
+            continue;
+        }
+        if ch == '\\' {
+            escape = true;
+            current.push(ch);
+            continue;
+        }
+        if ch == '"' {
+            in_quote = !in_quote;
+            current.push(ch);
+            continue;
+        }
+        if in_quote {
+            current.push(ch);
+            continue;
+        }
+        match ch {
+            '(' => { depth += 1; current.push(ch); }
+            ')' => { depth -= 1; current.push(ch); }
+            ' ' | '\t' | '\n' | '\r' if depth == 0 => {
+                if !current.is_empty() {
+                    items.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.is_empty() {
+        items.push(current);
+    }
+    items
+}
+
+// ---------------------------------------------------------------------------
+// MeTTa result
+// ---------------------------------------------------------------------------
+
+/// A single result from executing MeTTa code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MettaResult {
-    /// The string representation of the result (S-expression format).
+    /// Raw string representation (S-expression format).
     pub value: String,
 }
+
+impl MettaResult {
+    /// Parse the value into a typed [`MettaValue`].
+    pub fn parsed_value(&self) -> Option<MettaValue> {
+        MettaValue::parse(&self.value)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Human-readable error types
+// ---------------------------------------------------------------------------
+
+/// Structured SWI-Prolog error.
+#[derive(Debug, Clone)]
+pub enum SwiplErrorKind {
+    /// Undefined predicate/function
+    UndefinedFunction { name: String, arity: usize },
+    /// Type error
+    TypeMismatch { expected: String, found: String },
+    /// Syntax error
+    SyntaxError { detail: String },
+    /// Instantiation error (unbound variable)
+    UninstantiatedArgument,
+    /// Permission error
+    PermissionDenied { operation: String, target: String },
+    /// Stack overflow
+    StackOverflow,
+    /// Generic/unknown error
+    Generic(String),
+}
+
+impl std::fmt::Display for SwiplErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SwiplErrorKind::UndefinedFunction { name, arity } => {
+                write!(f, "MeTTa function '{}/{}' is not defined", name, arity)
+            }
+            SwiplErrorKind::TypeMismatch { expected, found } => {
+                write!(f, "Type error: expected {}, got {}", expected, found)
+            }
+            SwiplErrorKind::SyntaxError { detail } => {
+                write!(f, "Syntax error: {}", detail)
+            }
+            SwiplErrorKind::UninstantiatedArgument => {
+                write!(f, "Argument is not sufficiently instantiated")
+            }
+            SwiplErrorKind::PermissionDenied { operation, target } => {
+                write!(f, "Permission denied: {} on {}", operation, target)
+            }
+            SwiplErrorKind::StackOverflow => {
+                write!(f, "Stack overflow — increase stack limit with --stack_limit")
+            }
+            SwiplErrorKind::Generic(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+/// Parse a SWI-Prolog error string into a structured form.
+fn parse_swipl_error(raw: &str) -> SwiplErrorKind {
+    if raw.contains("existence_error") && raw.contains("procedure") {
+        if let Some(cap) = extract_name_arity(raw) {
+            return SwiplErrorKind::UndefinedFunction {
+                name: cap.0,
+                arity: cap.1,
+            };
+        }
+    }
+    if raw.contains("type_error") {
+        return SwiplErrorKind::TypeMismatch {
+            expected: "unknown".to_string(),
+            found: "unknown".to_string(),
+        };
+    }
+    if raw.contains("syntax_error") {
+        let detail = extract_between(raw, "syntax_error(", ")").unwrap_or_else(|| "unknown".into());
+        return SwiplErrorKind::SyntaxError { detail };
+    }
+    if raw.contains("instantiation_error") {
+        return SwiplErrorKind::UninstantiatedArgument;
+    }
+    if raw.contains("permission_error") {
+        return SwiplErrorKind::PermissionDenied {
+            operation: "unknown".to_string(),
+            target: "unknown".to_string(),
+        };
+    }
+    if raw.contains("Stack depth") || raw.contains("stack_limit") {
+        return SwiplErrorKind::StackOverflow;
+    }
+
+    SwiplErrorKind::Generic(raw.lines().next().unwrap_or(raw).trim().to_string())
+}
+
+fn extract_name_arity(raw: &str) -> Option<(String, usize)> {
+    for token in raw.split(&['(', ')', ',', '/']) {
+        let token = token.trim();
+        let parts: Vec<&str> = token.split_whitespace().collect();
+        if parts.len() == 2 {
+            if let Ok(arity) = parts[1].parse::<usize>() {
+                return Some((parts[0].to_string(), arity));
+            }
+        }
+    }
+    None
+}
+
+fn extract_between(s: &str, start: &str, end: &str) -> Option<String> {
+    let start_idx = s.find(start)?;
+    let rest = &s[start_idx + start.len()..];
+    let end_idx = rest.find(end)?;
+    Some(rest[..end_idx].to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/// Errors that can occur during PeTTa execution.
+#[derive(Debug)]
+pub enum PeTTaError {
+    FileNotFound(PathBuf),
+    SpawnSwipl(String),
+    PathError(String),
+    WriteError(String),
+    SwiplError(SwiplErrorKind),
+    SwiplVersionError(String),
+}
+
+impl std::fmt::Display for PeTTaError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PeTTaError::FileNotFound(p) => write!(f, "File not found: {}", p.display()),
+            PeTTaError::SpawnSwipl(e) => write!(f, "Failed to spawn swipl: {}", e),
+            PeTTaError::PathError(e) => write!(f, "Path error: {}", e),
+            PeTTaError::WriteError(e) => write!(f, "Write error: {}", e),
+            PeTTaError::SwiplError(e) => write!(f, "{}", e),
+            PeTTaError::SwiplVersionError(e) => write!(f, "SWI-Prolog version: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for PeTTaError {}
+
+// ---------------------------------------------------------------------------
+// Engine
+// ---------------------------------------------------------------------------
 
 /// The main PeTTa engine wrapper.
 pub struct PeTTaEngine {
@@ -25,20 +327,15 @@ pub struct PeTTaEngine {
 
 impl PeTTaEngine {
     /// Create a new PeTTa engine.
-    ///
-    /// # Arguments
-    /// * `project_root` - The root directory of the PeTTa project (where src/ lives).
-    /// * `verbose` - Whether to enable verbose output (debug info from Prolog).
     pub fn new(project_root: &Path, verbose: bool) -> Result<Self, PeTTaError> {
-        let main_pl = project_root.join("src").join("main.pl");
-        if !main_pl.exists() {
-            return Err(PeTTaError::FileNotFound(main_pl));
+        let src_dir = project_root.join("src");
+        if !src_dir.exists() {
+            return Err(PeTTaError::FileNotFound(src_dir));
         }
         let abs_root = project_root
             .canonicalize()
             .map_err(|e| PeTTaError::PathError(e.to_string()))?;
 
-        // Verify swipl is available
         check_swipl_version()?;
 
         Ok(Self {
@@ -68,9 +365,7 @@ impl PeTTaEngine {
             .arg("--")
             .arg(rel_path);
 
-        if self.verbose {
-            // No extra args needed -- metta.pl defaults to non-silent
-        } else {
+        if !self.verbose {
             cmd.arg("--silent");
         }
 
@@ -80,26 +375,23 @@ impl PeTTaEngine {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PeTTaError::SwiplError(format!(
-                "swipl exited with status {}: {}",
-                output.status,
-                stderr.trim()
-            )));
+            let err = parse_swipl_error(&stderr);
+            return Err(PeTTaError::SwiplError(err));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         Ok(parse_output(&stdout, self.verbose))
     }
 
-    /// Load and execute multiple MeTTa files in a single subprocess.
-    /// This is significantly faster than calling `load_metta_file` in a loop
-    /// because it avoids spawning a separate process per file.
+    /// Load and execute multiple MeTTa files, each in its own subprocess.
+    /// (For batching into one subprocess, concatenate content and use
+    /// `process_metta_string`.)
     pub fn load_metta_files(&self, file_paths: &[&Path]) -> Result<Vec<MettaResult>, PeTTaError> {
         if file_paths.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Read all files and concatenate their contents
+        // Read all files and concatenate their contents, then run in one subprocess
         let combined: String = file_paths
             .iter()
             .map(|p| {
@@ -115,7 +407,6 @@ impl PeTTaEngine {
             .collect::<Result<Vec<String>, PeTTaError>>()?
             .join("\n");
 
-        // Process all combined content in a single subprocess
         self.process_metta_string(&combined)
     }
 
@@ -127,51 +418,34 @@ impl PeTTaEngine {
         metta_code: &str,
     ) -> Result<Vec<MettaResult>, PeTTaError> {
         let main_pl = self.project_root.join("src").join("main.pl");
-
-        // Use a Prolog query that reads MeTTa code from stdin
         let silent_flag = if self.verbose { "false" } else { "true" };
+
+        // Escape for Prolog single-quoted string: \' and \\
+        let escaped = metta_code.replace('\\', "\\\\").replace('\'', "\\'");
         let query = format!(
             "assertz(working_dir('{}')), assertz(silent({})), \
-             read_string(user_input, _, Code), \
-             process_metta_string(Code, Results), \
+             process_metta_string('{}', Results), \
              maplist(swrite, Results, Strings), \
              (Strings == [] -> true ; maplist(writeln, Strings)), \
              halt.",
             self.project_root.to_string_lossy().replace('\\', "\\\\"),
             silent_flag,
+            escaped,
         );
 
-        let mut child = Command::new("swipl")
+        let output = Command::new("swipl")
             .arg("-q")
             .arg("-s")
             .arg(&main_pl)
             .arg("-g")
             .arg(&query)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| PeTTaError::SpawnSwipl(e.to_string()))?;
-
-        // Write MeTTa code to stdin
-        use std::io::Write;
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(metta_code.as_bytes())
-                .map_err(|e| PeTTaError::WriteError(e.to_string()))?;
-        }
-
-        let output = child
-            .wait_with_output()
+            .output()
             .map_err(|e| PeTTaError::SpawnSwipl(e.to_string()))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PeTTaError::SwiplError(format!(
-                "swipl exited with status {}: {}",
-                output.status,
-                stderr.trim()
-            )));
+            let err = parse_swipl_error(&stderr);
+            return Err(PeTTaError::SwiplError(err));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -179,12 +453,14 @@ impl PeTTaEngine {
     }
 }
 
-/// Parse SWI-Prolog output into MettaResult values.
+// ---------------------------------------------------------------------------
+// Output parsing
+// ---------------------------------------------------------------------------
+
 fn parse_output(output: &str, _verbose: bool) -> Vec<MettaResult> {
     output
         .lines()
         .filter_map(|line| {
-            // Strip ANSI codes first, then filter
             let cleaned = strip_ansi(line.trim());
             if cleaned.is_empty()
                 || cleaned.starts_with('%')
@@ -192,7 +468,7 @@ fn parse_output(output: &str, _verbose: bool) -> Vec<MettaResult> {
                 || cleaned.starts_with(":-")
                 || cleaned.starts_with("-->")
                 || cleaned.starts_with("^^^")
-                || cleaned.starts_with('!')  // MeTTa runnable forms (debug echo)
+                || cleaned.starts_with('!')
                 || cleaned.contains("metta function")
                 || cleaned.contains("metta runnable")
                 || cleaned.contains("prolog clause")
@@ -213,14 +489,12 @@ fn strip_ansi(s: &str) -> String {
         if ch == '\x1b' {
             in_escape = true;
         } else if in_escape {
-            // In CSI sequences (\x1b[), skip until we hit a final byte (0x40..=0x7E)
             if ch == '[' {
-                continue; // Still in CSI header
+                continue;
             }
             if (0x40..=0x7E).contains(&(ch as u32)) {
-                in_escape = false; // Final byte — end of CSI sequence
+                in_escape = false;
             }
-            // Otherwise skip (parameter/intermediate bytes)
         } else {
             result.push(ch);
         }
@@ -228,42 +502,18 @@ fn strip_ansi(s: &str) -> String {
     result.trim().to_string()
 }
 
-/// Errors that can occur during PeTTa execution.
-#[derive(Debug)]
-pub enum PeTTaError {
-    FileNotFound(PathBuf),
-    SpawnSwipl(String),
-    PathError(String),
-    WriteError(String),
-    SwiplError(String),
-    SwiplVersionError(String),
-}
+// ---------------------------------------------------------------------------
+// Version check
+// ---------------------------------------------------------------------------
 
-impl std::fmt::Display for PeTTaError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PeTTaError::FileNotFound(p) => write!(f, "File not found: {}", p.display()),
-            PeTTaError::SpawnSwipl(e) => write!(f, "Failed to spawn swipl: {}", e),
-            PeTTaError::PathError(e) => write!(f, "Path error: {}", e),
-            PeTTaError::WriteError(e) => write!(f, "Write error: {}", e),
-            PeTTaError::SwiplError(e) => write!(f, "SWI-Prolog error: {}", e),
-            PeTTaError::SwiplVersionError(e) => write!(f, "SWI-Prolog version: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for PeTTaError {}
-
-/// Minimum required SWI-Prolog version.
 const MIN_SWIPL_MAJOR: u32 = 9;
 const MIN_SWIPL_MINOR: u32 = 3;
 
-/// Check that SWI-Prolog is available and meets the minimum version.
 fn check_swipl_version() -> Result<(), PeTTaError> {
     let output = Command::new("swipl")
         .arg("--version")
         .output()
-        .map_err(|_e| {
+        .map_err(|_| {
             PeTTaError::SwiplVersionError(format!(
                 "swipl not found on PATH. Install SWI-Prolog >= {}.{}.",
                 MIN_SWIPL_MAJOR, MIN_SWIPL_MINOR
@@ -277,27 +527,6 @@ fn check_swipl_version() -> Result<(), PeTTaError> {
     }
 
     let version_str = String::from_utf8_lossy(&output.stdout);
-    // Expected format: "SWI-Prolog version 9.3.2 for x86_64-linux"
-    // or:              "SWI-Prolog version 9.3.2"
-    for token in version_str.split_whitespace() {
-        if let Ok(major) = token.parse::<u32>() {
-            // Try to find "major.minor" pattern
-            if let Some(rest) = version_str.find(&format!("{}.{}.", major, MIN_SWIPL_MINOR)) {
-                let major_str = &version_str[rest..rest + 1];
-                if let Ok(m) = major_str.parse::<u32>() {
-                    if m >= MIN_SWIPL_MAJOR {
-                        return Ok(());
-                    }
-                }
-            }
-            // Simple check: major version >= MIN
-            if major >= MIN_SWIPL_MAJOR {
-                return Ok(());
-            }
-        }
-    }
-
-    // Try parsing "X.Y.Z" from the version string
     for part in version_str.split_whitespace() {
         let parts: Vec<&str> = part.split('.').collect();
         if parts.len() >= 2 {
@@ -307,12 +536,16 @@ fn check_swipl_version() -> Result<(), PeTTaError> {
                 {
                     return Ok(());
                 }
+                if major < MIN_SWIPL_MAJOR {
+                    return Err(PeTTaError::SwiplVersionError(format!(
+                        "SWI-Prolog {}.{} found, but >= {}.{} required",
+                        major, minor, MIN_SWIPL_MAJOR, MIN_SWIPL_MINOR
+                    )));
+                }
             }
         }
     }
 
-    // Be lenient — if we got a version output, assume it's probably OK
-    // The actual tests will catch real incompatibilities
     Ok(())
 }
 
@@ -320,6 +553,10 @@ fn check_swipl_version() -> Result<(), PeTTaError> {
 pub fn swipl_available() -> bool {
     check_swipl_version().is_ok()
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -434,7 +671,6 @@ mod tests {
             .unwrap();
         assert!(!results.is_empty());
         let val = &results[0].value;
-        // Result should be ($_N x) or ($b x) — variable followed by x
         assert!(
             val.contains("$") && val.contains('x'),
             "Expected variable pattern, got: {}",
@@ -446,13 +682,10 @@ mod tests {
     fn test_file_imports() {
         let engine = make_engine();
         let root = project_root();
-        // Load identity.metta then call f in the same subprocess
         let identity_code =
             std::fs::read_to_string(root.join("examples/identity.metta")).unwrap();
         let combined = format!("{}\n!(f 5)", identity_code);
         let results = engine.process_metta_string(&combined).unwrap();
-        // identity.metta includes !(test (f 1) 1) which produces "is 1, should 1..."
-        // The last result should be from !(f 5) = 25
         assert!(
             results.iter().any(|r| r.value == "25"),
             "Expected '25' in results: {:?}",
@@ -480,12 +713,67 @@ mod tests {
 
     #[test]
     fn test_parse_output_filters_debug() {
-        // Both raw ANSI-coded and clean debug lines should be filtered
         let results = parse_output(
             "--> metta function -->\n42\n^^^^^^^^^^^^^^^^^^^\n\x1b[36m!(+ 1 2)\n\x1b[33m-->",
             false,
         );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].value, "42");
+    }
+
+    // Typed value parsing tests
+    #[test]
+    fn test_parse_int() {
+        assert_eq!(MettaValue::parse("42"), Some(MettaValue::Integer("42".into())));
+    }
+
+    #[test]
+    fn test_parse_bool() {
+        assert_eq!(MettaValue::parse("true"), Some(MettaValue::Bool(true)));
+        assert_eq!(MettaValue::parse("false"), Some(MettaValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_parse_float() {
+        assert_eq!(MettaValue::parse("3.14"), Some(MettaValue::Float(3.14)));
+    }
+
+    #[test]
+    fn test_parse_atom() {
+        assert_eq!(MettaValue::parse("hello"), Some(MettaValue::Atom("hello".into())));
+    }
+
+    #[test]
+    fn test_parse_list() {
+        let v = MettaValue::parse("(1 2 3)");
+        assert!(matches!(v, Some(MettaValue::List(ref items)) if items.len() == 3));
+    }
+
+    #[test]
+    fn test_parse_expression() {
+        let v = MettaValue::parse("(+ 1 2)");
+        assert!(matches!(v, Some(MettaValue::Expression(ref f, ref args)) if f == "+" && args.len() == 2));
+    }
+
+    // Error parsing tests
+    #[test]
+    fn test_parse_undefined_function_error() {
+        let raw = "ERROR: existence_error(procedure, (/ foo 2))";
+        let err = parse_swipl_error(raw);
+        assert!(matches!(err, SwiplErrorKind::UndefinedFunction { .. }));
+    }
+
+    #[test]
+    fn test_parse_stack_overflow() {
+        let raw = "ERROR: Stack depth: 5000000";
+        let err = parse_swipl_error(raw);
+        assert!(matches!(err, SwiplErrorKind::StackOverflow));
+    }
+
+    // MettaResult parsed_value test
+    #[test]
+    fn test_result_parsed_value() {
+        let r = MettaResult { value: "42".into() };
+        assert_eq!(r.parsed_value(), Some(MettaValue::Integer("42".into())));
     }
 }
