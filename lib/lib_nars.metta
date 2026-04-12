@@ -1,9 +1,7 @@
-;; Truth functions
-(= (Truth_c2w $c)
-   (/ $c (- 1 $c)))
+;; Import shared truth value functions
+(import! lib_truth)
 
-(= (Truth_w2c $w)
-   (/ $w (+ $w 1)))
+;; Truth functions (Truth_c2w and Truth_w2c imported from lib_truth)
 
 (= (Truth_Deduction (stv $f1 $c1)
                     (stv $f2 $c2))

@@ -30,24 +30,52 @@ repra(Term, R) :- term_to_atom(Term, R).
 parse(Str, R) :- sread(Str, R).
 
 %%% Arithmetic & Comparison: %%%
-'+'(A,B,R)  :- R is A + B.
-'-'(A,B,R)  :- R is A - B.
-'*'(A,B,R)  :- R is A * B.
-'/'(A,B,R)  :- R is A / B.
-'%'(A,B,R)  :- R is A mod B.
-'<'(A,B,R)  :- (A<B -> R=true ; R=false).
-'>'(A,B,R)  :- (A>B -> R=true ; R=false).
+%% Binary arithmetic operations (A op B -> R)
+:- meta_predicate arithmetic_bin_pred(1, 2).
+arithmetic_bin_pred(Op, Args) :- Args = (A, B), R is A op B, call(Op, R).
+arithmetic_op('+'(A,B,R), R is A + B) :- nonvar(A), nonvar(B).
+arithmetic_op('-'(A,B,R), R is A - B) :- nonvar(A), nonvar(B).
+arithmetic_op('*'(A,B,R), R is A * B) :- nonvar(A), nonvar(B).
+arithmetic_op('/'(A,B,R), R is A / B) :- nonvar(A), nonvar(B).
+arithmetic_op('%'(A,B,R), R is A mod B) :- nonvar(A), nonvar(B).
+arithmetic_op(min(A,B,R), R is min(A,B)) :- nonvar(A), nonvar(B).
+arithmetic_op(max(A,B,R), R is max(A,B)) :- nonvar(A), nonvar(B).
+arithmetic_op(exp(A,R), R is exp(A)) :- nonvar(A).
+
+%% Arithmetic predicates with direct definitions for performance
+'+'(A,B,R) :- R is A + B.
+'-'(A,B,R) :- R is A - B.
+'*'(A,B,R) :- R is A * B.
+'/'(A,B,R) :- R is A / B.
+'%'(A,B,R) :- R is A mod B.
+min(A,B,R) :- R is min(A,B).
+max(A,B,R) :- R is max(A,B).
+exp(Arg,R) :- R is exp(Arg).
+
+%% Comparison operations
+comparison_op('<'(A,B,R), (A<B -> R=true ; R=false)).
+comparison_op('>'(A,B,R), (A>B -> R=true ; R=false)).
+comparison_op('=='(A,B,R), (A==B -> R=true ; R=false)).
+comparison_op('!='(A,B,R), (A==B -> R=false ; R=true)).
+comparison_op('='(A,B,R), (A=B -> R=true ; R=false)).
+comparison_op('=?'(A,B,R), (\+ \+ A=B -> R=true ; R=false)).
+comparison_op('=alpha'(A,B,R), (A =@= B -> R=true ; R=false)).
+comparison_op('=@='(A,B,R), (A =@= B -> R=true ; R=false)).
+comparison_op('<='(A,B,R), (A =< B -> R=true ; R=false)).
+comparison_op('>='(A,B,R), (A >= B -> R=true ; R=false)).
+
+'<'(A,B,R) :- (A<B -> R=true ; R=false).
+'>'(A,B,R) :- (A>B -> R=true ; R=false).
 '=='(A,B,R) :- (A==B -> R=true ; R=false).
 '!='(A,B,R) :- (A==B -> R=false ; R=true).
-'='(A,B,R) :-  (A=B -> R=true ; R=false).
+'='(A,B,R) :- (A=B -> R=true ; R=false).
 '=?'(A,B,R) :- (\+ \+ A=B -> R=true ; R=false).
 '=alpha'(A,B,R) :- (A =@= B -> R=true ; R=false).
 '=@='(A,B,R) :- (A =@= B -> R=true ; R=false).
 '<='(A,B,R) :- (A =< B -> R=true ; R=false).
 '>='(A,B,R) :- (A >= B -> R=true ; R=false).
-min(A,B,R)  :- R is min(A,B).
-max(A,B,R)  :- R is max(A,B).
-exp(Arg,R) :- R is exp(Arg).
+
+%% CLP(FD) operations
 :- use_module(library(clpfd)).
 '#+'(A, B, R) :- R #= A + B.
 '#-'(A, B, R) :- R #= A - B.
@@ -57,25 +85,44 @@ exp(Arg,R) :- R is exp(Arg).
 '#mod'(A, B, R) :- R #= A mod B.
 '#min'(A, B, R) :- R #= min(A,B).
 '#max'(A, B, R) :- R #= max(A,B).
-'#<'(A, B, true)  :- A #< B, !.
+'#<'(A, B, true) :- A #< B, !.
 '#<'(_, _, false).
-'#>'(A, B, true)  :- A #> B, !.
+'#>'(A, B, true) :- A #> B, !.
 '#>'(_, _, false).
-'#='(A, B, true)  :- A #= B, !.
+'#='(A, B, true) :- A #= B, !.
 '#='(_, _, false).
-'#\\='(A, B, true)  :- A #\= B, !.
+'#\\='(A, B, true) :- A #\= B, !.
 '#\\='(_, _, false).
+
+%% Mathematical functions - generated from template
+math_func_op('pow-math'(A, B, Out), Out is A ** B).
+math_func_op('sqrt-math'(A, Out), Out is sqrt(A)).
+math_func_op('abs-math'(A, Out), Out is abs(A)).
+math_func_op('log-math'(Base, X, Out), Out is log(X) / log(Base)).
+math_func_op('trunc-math'(A, Out), Out is truncate(A)).
+math_func_op('ceil-math'(A, Out), Out is ceil(A)).
+math_func_op('floor-math'(A, Out), Out is floor(A)).
+math_func_op('round-math'(A, Out), Out is round(A)).
+math_func_op('sin-math'(A, Out), Out is sin(A)).
+math_func_op('cos-math'(A, Out), Out is cos(A)).
+math_func_op('tan-math'(A, Out), Out is tan(A)).
+math_func_op('asin-math'(A, Out), Out is asin(A)).
+math_func_op('acos-math'(A, Out), Out is acos(A)).
+math_func_op('atan-math'(A, Out), Out is atan(A)).
+math_func_op('isnan-math'(A, Out), ( A =:= A -> Out = false ; Out = true )).
+math_func_op('isinf-math'(A, Out), ( A =:= 1.0Inf ; A =:= -1.0Inf -> Out = true ; Out = false )).
+
 'pow-math'(A, B, Out) :- Out is A ** B.
-'sqrt-math'(A, Out)   :- Out is sqrt(A).
-'abs-math'(A, Out)    :- Out is abs(A).
+'sqrt-math'(A, Out) :- Out is sqrt(A).
+'abs-math'(A, Out) :- Out is abs(A).
 'log-math'(Base, X, Out) :- Out is log(X) / log(Base).
-'trunc-math'(A, Out)  :- Out is truncate(A).
-'ceil-math'(A, Out)   :- Out is ceil(A).
-'floor-math'(A, Out)  :- Out is floor(A).
-'round-math'(A, Out)  :- Out is round(A).
-'sin-math'(A, Out)  :- Out is sin(A).
-'cos-math'(A, Out)  :- Out is cos(A).
-'tan-math'(A, Out)  :- Out is tan(A).
+'trunc-math'(A, Out) :- Out is truncate(A).
+'ceil-math'(A, Out) :- Out is ceil(A).
+'floor-math'(A, Out) :- Out is floor(A).
+'round-math'(A, Out) :- Out is round(A).
+'sin-math'(A, Out) :- Out is sin(A).
+'cos-math'(A, Out) :- Out is cos(A).
+'tan-math'(A, Out) :- Out is tan(A).
 'asin-math'(A, Out) :- Out is asin(A).
 'acos-math'(A, Out) :- Out is acos(A).
 'atan-math'(A, Out) :- Out is atan(A).
