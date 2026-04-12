@@ -1,8 +1,8 @@
 [package]
 name = "petta"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
-description = "Efficient MeTTa language implementation in Rust + SWI-Prolog"
+description = "Efficient MeTTa language implementation in Rust + persistent SWI-Prolog subprocess"
 license = "MIT"
 readme = "README.md"
 
@@ -15,3 +15,4 @@ name = "petta"
 path = "rust/src/lib.rs"
 
 [dependencies]
+tempfile = "3"
