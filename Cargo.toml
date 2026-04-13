@@ -9,10 +9,19 @@ repository = "https://github.com/patham9/petta"
 keywords = ["metta", "logic", "prolog", "agi", "trueagi"]
 categories = ["compilers", "parser-implementations"]
 
+# Workspace: petta + MORK + PathMap for unified development
 [workspace]
 resolver = "2"
-members = ["."]
-exclude = ["repos/MORK"]
+members = [
+    ".",
+    "repos/MORK/expr",
+    "repos/MORK/frontend",
+    "repos/MORK/interning",
+    "repos/MORK/kernel",
+]
+# PathMap has its own workspace; we reference it by path
+exclude = ["repos/PathMap", "repos/PathMap/pathmap-derive"]
+default-members = ["."]
 
 [workspace.package]
 edition = "2024"
@@ -31,26 +40,69 @@ thiserror = "2"
 tracing = "0.1"
 nom = "8"
 
-# MORK integration (future - requires pathmap 0.3 + full eval crate)
-# The MORK source is cloned to repos/MORK for local development.
-# To enable: add pathmap 0.3, mork-expr, mork-frontend, mork-interning as dependencies
-# and uncomment the mork feature below.
-# mork = { path = "repos/MORK/kernel", optional = true }
-# mork-expr = { path = "repos/MORK/expr", optional = true }
-# mork-frontend = { path = "repos/MORK/frontend", optional = true }
-# mork-interning = { path = "repos/MORK/interning", optional = true }
+# MORK integration (optional, enabled via 'mork' feature)
+mork = { path = "repos/MORK/kernel", optional = true }
+mork-expr = { path = "repos/MORK/expr", optional = true }
+mork-frontend = { path = "repos/MORK/frontend", optional = true }
+mork-interning = { path = "repos/MORK/interning", optional = true }
+
+# FAISS support (optional, enabled via 'faiss' feature)
+faiss = { version = "0.13", optional = true }
+
+# Parallel execution (enabled via 'parallel' feature)
+rayon = { version = "1.10", optional = true }
+
+# Profiling (enabled via 'profiling' feature)
+parking_lot = { version = "0.12", optional = true }
 
 [features]
 default = ["swipl"]
 swipl = []
 pure-rust = []
-# mork = ["swipl", "dep:mork", "dep:mork-expr", "dep:mork-frontend", "dep:mork-interning"]
+mork = [
+    "swipl",
+    "dep:mork", "dep:mork-expr", "dep:mork-frontend", "dep:mork-interning",
+    
+]
+faiss = ["dep:faiss"]
+parallel = ["dep:rayon"]
+profiling = ["dep:parking_lot"]
 
-# MORK integration (future - requires pathmap 0.3 + full eval crate)
-# The MORK source is cloned to repos/MORK for local development.
-# To enable: add pathmap 0.3, mork-expr, mork-frontend, mork-interning as dependencies
-# and uncomment the mork feature below.
-# mork = { path = "repos/MORK/kernel", optional = true }
-# mork-expr = { path = "repos/MORK/expr", optional = true }
-# mork-frontend = { path = "repos/MORK/frontend", optional = true }
-# mork-interning = { path = "repos/MORK/interning", optional = true }
+# Workspace dependencies - shared across petta and MORK
+[workspace.dependencies]
+# Internal
+mork = { path = "repos/MORK/kernel" }
+mork-expr = { path = "repos/MORK/expr" }
+mork-frontend = { path = "repos/MORK/frontend" }
+mork-interning = { path = "repos/MORK/interning", features = ["debug_api"] }
+pathmap = { git = "https://github.com/Adam-Vandervorst/PathMap.git", branch = "master", features = ["arena_compact", "nightly"] }
+
+# External - MORK needs these
+gxhash = { version = "3.5" }
+log = "0.4.27"
+env_logger = "0.11.8"
+smallvec = { version = "1.13", features = ["union"] }
+xxhash-rust = { version = "0.8", features = ["xxh64", "xxh3", "const_xxh3"] }
+fast-slice-utils = "0.1.2"
+typed-arena = "2.0"
+regex = "1.10"
+memmap2 = "0.9.5"
+rayon = "1.10"
+memchr = "2.7"
+glob = "0.3"
+zip = { version = "2.2", default-features = false }
+bstr = "1.10"
+futures = "0.3"
+rand = "0.9"
+itertools = "0.14"
+base64 = "0.22"
+hex = "0.4"
+subprocess = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
+reusing-vec = { version = "0.2.0", features = ["smallvec"] }
+maybe-dangling = "0.1.1"
+dyn-clone = "1.0.17"
+local-or-heap = "0.1.0"
+arrayvec = "0.7.6"
+num-traits = "0.2"

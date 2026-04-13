@@ -31,11 +31,12 @@
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tracing::{debug, info, trace, warn};
 
 pub mod petta_parser;
+pub mod profiler;
 
 /// Configuration options for the PeTTaEngine.
 #[derive(Debug, Clone)]
@@ -46,6 +47,8 @@ pub struct EngineConfig {
     pub src_dir: Option<PathBuf>,
     /// Enable verbose debug output from Prolog.
     pub verbose: bool,
+    /// Enable query profiling.
+    pub profile: bool,
     /// Timeout for query execution. None means no timeout.
     pub query_timeout: Option<Duration>,
     /// Maximum number of automatic restarts on subprocess crash (default: 0).
@@ -60,6 +63,7 @@ impl Default for EngineConfig {
             swipl_path: PathBuf::from("swipl"),
             src_dir: None,
             verbose: false,
+            profile: false,
             query_timeout: None,
             max_restarts: 0,
             min_swipl_version: (9, 3),
@@ -90,6 +94,12 @@ impl EngineConfig {
     }
 
     /// Enable or disable verbose Prolog debug output.
+    /// Enable or disable query profiling.
+    pub fn profile(mut self, p: bool) -> Self {
+        self.profile = p;
+        self
+    }
+
     pub fn verbose(mut self, v: bool) -> Self {
         self.verbose = v;
         self
@@ -953,6 +963,118 @@ impl PeTTaEngine {
         if let Some(mut child) = self.child.take() {
             let _ = child.wait();
         }
+    }
+    // Profiling methods
+    // -----------------------------------------------------------------------
+
+    /// Execute a query with profiling enabled. Returns the results and profile data.
+    pub fn process_metta_string_profiled(
+        &mut self,
+        metta_code: &str,
+    ) -> Result<(Vec<MettaResult>, profiler::QueryProfile), PeTTaError> {
+        let mut profile = profiler::QueryProfile::new("process_metta_string", metta_code.len());
+        let total_start = Instant::now();
+
+        let send_start = Instant::now();
+        let results = self.send_query(b'S', metta_code);
+        profile.serialization_time = send_start.elapsed();
+
+        let parse_start = Instant::now();
+        let results = results?;
+        profile.parse_time = parse_start.elapsed();
+
+        profile.round_trip_time = profile.serialization_time;
+        profile.total_time = total_start.elapsed();
+        profile.result_count = results.len();
+
+        if self.config.profile {
+            info!("{}", profile.summary());
+        }
+
+        Ok((results, profile))
+    }
+
+    /// Execute a file query with profiling enabled.
+    pub fn load_metta_file_profiled(
+        &mut self,
+        file_path: &Path,
+    ) -> Result<(Vec<MettaResult>, profiler::QueryProfile), PeTTaError> {
+        let abs = file_path
+            .canonicalize()
+            .map_err(|e| PeTTaError::PathError(e.to_string()))?;
+        if !abs.exists() {
+            return Err(PeTTaError::FileNotFound(abs));
+        }
+        let path_str = abs.to_string_lossy();
+        let mut profile = profiler::QueryProfile::new("load_metta_file", path_str.len());
+        let total_start = Instant::now();
+
+        let send_start = Instant::now();
+        let results = self.send_query(b'F', &path_str);
+        profile.serialization_time = send_start.elapsed();
+
+        let parse_start = Instant::now();
+        let results = results?;
+        profile.parse_time = parse_start.elapsed();
+
+        profile.round_trip_time = profile.serialization_time;
+        profile.total_time = total_start.elapsed();
+        profile.result_count = results.len();
+
+        if self.config.profile {
+            info!("{}", profile.summary());
+        }
+
+        Ok((results, profile))
+    }
+
+    // -----------------------------------------------------------------------
+    // Parallel batch execution (requires 'parallel' feature)
+    // -----------------------------------------------------------------------
+
+    /// Execute multiple independent MeTTa strings in parallel using rayon.
+    /// Each string gets its own engine instance for true parallelism.
+    #[cfg(feature = "parallel")]
+    /// Execute multiple independent MeTTa strings in parallel using rayon.
+    /// Each string gets its own engine instance for true parallelism.
+    #[cfg(feature = "parallel")]
+    pub fn process_metta_strings_parallel(
+        &self,
+        queries: &[&str],
+    ) -> Vec<Result<Vec<MettaResult>, PeTTaError>> {
+        use rayon::prelude::*;
+        use std::sync::Arc;
+
+        let config = Arc::new(self.config.clone());
+
+        queries.par_iter().map(|&q| {
+            let cfg = Arc::clone(&config);
+            let mut c = (*cfg).clone();
+            c.verbose = false;
+            let mut engine = PeTTaEngine::with_config(&c)?;
+            engine.process_metta_string(q)
+        }).collect()
+    }
+
+    /// Execute multiple independent MeTTa files in parallel using rayon.
+    #[cfg(feature = "parallel")]
+    pub fn load_metta_files_parallel(
+        &self,
+        file_paths: &[PathBuf],
+    ) -> Vec<Result<Vec<MettaResult>, PeTTaError>> {
+        use rayon::prelude::*;
+        use std::sync::Arc;
+
+        let config = Arc::new(self.config.clone());
+
+        file_paths.par_iter().map(|path| {
+            let cfg = Arc::clone(&config);
+            let mut c = (*cfg).clone();
+            c.verbose = false;
+            let path = path.clone();
+            let mut engine = PeTTaEngine::with_config(&c)?;
+            engine.load_metta_file(&path)
+        }).collect()
     }
 }
 
