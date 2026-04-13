@@ -17,6 +17,8 @@
 //!   If 1: [4 bytes: error msg len][N bytes: UTF-8 error]
 //! ```
 
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::useless_conversion)]
 // MORK feature flags - uncomment when mork feature is enabled in Cargo.toml
 // #![cfg_attr(feature = "mork", allow(internal_features))]
 // #![cfg_attr(feature = "mork", feature(core_intrinsics))]

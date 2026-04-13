@@ -1,4 +1,5 @@
 //! Native Rust MeTTa S-expression parser using `nom`.
+#![allow(clippy::collapsible_if)]
 //!
 //! This module provides a dual-mode parser that can operate independently
 //! of the SWI-Prolog backend, enabling the `pure-rust` feature path.

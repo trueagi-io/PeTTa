@@ -1,4 +1,5 @@
 //! PeTTa CLI — Command-line interface for MeTTa execution
+#![allow(clippy::collapsible_if)]
 
 use std::path::Path;
 use std::time::Instant;

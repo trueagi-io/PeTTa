@@ -6,7 +6,7 @@
 //! - Prolog round-trip
 //! - Result parsing
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::info;
 
 /// Timing profile for a single query.
