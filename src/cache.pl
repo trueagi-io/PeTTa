@@ -219,9 +219,20 @@ memoizable_fun(Fun, Arity) :-
 
 memo_arg_size_limit(200).
 
-args_contain_float(AVs) :-
-    sub_term(X, AVs),
-    float(X), !.
+quantize_float(V, Q) :-
+    Q is round(V * 1.0e12) / 1.0e12.
+
+quantize_term(T, T) :-
+    var(T), !.
+quantize_term(T, Q) :-
+    float(T), !,
+    quantize_float(T, Q).
+quantize_term(T, T) :-
+    atomic(T), !.
+quantize_term(T, Q) :-
+    T =.. [F|Args],
+    maplist(quantize_term, Args, QArgs),
+    Q =.. [F|QArgs].
 
 args_too_complex(AVs) :-
     memo_arg_size_limit(Limit),
@@ -229,7 +240,6 @@ args_too_complex(AVs) :-
     S > Limit.
 
 args_worth_caching(AVs) :-
-    \+ args_contain_float(AVs),
     \+ args_too_complex(AVs).
 
 memo_probe_results(Fun, AVs, ProbeResults) :-
@@ -247,10 +257,11 @@ cache_call(Fun, AVs, Out) :-
         ground(AVs),
         args_worth_caching(AVs),
         memoizable_fun(Fun, Arity)
-    ->  memo_current_generation(Fun, Arity, CurGen),
-        ( metta_memo_entry(Fun, Arity, CurGen, AVs, CachedResults)
+    ->  quantize_term(AVs, KeyAVs),
+        memo_current_generation(Fun, Arity, CurGen),
+        ( metta_memo_entry(Fun, Arity, CurGen, KeyAVs, CachedResults)
         ->  % O(1) hit
-            record_hit(Fun, Arity, AVs),
+            record_hit(Fun, Arity, KeyAVs),
             member(Out, CachedResults)
         ;   % Cache miss
             memo_probe_results(Fun, AVs, ProbeResults),
@@ -258,8 +269,8 @@ cache_call(Fun, AVs, Out) :-
             % Non-deterministic bypass memo
             -> call(Goal)
             ; CachedResults = ProbeResults,
-              store_if_current_generation(Fun, Arity, CurGen, AVs, CachedResults),
-              record_miss(Fun, Arity, AVs),
+              store_if_current_generation(Fun, Arity, CurGen, KeyAVs, CachedResults),
+              record_miss(Fun, Arity, KeyAVs),
               member(Out, CachedResults)
             )
         )
