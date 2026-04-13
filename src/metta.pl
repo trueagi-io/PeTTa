@@ -335,22 +335,54 @@ list_loaded_libraries(Libs) :- findall(Lib, loaded_library(Lib), Libs).
 %%% Registration: %%%
 :- dynamic fun/1.
 register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
-:- maplist(register_fun, [superpose, empty, let, 'let*', '+','-','*','/', '%', min, max, 'change-state!', 'get-state', 'bind!',
-                          '<','>','==', '!=', '=', '=?', '<=', '>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
-                          'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom', 'alpha-unique-atom',
-                          repr, repra, parse, 'println!', 'readln!', test, assert, 'mm2-exec', atom_concat, atom_chars, copy_term, term_hash,
-                          foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!',
-                          'add-atom', 'remove-atom', 'get-atoms', match, 'is-var', 'is-expr', 'is-space', 'get-mettatype',
-                          decons, 'decons-atom', 'py-call', 'get-type', 'get-metatype', '=alpha', concat, sread, cons, reverse,
-                          '#+','#-','#*','#div','#//','#mod','#min','#max','#<','#>','#=','#\\=','set_hook',
-                          'union-atom', 'cons-atom', 'intersection-atom', 'subtraction-atom', 'index-atom', id,
-                          'pow-math', 'sqrt-math', 'sort-atom','abs-math', 'log-math', 'trunc-math', 'ceil-math',
-                          'floor-math', 'round-math', 'sin-math', 'cos-math', 'tan-math', 'asin-math','random-int','random-float',
-                          'acos-math', 'atan-math', 'isnan-math', 'isinf-math', 'min-atom', 'max-atom',
-                          'foldl-atom', 'map-atom', 'filter-atom','current-time','format-time', library, exists_file,
-                          import_prolog_function, 'Predicate', callPredicate, assertaPredicate, assertzPredicate, retractPredicate,
-                          'add-translator-rule!', 'remove-translator-rule!', argv, lazy_load_library, reload_library, list_loaded_libraries,
-                          declare_type, get_declared_type, infer_type]).
+%Pre-assert all builtin functions (avoids maplist/register_fun overhead at startup):
+:- assertz(fun(superpose)), assertz(fun(empty)), assertz(fun(let)), assertz(fun('let*')),
+   assertz(fun('+')), assertz(fun('-')), assertz(fun('*')), assertz(fun('/')), assertz(fun('%')),
+   assertz(fun(min)), assertz(fun(max)), assertz(fun('change-state!')), assertz(fun('get-state')),
+   assertz(fun('bind!')),
+   assertz(fun('<')), assertz(fun('>')), assertz(fun('==')), assertz(fun('!=')), assertz(fun('=')),
+   assertz(fun('=?')), assertz(fun('<=')), assertz(fun('>=')),
+   assertz(fun(and)), assertz(fun(or)), assertz(fun(xor)), assertz(fun(implies)), assertz(fun(not)),
+   assertz(fun(sqrt)), assertz(fun(exp)), assertz(fun(log)), assertz(fun(cos)), assertz(fun(sin)),
+   assertz(fun('first-from-pair')), assertz(fun('second-from-pair')),
+   assertz(fun('car-atom')), assertz(fun('cdr-atom')),
+   assertz(fun('unique-atom')), assertz(fun('alpha-unique-atom')),
+   assertz(fun(repr)), assertz(fun(repra)), assertz(fun(parse)), assertz(fun('println!')),
+   assertz(fun('readln!')), assertz(fun(test)), assertz(fun(assert)), assertz(fun('mm2-exec')),
+   assertz(fun(atom_concat)), assertz(fun(atom_chars)), assertz(fun(copy_term)), assertz(fun(term_hash)),
+   assertz(fun(foldl)), assertz(fun(first)), assertz(fun(last)), assertz(fun(append)),
+   assertz(fun(length)), assertz(fun('size-atom')), assertz(fun(sort)), assertz(fun(msort)),
+   assertz(fun(member)), assertz(fun('is-member')), assertz(fun('exclude-item')),
+   assertz(fun(list_to_set)), assertz(fun(maplist)), assertz(fun(eval)), assertz(fun(reduce)),
+   assertz(fun('import!')),
+   assertz(fun('add-atom')), assertz(fun('remove-atom')), assertz(fun('get-atoms')),
+   assertz(fun(match)), assertz(fun('is-var')), assertz(fun('is-expr')), assertz(fun('is-space')),
+   assertz(fun('get-mettatype')),
+   assertz(fun(decons)), assertz(fun('decons-atom')), assertz(fun('py-call')),
+   assertz(fun('get-type')), assertz(fun('get-metatype')), assertz(fun('=alpha')),
+   assertz(fun(concat)), assertz(fun(sread)), assertz(fun(cons)), assertz(fun(reverse)),
+   assertz(fun('#+')), assertz(fun('#-')), assertz(fun('#*')), assertz(fun('#div')),
+   assertz(fun('#//')), assertz(fun('#mod')), assertz(fun('#min')), assertz(fun('#max')),
+   assertz(fun('#<')), assertz(fun('#>')), assertz(fun('#=')), assertz(fun('#\\=')),
+   assertz(fun(set_hook)),
+   assertz(fun('union-atom')), assertz(fun('cons-atom')), assertz(fun('intersection-atom')),
+   assertz(fun('subtraction-atom')), assertz(fun('index-atom')), assertz(fun(id)),
+   assertz(fun('pow-math')), assertz(fun('sqrt-math')), assertz(fun('sort-atom')),
+   assertz(fun('abs-math')), assertz(fun('log-math')), assertz(fun('trunc-math')),
+   assertz(fun('ceil-math')), assertz(fun('floor-math')), assertz(fun('round-math')),
+   assertz(fun('sin-math')), assertz(fun('cos-math')), assertz(fun('tan-math')),
+   assertz(fun('asin-math')), assertz(fun('random-int')), assertz(fun('random-float')),
+   assertz(fun('acos-math')), assertz(fun('atan-math')), assertz(fun('isnan-math')),
+   assertz(fun('isinf-math')), assertz(fun('min-atom')), assertz(fun('max-atom')),
+   assertz(fun('foldl-atom')), assertz(fun('map-atom')), assertz(fun('filter-atom')),
+   assertz(fun('current-time')), assertz(fun('format-time')),
+   assertz(fun(library)), assertz(fun(exists_file)),
+   assertz(fun(import_prolog_function)), assertz(fun('Predicate')), assertz(fun(callPredicate)),
+   assertz(fun(assertaPredicate)), assertz(fun(assertzPredicate)), assertz(fun(retractPredicate)),
+   assertz(fun('add-translator-rule!')), assertz(fun('remove-translator-rule!')),
+   assertz(fun(argv)), assertz(fun(lazy_load_library)), assertz(fun(reload_library)),
+   assertz(fun(list_loaded_libraries)),
+   assertz(fun(declare_type)), assertz(fun(get_declared_type)), assertz(fun(infer_type)).
 
 'get-error-location'(error(_ErrType, context(Location, _)), Location).
 'get-error-location'(_, none).
@@ -369,8 +401,7 @@ similarity(S1, S2, Score) :-
     length(Chars1, Len1),
     length(Chars2, Len2),
     MaxLen is max(Len1, Len2),
-    MaxLen > 0,
-    Score is LCSLen / MaxLen.
+    ( MaxLen > 0 -> Score is LCSLen / MaxLen ; Score = 0 ).
 
 %Tabling prevents exponential blowup in LCS computation:
 :- table longest_common_substring/3.
@@ -384,7 +415,6 @@ longest_common_substring([_|T1], [_|T2], Len) :-
     longest_common_substring(T1, [_|T2], Len2),
     longest_common_substring([_|T1], T2, Len3),
     Len is max(max(Len1, Len2), Len3).
-longest_common_substring(_, _, 0).
 
 'error-syntax'(Location, Detail, Recoverable) :-
     format(atom(Detail), 'Syntax error at ~w', [Location]),

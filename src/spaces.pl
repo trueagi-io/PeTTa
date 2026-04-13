@@ -57,18 +57,18 @@ match(Space, PatternVar, OutPattern, Result) :- var(PatternVar), !,
 %Match for pattern:
 match(Space, [Rel|PatArgs], OutPattern, Result) :- match_one(Space, [Rel|PatArgs], OutPattern, Result).
 
-%Optimized single-pattern match using call/N instead of =..:
+%Optimized single-pattern match using direct term construction:
 match_one(Space, [Rel|PatArgs], OutPattern, Result) :-
     callable_term(Space, Rel, PatArgs, Term),
     catch(Term, _, fail),
     Result = OutPattern.
 
 %Build callable term efficiently, avoiding =.. where possible:
-callable_term(Space, Rel, [A1], Space, Rel, A1) :- !.
-callable_term(Space, Rel, [A1,A2], Space, Rel, A1, A2) :- !.
-callable_term(Space, Rel, [A1,A2,A3], Space, Rel, A1, A2, A3) :- !.
-callable_term(Space, Rel, [A1,A2,A3,A4], Space, Rel, A1, A2, A3, A4) :- !.
-callable_term(Space, Rel, [A1,A2,A3,A4,A5], Space, Rel, A1, A2, A3, A4, A5) :- !.
+callable_term(Space, Rel, [A1], Term) :- !, Term =.. [Space, Rel, A1].
+callable_term(Space, Rel, [A1,A2], Term) :- !, Term =.. [Space, Rel, A1, A2].
+callable_term(Space, Rel, [A1,A2,A3], Term) :- !, Term =.. [Space, Rel, A1, A2, A3].
+callable_term(Space, Rel, [A1,A2,A3,A4], Term) :- !, Term =.. [Space, Rel, A1, A2, A3, A4].
+callable_term(Space, Rel, [A1,A2,A3,A4,A5], Term) :- !, Term =.. [Space, Rel, A1, A2, A3, A4, A5].
 callable_term(Space, Rel, Args, Term) :- Term =.. [Space, Rel | Args].
 
 %Get all atoms in space, regardless of arity:

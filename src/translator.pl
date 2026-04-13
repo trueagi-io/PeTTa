@@ -37,19 +37,17 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
 
 % Runtime dispatcher: call F if it's a registered fun/1, else keep as list:
 reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
-                         -> % --- Case 1: callable predicate ---
-                            length(Args, N),
+                         -> length(Args, N),
                             Arity is N + 1,
                             ( current_predicate(F/Arity) , \+ (current_op(_, _, F), Arity =< 2)
                               -> append(Args,[Out],CallArgs),
                                  Goal =.. [F|CallArgs],
                                  catch(call(Goal),_,fail)
                                ; Out = partial(F,Args) )
-                          ; % --- Case 2: partial closure ---
-                            compound(F), F = partial(Base, Bound) -> append(Bound, Args, NewArgs),
-                                                                     reduce([Base|NewArgs], Out)
-                          ; % --- Case 3: leave unevaluated ---
-                            Out = [F|Args],
+                          ; compound(F), F = partial(Base, Bound)
+                            -> append(Bound, Args, NewArgs),
+                               reduce([Base|NewArgs], Out)
+                          ; Out = [F|Args],
                             \+ cyclic_term(Out).
 
 %Calling reduce from aggregate function foldall needs this argument wrapping
@@ -383,11 +381,14 @@ translate_case([[K,VExpr]|Rs], Kv, Out, Goal, KGo) :- translate_expr_to_conj(VEx
                                                                     Goal = ((Kv = Kc) -> Then ; Next) ),
                                                       append([Gc,KGi], KGo).
 
-%Translate arguments recursively:
-translate_args([], [], []).
-translate_args([X|Xs], Goals, [V|Vs]) :- translate_expr(X, G1, V),
-                                         translate_args(Xs, G2, Vs),
-                                         append(G1, G2, Goals).
+%Translate arguments recursively (difference-list version avoids append):
+translate_args([], [], []) :- !.
+translate_args([X|Xs], Goals, [V|Vs]) :-
+    translate_expr(X, G1, V),
+    translate_args(Xs, G2, Vs),
+    ( G2 == [] -> Goals = G1
+    ; G1 == [] -> Goals = G2
+    ; append(G1, G2, Goals) ).
 
 %Build A ; B ; C ... from a list:
 disj_list([G], G).

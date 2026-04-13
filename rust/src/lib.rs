@@ -120,8 +120,9 @@ read_bytes_tail(N, Bytes) :-
 read_bytes_loop(0, Acc, Acc) :- !.
 read_bytes_loop(N, Acc, Result) :-
     get_code(user_input, Code),
-    N1 is N - 1,
-    read_bytes_loop(N1, [Code|Acc], Result).
+    ( Code =:= -1 -> !, reverse(Acc, Result)
+    ; N1 is N - 1,
+      read_bytes_loop(N1, [Code|Acc], Result) ).
 
 %Tail-recursive byte writing:
 write_bytes(Codes) :- write_bytes_loop(Codes).
@@ -861,6 +862,27 @@ mod tests {
             eprintln!("Engine creation failed: {}", e);
         }
         assert!(r.is_ok());
+    }
+    #[test]
+    fn test_booleansolver() {
+        let mut e = make_engine();
+        let r = e.load_metta_file(&project_root().join("examples/booleansolver.metta"));
+        let stderr = e.stderr_output();
+        if !stderr.is_empty() {
+            eprintln!("STDERR: {}", stderr);
+        }
+        match &r {
+            Ok(results) => {
+                for res in results {
+                    eprintln!("RESULT: {}", res.value);
+                }
+                assert!(!results.is_empty());
+            }
+            Err(e) => {
+                eprintln!("ERROR: {:?}", e);
+                panic!("booleansolver failed");
+            }
+        }
     }
     #[test]
     fn test_identity() {
