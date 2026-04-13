@@ -14,6 +14,3 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
-
-# Build artifacts
-repos/

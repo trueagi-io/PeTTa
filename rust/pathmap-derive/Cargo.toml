@@ -1,0 +1,16 @@
+[package]
+name = "pathmap-derive"
+version = "0.2.1"
+edition = "2024"
+license = "MIT"
+description = "Macros and support functionality for the pathmap crate"
+repository = "https://github.com/adam-Vandervorst/pathMap/"
+readme = "README.md"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full"] }
+quote = "1.0"
+proc-macro2 = "1.0"

@@ -19,16 +19,16 @@
 
 #![allow(clippy::collapsible_if)]
 #![allow(clippy::useless_conversion)]
-// MORK feature flags - uncomment when mork feature is enabled in Cargo.toml
-// #![cfg_attr(feature = "mork", allow(internal_features))]
-// #![cfg_attr(feature = "mork", feature(core_intrinsics))]
-// #![cfg_attr(feature = "mork", feature(portable_simd))]
-// #![cfg_attr(feature = "mork", feature(allocator_api))]
-// #![cfg_attr(feature = "mork", feature(coroutine_trait))]
-// #![cfg_attr(feature = "mork", feature(coroutines))]
-// #![cfg_attr(feature = "mork", feature(stmt_expr_attributes))]
-// #![cfg_attr(feature = "mork", feature(gen_blocks))]
-// #![cfg_attr(feature = "mork", feature(yield_expr))]
+// MORK requires nightly Rust for coroutine/zipper features
+#![cfg_attr(feature = "mork", allow(internal_features))]
+#![cfg_attr(feature = "mork", feature(core_intrinsics))]
+#![cfg_attr(feature = "mork", feature(portable_simd))]
+#![cfg_attr(feature = "mork", feature(allocator_api))]
+#![cfg_attr(feature = "mork", feature(coroutine_trait))]
+#![cfg_attr(feature = "mork", feature(coroutines))]
+#![cfg_attr(feature = "mork", feature(stmt_expr_attributes))]
+#![cfg_attr(feature = "mork", feature(gen_blocks))]
+#![cfg_attr(feature = "mork", feature(yield_expr))]
 
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -49,6 +49,21 @@ pub mod petta_parser;
 #[allow(dead_code)]
 mod petta_parser;
 pub mod profiler;
+
+/// MORK (MeTTa Optimal Reduction Kernel) - Zipper-based execution backend.
+///
+/// Inlined from <https://github.com/trueagi-io/MORK>.
+/// Requires nightly Rust when enabled.
+#[cfg(feature = "mork")]
+pub mod mork;
+#[cfg(not(feature = "mork"))]
+#[allow(dead_code)]
+mod mork;
+
+/// PathMap - Byte-path-indexed trie with algebraic operations.
+///
+/// Inlined from <https://github.com/Adam-Vandervorst/PathMap>.
+pub mod pathmap;
 
 /// Configuration options for the PeTTaEngine.
 #[derive(Debug, Clone)]
