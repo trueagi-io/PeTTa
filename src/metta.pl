@@ -1,6 +1,6 @@
 %%%%%%%%%% Dependencies %%%%%%%%%%
-library(X, Path) :- library_path(Base), atomic_list_concat([Base, '/', X], Path).
-library(X, Y, Path) :- library_path(Base), atomic_list_concat([Base, '/../', X, '/', Y], Path).
+library(X, Path) :- library_path(Base), atomic_list_concat([Base, '/', X], Path), !.
+library(X, Y, Path) :- library_path(Base), atomic_list_concat([Base, '/../', X, '/', Y], Path), !.
 :- prolog_load_context(directory, Source),
    directory_file_path(Source, '..', Parent),
    directory_file_path(Parent, 'lib', LibPath),
@@ -269,19 +269,24 @@ retractPredicate(_, false).
 ensure_metta_ext(Path, Path) :- file_name_extension(_, metta, Path), !.
 ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWithExt).
 
-'import!'(Space, File, true) :- catch(importer_helper(Space, File), _, fail).
+'import!'(Space, File, true) :- importer_helper(Space, File).
 importer_helper(Space, File) :- atom_string(File, SFile),
                                 working_dir(Base),
                                 ( file_name_extension(ModPath, 'py', SFile)
                                   -> absolute_file_name(SFile, Path, [relative_to(Base)]),
                                      file_directory_name(Path, Dir),
                                      file_base_name(ModPath, ModuleName),
-                                     py_call(sys:path:append(Dir), _),
-                                     py_call(builtins:'__import__'(ModuleName), _)
-                                   ; ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
-                                     ensure_metta_ext(Path, PathWithExt),
-                                     exists_file(PathWithExt), !,
-                                     load_metta_file(PathWithExt, _, Space) ).
+                                     ( catch(use_module(library(janus)), _, fail)
+                                       -> py_call(sys:path:append(Dir), _),
+                                          py_call(builtins:'__import__'(ModuleName), _)
+                                        ; throw(error(existence_error(source_sink, library(janus)),
+                                                      context('import!', File))) )
+                                    ; ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
+                                      ensure_metta_ext(Path, PathWithExt),
+                                      exists_file(PathWithExt), !,
+                                      load_metta_file(PathWithExt, _, Space)
+                                  ; throw(error(existence_error(source_sink, File),
+                                                context('import!', File))) ).
 
 :- dynamic translator_rule/1.
 'add-translator-rule!'(HV, true) :- ( translator_rule(HV)
