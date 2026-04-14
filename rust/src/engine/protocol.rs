@@ -63,9 +63,14 @@ pub fn send_query(
     match send_query_inner(stdin_pipe, stdout_pipe, query_type, payload, config) {
         Ok(results) => Ok(results),
         Err(PeTTaError::ProtocolError(ref msg)) if msg.contains("child closed") => {
-            warn!("Subprocess crashed during query, attempting recovery");
+            warn!("Subprocess crashed during query (type={}), payload preview: {:?}",
+                query_type as char, &payload[..payload.len().min(120)]);
             // The caller (engine) handles recovery/restart
-            Err(PeTTaError::ProtocolError("child closed".into()))
+            Err(PeTTaError::ProtocolError(format!(
+                "child closed (query type '{}', payload: {:?})",
+                query_type as char,
+                &payload[..payload.len().min(120)]
+            )))
         }
         Err(e) => Err(e),
     }

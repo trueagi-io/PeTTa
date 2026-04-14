@@ -162,6 +162,11 @@ fn run_engine_files(project_root: &Path, paths: &[&Path], verbose: bool) -> Resu
                 }
             }
             Err(e) => {
+                // Surface Prolog stderr on error — this often contains the crash reason
+                let stderr = engine.stderr_output();
+                if !stderr.is_empty() {
+                    eprintln!("{}:\n{}", red("Prolog stderr"), red(&stderr));
+                }
                 eprintln!("{} {}: {}", red("Error processing"), path.display(), e);
                 had_failure = true;
             }

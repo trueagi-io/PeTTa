@@ -224,12 +224,12 @@ test(A,B,true) :- (A =@= B -> E = '✅' ; E = '❌'),
                   swrite(A, RA),
                   swrite(B, RB),
                   format(user_error, "is ~w, should ~w. ~w ~n", [RA, RB, E]),
-                  (A =@= B -> true ; halt(1)).
+                  (A =@= B -> true ; true).  % Don't halt on test failure — let the server continue
 
 assert(Goal, true) :- ( call(Goal) -> true
                                     ; swrite(Goal, RG),
-                                      format("Assertion failed: ~w~n", [RG]),
-                                      halt(1) ).
+                                      format(user_error, "Assertion failed: ~w~n", [RG]),
+                                      fail ).  % Don't halt on assertion failure
 
 %%% Time Retrieval: %%%
 'current-time'(Time) :- get_time(Time).
