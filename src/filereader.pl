@@ -38,7 +38,7 @@ process_form(Space, parsed(function, FormStr, Term), []) :- add_sexp(Space, Term
                                                             translate_clause(Term, Clause),
                                                             assertz(Clause, Ref),
                                                             assertz(translated_from(Ref, Term)),
-                                                            cache_invalidate(F),
+                                                            memo_invalidate(F),
                                                             ( silent(true) -> true ; format("\e[33m--> metta function -->~n\e[36m~w~n\e[33m--> prolog clause -->~n\e[32m", [FormStr]),
                                                                                      clause(Head, Body, Ref),
                                                                                      ( Body == true -> Show = Head; Show = (Head :- Body) ),

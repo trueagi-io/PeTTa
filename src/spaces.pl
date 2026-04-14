@@ -16,7 +16,7 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                  once(translate_clause(Term, Clause)),
                                   assertz(Clause, Ref),
                                   assertz(translated_from(Ref, Term)),
-                                  cache_invalidate(FAtom),
+                                 memo_invalidate(FAtom),
                                   invalidate_specializations(FAtom),
                                   maybe_print_compiled_clause("added function", Term, Clause).
 
@@ -33,11 +33,11 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                          findall(Ref, translated_from(Ref, Term), Refs),
                                           forall(member(Ref, Refs), erase(Ref)),
                                           retractall(translated_from(_, Term)),
-                                          cache_invalidate(F),
+                                         memo_invalidate(F),
                                           invalidate_specializations(F),
                                          ( \+ ( current_predicate(F/A), functor(H2, F, A), clause(H2, _, _) )
                                            -> retractall(fun(F)),
-                                              disable_memoization(F)
+                                              memo_disable(F)
                                            ; true ),
                                          ( Refs = [] -> Removed = false ; Removed = true ).
 
@@ -45,17 +45,6 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
 'remove-atom'(Space, Term, true) :- remove_sexp(Space, Term).
 
 :- dynamic translated_from/2.
-
-'memoize!'(Fun, 'Empty') :-
-    ( atom(Fun), fun(Fun)
-    -> true
-    ; throw(error(domain_error(function_symbol, Fun), 'memoize!/2'))
-    ),
-    findall(Term, (translated_from(_, Term), Term = [=, [Fun|_], _]), RawTerms),
-    sort(RawTerms, Terms),
-    forall(member(Term, Terms), 'remove-atom'('&self', Term, _)),
-    enable_memoization(Fun),
-    forall(member(Term, Terms), 'add-atom'('&self', Term, _)).
 
 %Match for conjunctive pattern
 match(_, LComma, OutPattern, Result) :- LComma == [','], !,
