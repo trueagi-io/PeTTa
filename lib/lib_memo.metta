@@ -7,4 +7,4 @@
 
 !(import_prolog_functions_from_file
     (library lib_memo.pl)
-    (memoize! config-memoize get-memoize-config clear-memoize! is-memoized?))
+    (memoize config-memoize get-memoize-config clear-memoize is-memoized))
