@@ -27,11 +27,8 @@ specialize_call(HV, AVs, Out, Goal) :- %1. Retrieve a copy of all meta-clauses s
                                        %4. Specialize, but only if not already specialized:
                                        ( ho_specialization(HV, SpecName)
                                          ; ( %4.1. Otherwise register the specialization:
-                                             register_fun(SpecName),
+                                             register_fun_arity(SpecName, AVs),
                                              assertz(ho_specialization(HV, SpecName)),
-                                             length(AVs, N),
-                                             Arity is N + 1,
-                                             assertz(arity(SpecName, Arity)),
                                              ( %4.2. Re-use the type definition of the parent function for the specialization:
                                                get_fun_types(HV, TypeChains),
                                                forall(member(TypeChain, TypeChains), add_sexp('&self', [':', SpecName, TypeChain])),

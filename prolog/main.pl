@@ -1,4 +1,5 @@
 :- ensure_loaded(metta).
+:- dynamic working_dir/1.
 
 prologfunc(X,Y) :- Y is X+1.
 

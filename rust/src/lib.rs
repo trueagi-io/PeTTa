@@ -63,7 +63,7 @@ mod hash_fallback;
 mod engine;
 
 // Re-export types that were previously top-level for backward compatibility.
-pub use engine::{EngineConfig, MettaValue, MettaResult, PeTTaError, SwiplErrorKind, PeTTaEngine, swipl_available};
+pub use engine::{EngineConfig, MettaValue, MettaResult, PeTTaError, SwiplErrorKind, PeTTaEngine, swipl_available, MIN_SWIPL_VERSION};
 
 // ---------------------------------------------------------------------------
 // Tests

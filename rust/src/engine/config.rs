@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use super::version::MIN_SWIPL_VERSION;
+
 /// Configuration options for the [`PeTTaEngine`](super::PeTTaEngine).
 ///
 /// Uses the builder pattern:
@@ -37,7 +39,7 @@ impl Default for EngineConfig {
             profile: false,
             query_timeout: None,
             max_restarts: 0,
-            min_swipl_version: (9, 3),
+            min_swipl_version: MIN_SWIPL_VERSION,
         }
     }
 }

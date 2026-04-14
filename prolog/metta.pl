@@ -86,8 +86,8 @@ exp(Arg,R) :- R is exp(Arg).
 'asin-math'(A, Out) :- Out is asin(A).
 'acos-math'(A, Out) :- Out is acos(A).
 'atan-math'(A, Out) :- Out is atan(A).
-'isnan-math'(A, Out) :- ( A =:= A -> Out = false ; Out = true ).
-'isinf-math'(A, Out) :- ( A =:= 1.0Inf ; A =:= -1.0Inf -> Out = true ; Out = false ).
+'isnan-math'(A, Out) :- ( float(A) -> (A =:= A -> Out = false ; Out = true) ; Out = false ).
+'isinf-math'(A, Out) :- ((A =:= 1.0Inf ; A =:= -1.0Inf) -> Out = true ; Out = false).
 'min-atom'(List, Out) :- min_list(List, Out).
 'max-atom'(List, Out) :- max_list(List, Out).
 
@@ -114,8 +114,7 @@ empty(_) :- fail.
 %%% Lists / Tuples: %%%
 'cons-atom'(H, T, [H|T]).
 'decons-atom'([H|T], [H|[T]]).
-'first-from-pair'([A, _], A).
-first([A, _], A).
+first(List, Result) :- 'first-from-pair'(List, Result).
 'second-from-pair'([_, A], A).
 'unique-atom'(A, B) :- list_to_set(A, B).
 
@@ -145,8 +144,8 @@ alpha_list_to_set_assoc([H|T], SeenIn, R) :-
 'size-atom'(List, Size) :- length(List, Size).
 'car-atom'([H|_], H).
 'cdr-atom'([_|T], T).
-decons([H|T], [H|[T]]).
-cons(H, T, [H|T]).
+decons(List, Result) :- 'decons-atom'(List, Result).
+cons(Head, Tail, Result) :- 'cons-atom'(Head, Tail, Result).
 'index-atom'(List, Index, Elem) :- nth0(Index, List, Elem).
 member(X, L, true) :- member(X, L).
 'is-member'(X, List, true) :- member(X, List).

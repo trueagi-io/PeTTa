@@ -5,6 +5,9 @@ use tracing::debug;
 
 use super::errors::PeTTaError;
 
+/// Minimum supported SWI-Prolog version (major, minor).
+pub const MIN_SWIPL_VERSION: (u32, u32) = (9, 3);
+
 pub fn check_swipl_version(
     swipl_path: &Path,
     min_version: (u32, u32),
@@ -51,5 +54,5 @@ pub fn check_swipl_version(
 
 /// Check if SWI-Prolog is available at the given path.
 pub fn swipl_available(swipl_path: &Path) -> bool {
-    check_swipl_version(swipl_path, (9, 3)).is_ok()
+    check_swipl_version(swipl_path, MIN_SWIPL_VERSION).is_ok()
 }

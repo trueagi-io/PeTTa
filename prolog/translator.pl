@@ -226,13 +226,10 @@ translate_expr([H0|T0], Goals, Out) :-
                                            append(FreeVars, Args, FullArgs),
                                            % compile clause with all bound + free vars
                                            translate_clause([=, [F|FullArgs], Body], Clause),
-                                           register_fun(F),
+                                           register_fun_arity(F, FullArgs),
                                            assertz(Clause),
                                            format(atom(Label), "metta lambda (~w)", [F]),
                                            maybe_print_compiled_clause(Label, ['|->', Args, Body], Clause),
-                                           length(FullArgs, N),
-                                           Arity is N + 1,
-                                           assertz(arity(F, Arity)),
                                            % emit closure capturing the environment (free vars)
                                            ( FreeVars == [] -> Out = F
                                                              ; Out = partial(F, FreeVars) )

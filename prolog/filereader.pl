@@ -16,7 +16,7 @@ process_metta_string(S, Results, Space) :- string_codes(S, Cs),
                                        append(ResultsList, Results).
 
 parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
-                                        ( Term = [=, [F|W], _], atom(F) -> register_fun(F), length(W, N), Arity is N + 1, assertz(arity(F,Arity)), T=function
+                                        ( Term = [=, [F|W], _], atom(F) -> register_fun_arity(F, W), T=function
                                                                          ; T=expression ).
 parse_form(runnable(S), parsed(runnable, S, Term)) :- sread(S, Term).
 
@@ -27,8 +27,7 @@ process_form(_, parsed(runnable, FormStr, Term), Result) :- translate_expr([coll
                                                     call_goals(Goals).
 process_form(Space, parsed(function, FormStr, Term), []) :- add_sexp(Space, Term),
                                                       translate_clause(Term, Clause),
-                                                      assertz(Clause, Ref),
-                                                      assertz(translated_from(Ref, Term)),
+                                                      assert_clause_with_tracking(Clause, Term, Ref),
                                                       maybe_print_metta_function(FormStr, Ref).
 process_form(_, In, _) :- format(atom(Msg), "failed to process form: ~w", [In]), throw(error(syntax_error(Msg), none)).
 

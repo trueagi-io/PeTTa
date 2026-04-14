@@ -1,4 +1,6 @@
 %Since both normal add-atom call and function additions needs to add the S-expression:
+:- dynamic arity/2.
+
 add_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                assertz(Term).
 
@@ -9,13 +11,9 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
 %Add a function atom:
 'add-atom'(Space, Term, true) :- Term = [=,[FAtom|W],_], !,
                                  add_sexp(Space, Term),
-                                 register_fun(FAtom),
-                                 length(W, N),
-                                 Arity is N + 1,
-                                 assertz(arity(FAtom,Arity)),
+                                 register_fun_arity(FAtom, W),
                                  once(translate_clause(Term, Clause)),
-                                 assertz(Clause, Ref),
-                                 assertz(translated_from(Ref, Term)),
+                                 assert_clause_with_tracking(Clause, Term),
                                  invalidate_specializations(FAtom),
                                  invalidate_type_cache,
                                  maybe_print_compiled_clause("added function", Term, Clause).
@@ -57,18 +55,13 @@ match(Space, PatternVar, OutPattern, Result) :- var(PatternVar), !,
 %Match for pattern:
 match(Space, [Rel|PatArgs], OutPattern, Result) :- match_one(Space, [Rel|PatArgs], OutPattern, Result).
 
-%Optimized single-pattern match using direct term construction:
+%Single-pattern match using direct term construction:
 match_one(Space, [Rel|PatArgs], OutPattern, Result) :-
     callable_term(Space, Rel, PatArgs, Term),
     catch(Term, _, fail),
     Result = OutPattern.
 
-%Build callable term efficiently, avoiding =.. where possible:
-callable_term(Space, Rel, [A1], Term) :- !, Term =.. [Space, Rel, A1].
-callable_term(Space, Rel, [A1,A2], Term) :- !, Term =.. [Space, Rel, A1, A2].
-callable_term(Space, Rel, [A1,A2,A3], Term) :- !, Term =.. [Space, Rel, A1, A2, A3].
-callable_term(Space, Rel, [A1,A2,A3,A4], Term) :- !, Term =.. [Space, Rel, A1, A2, A3, A4].
-callable_term(Space, Rel, [A1,A2,A3,A4,A5], Term) :- !, Term =.. [Space, Rel, A1, A2, A3, A4, A5].
+%Build callable term from space, relation, and argument list:
 callable_term(Space, Rel, Args, Term) :- Term =.. [Space, Rel | Args].
 
 %Get all atoms in space, regardless of arity:

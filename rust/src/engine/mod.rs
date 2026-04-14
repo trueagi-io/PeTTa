@@ -14,10 +14,12 @@ mod version;
 pub use config::EngineConfig;
 pub use errors::{SwiplErrorKind, PeTTaError};
 pub use values::{MettaValue, MettaResult};
-pub use version::swipl_available;
+pub use version::{swipl_available, MIN_SWIPL_VERSION};
 
 use std::io::{BufReader, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(feature = "parallel")]
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 #[cfg(feature = "profiling")]
 use std::time::Instant;

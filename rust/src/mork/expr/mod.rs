@@ -99,54 +99,6 @@ pub const fn maybe_byte_item(b: u8) -> Result<Tag, u8> {
     else { return Err(b) }
 }
 
-// pub fn str_item(ptr: *mut u8) -> (usize, Result<Tag, &[u8]>) {
-//     let offset = 0;
-//     loop {
-//         match unsafe { *ptr.byte_add(offset) } {
-//             '[' => {
-//                 offset += 1;
-//                 let i: u8 = match unsafe { *ptr.byte_add(offset) } {
-//                     '0' => 0, '1' => 1, '2' => 2, '3' => 3, '4' => 4,
-//                     '5' => 5, '6' => 6, '7' => 7, '8' => 8, '9' => 9,
-//                     _ => { panic!() }
-//                 };
-//                 offset += 1;
-//                 i = match unsafe { *ptr.byte_add(offset) } {
-//                     '0' => 10*i + 0, '1' => 10*i + 1, '2' => 10*i + 2, '3' => 10*i + 3, '4' => 10*i + 4,
-//                     '5' => 10*i + 5, '6' => 10*i + 6, '7' => 10*i + 7, '8' => 10*i + 8, '9' => 10*i + 9,
-//                     ']' => { return (offset, Ok(Tag::Arity(i))); },
-//                     _ => { panic!() }
-//                 };
-//                 offset += 1;
-//                 match unsafe { *ptr.byte_add(offset) } {
-//                     ']' => { return (offset, Ok(Tag::Arity(i))); },
-//                     _ => { panic!() }
-//                 };
-//             }
-//             '(' => {
-//                 offset += 1;
-//                 let i: u8 = match unsafe { *ptr.byte_add(offset) } {
-//                     '0' => 0, '1' => 1, '2' => 2, '3' => 3, '4' => 4,
-//                     '5' => 5, '6' => 6, '7' => 7, '8' => 8, '9' => 9,
-//                     _ => { panic!() }
-//                 };
-//                 offset += 1;
-//                 i = match unsafe { *ptr.byte_add(offset) } {
-//                     '0' => 10*i + 0, '1' => 10*i + 1, '2' => 10*i + 2, '3' => 10*i + 3, '4' => 10*i + 4,
-//                     '5' => 10*i + 5, '6' => 10*i + 6, '7' => 10*i + 7, '8' => 10*i + 8, '9' => 10*i + 9,
-//                     ')' => { return (offset, Ok(Tag::SymbolSize(i))); },
-//                     _ => { panic!() }
-//                 };
-//                 offset += 1;
-//                 match unsafe { *ptr.byte_add(offset) } {
-//                     ')' => { return (offset, Ok(Tag::SymbolSize(i))); },
-//                     _ => { panic!() }
-//                 };
-//             }
-//         }
-//     }
-// }
-
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Expr {
