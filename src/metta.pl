@@ -289,17 +289,14 @@ absolute_import_path(Base, File, AbsPath, metta) :-
     ensure_metta_ext(File, FileWithExt),
     resolve_import_path(Base, FileWithExt, AbsPath).
 
-prolog:message(error(duplicate_import(AbsPath), _Context)) -->
-    [ 'Duplicate import detected for file ~q'-[AbsPath] ].
-
 'import!'(Space, File, true) :-
-    catch(importer_helper(Space, File), error(duplicate_import(AbsPath), Context), throw(error(duplicate_import(AbsPath), Context))).
+    importer_helper(Space, File).
 importer_helper(Space, File) :-
     atom_string(File, SFile),
     working_dir(Base),
     absolute_import_path(Base, SFile, AbsPath, ImportType),
     ( imported_file(AbsPath)
-      -> throw(error(duplicate_import(AbsPath), context('import!'/3, 'Duplicate import detected')))
+      -> true
        ; ( ImportType = python
            -> file_directory_name(AbsPath, Dir),
               file_base_name(AbsPath, BaseName),
