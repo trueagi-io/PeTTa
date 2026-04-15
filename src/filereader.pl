@@ -2,11 +2,23 @@
 :- use_module(library(pcre)). % re_replace/4
 :- current_prolog_flag(argv, Args), ( (memberchk(silent, Args) ; memberchk('--silent', Args) ; memberchk('-s', Args))
                                       -> assertz(silent(true)) ; assertz(silent(false)) ).
+:- dynamic working_dir/1.
+
+push_working_dir(Filename) :- file_directory_name(Filename, Dir0),
+                              ( absolute_file_name(Dir0, Dir, [file_type(directory), file_errors(fail)])
+                                -> true
+                                 ; Dir = Dir0 ),
+                              asserta(working_dir(Dir)).
+
+pop_working_dir :- retract(working_dir(_)), !.
+pop_working_dir.
 
 %Read Filename into string S and process it (S holds MeTTa code):
 load_metta_file(Filename, Results) :- load_metta_file(Filename, Results, '&self').
-load_metta_file(Filename, Results, Space) :- read_file_to_string(Filename, S, []),
-                                             process_metta_string(S, Results, Space).
+load_metta_file(Filename, Results, Space) :- setup_call_cleanup(push_working_dir(Filename),
+                                                                ( read_file_to_string(Filename, S, []),
+                                                                  process_metta_string(S, Results, Space) ),
+                                                                pop_working_dir).
 
 %Extract function definitions, call invocations, and S-expressions part of &self space:
 process_metta_string(S, Results) :- process_metta_string(S, Results, '&self').
