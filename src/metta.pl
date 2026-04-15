@@ -18,6 +18,7 @@ library(X, Y, Path) :- library_path(Base), atomic_list_concat([Base, '/../', X, 
 :- use_module(library(apply_macros)).
 :- use_module(library(process)).
 :- use_module(library(filesex)).
+:- multifile prolog:message//1.
 :- current_prolog_flag(argv, Argv),
    ( member(mork, Argv) -> ensure_loaded([parser, translator, specializer, filereader, '../mork_ffi/morkspaces', spaces])
                          ; ensure_loaded([parser, translator, specializer, filereader, spaces])).
@@ -269,19 +270,42 @@ retractPredicate(_, false).
 ensure_metta_ext(Path, Path) :- file_name_extension(_, metta, Path), !.
 ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWithExt).
 
-'import!'(Space, File, true) :- catch(importer_helper(Space, File), _, fail).
-importer_helper(Space, File) :- atom_string(File, SFile),
-                                working_dir(Base),
-                                ( file_name_extension(ModPath, 'py', SFile)
-                                  -> absolute_file_name(SFile, Path, [relative_to(Base)]),
-                                     file_directory_name(Path, Dir),
-                                     file_base_name(ModPath, ModuleName),
-                                     py_call(sys:path:append(Dir), _),
-                                     py_call(builtins:'__import__'(ModuleName), _)
-                                   ; ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
-                                     ensure_metta_ext(Path, PathWithExt),
-                                     exists_file(PathWithExt), !,
-                                     load_metta_file(PathWithExt, _, Space) ).
+:- dynamic imported_file/1.
+
+clear_imported_files :-
+    retractall(imported_file(_)).
+
+resolve_import_path(Base, File, AbsPath) :-
+    absolute_file_name(File, AbsPath, [relative_to(Base), access(read), file_errors(fail)]),
+    !.
+resolve_import_path(_, File, AbsPath) :-
+    absolute_file_name(File, AbsPath, [access(read), file_errors(fail)]).
+
+absolute_import_path(Base, File, AbsPath, python) :-
+    file_name_extension(_, py, File),
+    !,
+    resolve_import_path(Base, File, AbsPath).
+absolute_import_path(Base, File, AbsPath, metta) :-
+    ensure_metta_ext(File, FileWithExt),
+    resolve_import_path(Base, FileWithExt, AbsPath).
+
+'import!'(Space, File, true) :-
+    importer_helper(Space, File).
+importer_helper(Space, File) :-
+    atom_string(File, SFile),
+    working_dir(Base),
+    absolute_import_path(Base, SFile, AbsPath, ImportType),
+    ( imported_file(AbsPath)
+      -> true
+       ; ( ImportType = python
+           -> file_directory_name(AbsPath, Dir),
+              file_base_name(AbsPath, BaseName),
+              file_name_extension(ModuleName, _, BaseName),
+              py_call(sys:path:append(Dir), _),
+              py_call(builtins:'__import__'(ModuleName), _)
+            ; load_metta_file(AbsPath, _, Space)
+          ),
+         assertz(imported_file(AbsPath)) ).
 
 :- dynamic translator_rule/1.
 'add-translator-rule!'(HV, true) :- ( translator_rule(HV)

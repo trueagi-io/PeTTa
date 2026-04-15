@@ -27,3 +27,14 @@ def test_var_out(petta_instance):
     assert (
         var == '$b' or (var.startswith('$_') and var[2:].isdigit())
     ), f"Unexpected variable name '{var}' in result '{result}'"
+
+def test_duplicate_import_is_ignored(petta_instance, tmp_path):
+    imported_file = tmp_path / "imported_lib.metta"
+    root_file = tmp_path / "root.metta"
+
+    imported_file.write_text("")
+    root_file.write_text("!(import! &self imported_lib)\n!(import! &self imported_lib)\n")
+
+    results = petta_instance.load_metta_file(str(root_file))
+
+    assert isinstance(results, list)
