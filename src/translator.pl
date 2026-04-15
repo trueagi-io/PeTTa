@@ -24,10 +24,10 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
                                                translate_expr(BodyExpr, GoalsBody, ExpOut),
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
-                                                -> current_predicate(Base/Arity), length(Bound, N), M is (Arity - N) - 1,
-                                                   length(ExtraArgs, M), append(Bound, ExtraArgs, CallInArgs),
-                                                   resolve_runtime_call(Base, CallInArgs, Out, Goal),
-                                                   append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs)
+                                               -> current_predicate(Base/Arity), length(Bound, N), M is (Arity - N) - 1,
+                                                  length(ExtraArgs, M), append(Bound, ExtraArgs, CallInArgs),
+                                                  resolve_runtime_call(Base, CallInArgs, Out, Goal),
+                                                  append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs)
                                                ; FinalGoals= GoalsBody , HeadArgs = Args1, Out = ExpOut ),
                                                append(HeadArgs, [Out], FinalArgs),
                                                Head =.. [F|FinalArgs],
@@ -60,10 +60,10 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                          -> % --- Case 1: callable predicate ---
                             length(Args, N),
                             Arity is N + 1,
-                             ( current_predicate(F/Arity) , \+ (current_op(_, _, F), Arity =< 2)
-                               -> resolve_runtime_call(F, Args, Out, Goal),
-                                  catch(call(Goal), _, fail)
-                                ; Out = partial(F,Args) )
+                            ( current_predicate(F/Arity) , \+ (current_op(_, _, F), Arity =< 2)
+                              -> resolve_runtime_call(F, Args, Out, Goal),
+                                 catch(call(Goal), _, fail)
+                               ; Out = partial(F,Args) )
                           ; % --- Case 2: partial closure ---
                             compound(F), F = partial(Base, Bound) -> append(Bound, Args, NewArgs),
                                                                      reduce([Base|NewArgs], Out)
@@ -309,7 +309,7 @@ translate_expr([H0|T0], Goals, Out) :-
         ; translate_args(T, GsT, AVs),
           append(GsH, GsT, Inner),
           %Known function => direct call:
-          ( is_list(AVs),
+          ( is_list(AVs), 
             ( atom(HV), fun(HV), Fun = HV, AllAVs = AVs, IsPartial = false
             ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
             ) % Check for type definition [:,HV,TypeChain]

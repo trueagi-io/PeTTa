@@ -36,16 +36,13 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                          metta_on_function_changed(F),
                                          invalidate_specializations(F),
                                          ( \+ ( current_predicate(F/A), functor(H2, F, A), clause(H2, _, _) )
-                                           -> retractall(fun(F)),
-                                              metta_on_function_removed(F)
-                                           ; true ),
+                                           -> retractall(fun(F)), metta_on_function_removed(F) ; true ),
                                          ( Refs = [] -> Removed = false ; Removed = true ).
 
 %Remove all same atoms:
 'remove-atom'(Space, Term, true) :- remove_sexp(Space, Term).
 
 :- dynamic translated_from/2.
-
 %Match for conjunctive pattern
 match(_, LComma, OutPattern, Result) :- LComma == [','], !,
                                         Result = OutPattern.
