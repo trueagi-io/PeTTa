@@ -14,11 +14,11 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                  Arity is N + 1,
                                  assertz(arity(FAtom,Arity)),
                                  once(translate_clause(Term, Clause)),
-                                  assertz(Clause, Ref),
-                                  assertz(translated_from(Ref, Term)),
+                                 assertz(Clause, Ref),
+                                 assertz(translated_from(Ref, Term)),
                                  metta_on_function_changed(FAtom),
-                                  invalidate_specializations(FAtom),
-                                  maybe_print_compiled_clause("added function", Term, Clause).
+                                 invalidate_specializations(FAtom),
+                                 maybe_print_compiled_clause("added function", Term, Clause).
 
 %Add an atom to the space:
 'add-atom'(Space, Term, true) :- add_sexp(Space, Term).
@@ -31,21 +31,18 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                              -> ( Rest == [] -> nb_delete(F)
                                                               ; nb_setval(F, Rest) ) ; true ),
                                          findall(Ref, translated_from(Ref, Term), Refs),
-                                          forall(member(Ref, Refs), erase(Ref)),
-                                          retractall(translated_from(_, Term)),
+                                         forall(member(Ref, Refs), erase(Ref)),
+                                         retractall(translated_from(_, Term)),
                                          metta_on_function_changed(F),
-                                          invalidate_specializations(F),
+                                         invalidate_specializations(F),
                                          ( \+ ( current_predicate(F/A), functor(H2, F, A), clause(H2, _, _) )
-                                           -> retractall(fun(F)),
-                                              metta_on_function_removed(F)
-                                           ; true ),
+                                           -> retractall(fun(F)), metta_on_function_removed(F) ; true ),
                                          ( Refs = [] -> Removed = false ; Removed = true ).
 
 %Remove all same atoms:
 'remove-atom'(Space, Term, true) :- remove_sexp(Space, Term).
 
 :- dynamic translated_from/2.
-
 %Match for conjunctive pattern
 match(_, LComma, OutPattern, Result) :- LComma == [','], !,
                                         Result = OutPattern.
