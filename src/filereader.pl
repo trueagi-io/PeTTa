@@ -34,9 +34,11 @@ process_form(_, parsed(runnable, FormStr, Term), Result) :- translate_expr([coll
                                                                                      format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ),
                                                             call_goals(Goals).
 process_form(Space, parsed(function, FormStr, Term), []) :- add_sexp(Space, Term),
+                                                            Term = [=, [F|_], _],
                                                             translate_clause(Term, Clause),
                                                             assertz(Clause, Ref),
                                                             assertz(translated_from(Ref, Term)),
+                                                            metta_on_function_changed(F),
                                                             ( silent(true) -> true ; format("\e[33m--> metta function -->~n\e[36m~w~n\e[33m--> prolog clause -->~n\e[32m", [FormStr]),
                                                                                      clause(Head, Body, Ref),
                                                                                      ( Body == true -> Show = Head; Show = (Head :- Body) ),

@@ -25,7 +25,8 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                translate_expr(BodyExpr, GoalsBody, ExpOut),
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
                                                -> current_predicate(Base/Arity), length(Bound, N), M is (Arity - N) - 1,
-                                                  length(ExtraArgs, M), append([Bound,ExtraArgs,[Out]],CallArgs), Goal =.. [Base|CallArgs],
+                                                  length(ExtraArgs, M), append(Bound, ExtraArgs, CallInArgs),
+                                                  resolve_runtime_call(Base, CallInArgs, Out, Goal),
                                                   append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs)
                                                ; FinalGoals= GoalsBody , HeadArgs = Args1, Out = ExpOut ),
                                                append(HeadArgs, [Out], FinalArgs),
@@ -46,15 +47,22 @@ goals_list_to_conj([], true)      :- !.
 goals_list_to_conj([G], G)        :- !.
 goals_list_to_conj([G|Gs], (G,R)) :- goals_list_to_conj(Gs, R).
 
+resolve_runtime_call(Fun, Args, Out, Goal) :-
+    ( current_predicate(metta_try_dispatch_call/4),
+      metta_try_dispatch_call(Fun, Args, Out, Goal)
+    -> true
+    ; append(Args, [Out], DirectArgs),
+      Goal =.. [Fun|DirectArgs]
+    ).
+
 % Runtime dispatcher: call F if it's a registered fun/1, else keep as list:
 reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                          -> % --- Case 1: callable predicate ---
                             length(Args, N),
                             Arity is N + 1,
                             ( current_predicate(F/Arity) , \+ (current_op(_, _, F), Arity =< 2)
-                              -> append(Args,[Out],CallArgs),
-                                 Goal =.. [F|CallArgs],
-                                 catch(call(Goal),_,fail)
+                              -> resolve_runtime_call(F, Args, Out, Goal),
+                                 catch(call(Goal), _, fail)
                                ; Out = partial(F,Args) )
                           ; % --- Case 2: partial closure ---
                             compound(F), F = partial(Base, Bound) -> append(Bound, Args, NewArgs),
@@ -329,8 +337,7 @@ build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                                -> append(Inner, [Goal|Extra], Goals)
                                                                 ; ( ( current_predicate(Fun/Arity) ; catch(arity(Fun, Arity), _, fail) ),
                                                                      \+ ( current_op(_, _, Fun), Arity =< 2 ) )
-                                                                  -> append(AVs, [Out], Args),
-                                                                     Goal =.. [Fun|Args],
+                                                                  -> resolve_runtime_call(Fun, AVs, Out, Goal),
                                                                      append(Inner, [Goal|Extra], Goals)
                                                                    ; Out = partial(Fun, AVs),
                                                                      append(Inner, Extra, Goals) ).
