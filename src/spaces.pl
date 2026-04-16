@@ -42,7 +42,6 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
 %Remove all same atoms:
 'remove-atom'(Space, Term, true) :- remove_sexp(Space, Term).
 
-:- dynamic translated_from/2.
 %Match for conjunctive pattern
 match(_, LComma, OutPattern, Result) :- LComma == [','], !,
                                         Result = OutPattern.
