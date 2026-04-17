@@ -62,8 +62,13 @@ match(Space, [Rel|PatArgs], OutPattern, Result) :- Term =.. [Space, Rel | PatArg
                                                    \+ cyclic_term(OutPattern),
                                                    Result = OutPattern.
 
+%Count matches without materializing results  
+'match-count'(Space, Pattern, Count) :-  
+    aggregate_all(count, match(Space, Pattern, _, _), Count).
+
 %Get all atoms in space, irregard of arity:
 'get-atoms'(Space, Pattern) :- current_predicate(Space/Arity),
                                functor(Head, Space, Arity),
                                clause(Head, true),
                                Head =.. [Space | Pattern].
+
