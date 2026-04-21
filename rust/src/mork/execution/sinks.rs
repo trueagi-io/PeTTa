@@ -1,7 +1,6 @@
 use core::f64;
 use std::io::{BufRead, Read, Write};
 use std::marker::PhantomData;
-use std::{mem, process, ptr};
 use std::any::Any;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -9,7 +8,7 @@ use std::fmt::Display;
 use std::fs::File;
 use std::hint::unreachable_unchecked;
 use std::mem::MaybeUninit;
-use std::ops::{AddAssign, Coroutine, CoroutineState, MulAssign};
+use std::ops::{AddAssign, MulAssign};
 use std::pin::Pin;
 use std::ptr::{addr_of, null, null_mut, slice_from_raw_parts, slice_from_raw_parts_mut};
 use std::sync::LazyLock;
@@ -17,17 +16,15 @@ use std::task::Poll;
 use std::time::Instant;
 use futures::StreamExt;
 use crate::pathmap::ring::{AlgebraicStatus, Lattice};
-use super::super::expr::{byte_item, Expr, ExprZipper, ExtractFailure, item_byte, parse, serialize, Tag, traverseh, ExprEnv, unify, UnificationFailure, apply, destruct};
+use super::super::expr::{byte_item, Expr, ExprZipper, item_byte, serialize, Tag, ExprEnv, unify, UnificationFailure, apply, destruct};
 use super::super::frontend::bytestring_parser::{Parser, ParserError, Context};
 use super::super::interning::{WritePermit, SharedMapping, SharedMappingHandle};
 use crate::pathmap::utils::{BitMask, ByteMask};
 use crate::pathmap::zipper::*;
 use super::super::frontend::json_parser::Transcriber;
-use tracing::{trace, debug, info, warn, error};
+use tracing::{debug, error, trace, warn};
 use crate::pathmap::morphisms::Catamorphism;
 use crate::pathmap::PathMap;
-// use eval::EvalScope; // requires eval crate
-// use eval_ffi::{ExprSink, ExprSource}; // requires eval_ffi crate
 use super::super::expr::macros::SerializableExpr;
 use super::super::expr;
 use super::pure;
