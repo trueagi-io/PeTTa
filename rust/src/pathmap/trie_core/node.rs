@@ -2636,7 +2636,7 @@ mod slim_node_ptr {
     use super::super::super::alloc::Allocator;
     use super::{TaggedNodeRef, TaggedNodeRefMut, EMPTY_NODE_TAG};
 
-    #[cfg(all(not(target_pointer_width="64")))]
+    #[cfg(not(target_pointer_width="64"))]
     compile_error!("slim_ptrs is only compatible with 64-bit architectures");
 
     #[repr(align(8))]

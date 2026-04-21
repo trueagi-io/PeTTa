@@ -67,17 +67,11 @@ libz-ng-sys = { version = "1.1", optional = true }
 
 # Optional features
 rayon = { version = "1.10", optional = true }
+rustyline = { version = "14", optional = true }
 
 [features]
-default = ["swipl"]
-swipl = []
-pure-rust = ["dep:nom"]
-pathmap-internal-tests = []
-serialization = ["dep:libz-ng-sys"]
-# MORK zipper-based execution backend (requires nightly)
-# Gates all MORK-specific dependencies
+default = ["mork", "repl"]
 mork = [
-    "swipl",
     "serialization",
     "dep:typed-arena",
     "dep:regex",
@@ -89,6 +83,11 @@ mork = [
     "dep:hex",
     "dep:subprocess",
 ]
+repl = ["dep:rustyline"]
+swipl = []
+pure-rust = ["dep:nom"]
+pathmap-internal-tests = []
+serialization = ["dep:libz-ng-sys"]
 parallel = ["dep:rayon"]
 profiling = []
 
@@ -121,4 +120,5 @@ num-traits = { version = "0.2" }
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(feature, values("arena_compact", "zipper_tracking", "random", "counters", "viz", "old_cursor", "bridge_nodes", "slim_dispatch", "slim_ptrs", "all_dense_nodes", "graft_root_vals", "nightly", "zipper_alg", "wasm", "z3", "grounding", "neo4j", "interning", "no_search", "specialize_io", "periodic_merkleize", "debug_api", "gxhash", "serialization"))',
+    'cfg(gxhash)',
 ] }

@@ -424,7 +424,7 @@ static ENGINE_LINKER: LazyLock<(wasmtime::Engine, wasmtime::Linker<()>)> = LazyL
         config.cranelift_flag_enable("has_popcnt");
         config.cranelift_flag_enable("has_fma");
     }
-    #[cfg(all(target_feature = "avx512"))]
+    #[cfg(target_feature = "avx512")]
     unsafe {
         config.cranelift_flag_enable("has_avx512bitalg");
         config.cranelift_flag_enable("has_avx512dq");

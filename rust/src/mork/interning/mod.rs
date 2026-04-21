@@ -23,12 +23,10 @@ use core::{marker::PhantomData, mem::MaybeUninit, sync::atomic::{self, AtomicPtr
 use crate::pathmap::PathMap;
 
 mod handle;
-use handle::*;
 pub use handle::SharedMappingHandle;
 pub use handle::WritePermit;
 
 mod symbol_backing;
-use symbol_backing::*;
 pub(crate) use symbol_backing::{Slab, ThinBytes};
 
 mod serialization;
@@ -196,7 +194,7 @@ pub(crate) fn bounded_pearson_hash<const SELECTION : usize>(bytes : &[u8]) -> u8
   core::debug_assert_ne!(SELECTION,0);
 
   // it's important that each value is unique;
-  #[cfg_attr(rustfmt, rustfmt::skip)]
+  #[rustfmt::skip]
   const PEARSON_TABLE : [u8;256] = [
      65,  243,  145,   88,  141,   27,   18,   96,  233,  173,  239,  229,   48,   29,   67,  214,
      39,  230,   19,  237,  128,   49,   95,  220,  216,  198,  249,   79,  204,  171,  200,  184,

@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-nightly-orange.svg)](https://www.rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-352%2F352%20passing-brightgreen.svg)](test.sh)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](test.sh)
 
 PeTTa is a high-performance, embeddable runtime for the [MeTTa](https://wiki.opencog.org/w/File:MeTTa_Specification.pdf) language, designed for the TrueAGI / OpenCog Hyperon ecosystem. It combines a clean Rust API with a proven Prolog-based parser/translator/WAM execution engine, and optionally integrates [MORK](https://github.com/trueagi-io/MORK) — a zipper-based multi-threaded virtual machine — as a native Rust execution backend.
 

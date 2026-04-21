@@ -17,6 +17,8 @@
 //!   If 1: [4 bytes: error msg len][N bytes: UTF-8 error]
 //! ```
 
+#![cfg_attr(all(test, feature = "mork"), allow(implicit_autoref))]
+
 // MORK requires nightly Rust for coroutine/zipper features
 #![cfg_attr(feature = "mork", allow(internal_features))]
 #![cfg_attr(feature = "mork", feature(core_intrinsics))]
@@ -56,11 +58,19 @@ pub mod pathmap;
 /// Shared fallback hasher for environments where gxhash is unavailable.
 mod hash_fallback;
 
+#[cfg(feature = "mork")]
+#[doc(hidden)]
+pub use mork::expr::compute_length;
+
+#[cfg(feature = "mork")]
+#[doc(hidden)]
+pub use mork::expr::parse as metta_parse_macro;
+
 /// Engine module - contains PeTTaEngine and all supporting types.
 mod engine;
 
 // Re-export types that were previously top-level for backward compatibility.
-pub use engine::{EngineConfig, MettaValue, MettaResult, PeTTaError, SwiplErrorKind, PeTTaEngine, swipl_available, MIN_SWIPL_VERSION};
+pub use engine::{Backend, BackendErrorKind, EngineConfig, MettaValue, MettaResult, PeTTaError, SwiplErrorKind, PeTTaEngine, swipl_available, MIN_SWIPL_VERSION};
 
 // ---------------------------------------------------------------------------
 // Tests

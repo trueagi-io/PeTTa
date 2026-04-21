@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
-use std::convert::Infallible;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hasher;
 use std::io::Write;
 use std::ops::{Coroutine, CoroutineState};
 use std::ptr::slice_from_raw_parts;
-use super::{byte_item, item_byte, traverseh, Expr, ExprEnv, ExprVar, ExprZipper, Tag, APPLY_DEPTH, PRINT_DEBUG};
+use super::{byte_item, item_byte, Expr, ExprEnv, ExprVar, Tag, APPLY_DEPTH, PRINT_DEBUG};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum SourceItem<'a> {
@@ -266,7 +265,7 @@ pub fn apply_e<'o, OS : Coroutine<SourceItem<'o>, Yield=(), Return=std::io::Resu
 }
 
 mod tests {
-    use std::ops::*;
+    use std::ops::{Coroutine, CoroutineState};
     use super::{item_sink, Expr, Tag, item_source, SourceItem};
     use crate::parse;
 

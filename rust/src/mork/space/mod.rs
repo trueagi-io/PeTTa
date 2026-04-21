@@ -1,6 +1,5 @@
 use std::io::{BufRead, Read, Write};
 use std::{mem, process, ptr};
-use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::collections::hash_map::Entry;
 use std::fs::File;
@@ -13,18 +12,16 @@ use std::str::Utf8Error;
 use std::task::Poll;
 use std::time::Instant;
 use futures::StreamExt;
-use crate::pathmap::ring::{AlgebraicStatus, Lattice};
-use super::expr::{byte_item, Expr, ExprZipper, ExtractFailure, item_byte, parse, serialize, Tag, traverseh, ExprEnv, unify, UnificationFailure, apply, destruct, OwnedSourceItem};
+use crate::pathmap::ring::Lattice;
+use super::expr::{byte_item, Expr, ExprZipper, ExtractFailure, item_byte, serialize, Tag, ExprEnv, apply, OwnedSourceItem, unify, UnificationFailure, destruct};
 use super::frontend::bytestring_parser::{Parser, ParserError, Context};
 use super::interning::{WritePermit, SharedMapping, SharedMappingHandle};
 use crate::pathmap::utils::{BitMask, ByteMask};
 use crate::pathmap::zipper::*;
 use crate::pathmap::arena_compact::ArenaCompactTree;
-use crate::pathmap::{zipper, PathMap};
-use super::frontend::json_parser::Transcriber;
-use tracing::{trace, debug, info, warn, error};
+use crate::pathmap::PathMap;
+use tracing::{debug, trace, warn};
 use subprocess::{Popen, PopenConfig, Redirection};
-use subprocess::unix::PopenExt;
 use super::execution::sinks::{WriteResource, WriteResourceRequest};
 use super::execution::sources::{AFactor, Resource, ResourceRequest};
 
@@ -837,8 +834,7 @@ impl Space {
     pub fn add_all_sexpr(&mut self, r: &[u8]) -> Result<usize, String> { self.load_all_sexpr_impl(r, true) }
     pub fn remove_all_sexpr(&mut self, r: &[u8]) -> Result<usize, String> { self.load_all_sexpr_impl(r, false) }
     pub fn load_all_sexpr_impl(&mut self, r: &[u8], add: bool) -> Result<usize, String> {
-        let mut stack = Vec::with_capacity(1 << 32);
-        unsafe { stack.set_len(1 << 32); }
+        let mut stack = vec![0u8; 1 << 32];
         let mut it = Context::new(r);
         let mut i = 0;
         let mut parser = ParDataParser::new(&self.sm);
@@ -864,10 +860,8 @@ impl Space {
     pub fn load_sexpr_impl(&mut self, r: &[u8], pattern: Expr, template: Expr, add: bool) -> Result<usize, String> {
         let constant_template_prefix = unsafe { template.prefix().unwrap_or_else(|_| template.span()).as_ref().unwrap() };
         let mut wz = self.btm.write_zipper_at_path(constant_template_prefix);
-        let mut buffer: Vec<u8> = Vec::with_capacity(1 << 32);
-        unsafe { buffer.set_len(1 << 32); }
-        let mut stack = Vec::with_capacity(1 << 32);
-        unsafe { stack.set_len(1 << 32); }
+        let mut buffer: Vec<u8> = vec![0u8; 1 << 32];
+        let mut stack: Vec<u8> = vec![0u8; 1 << 32];
         let mut it = Context::new(r);
         let mut i = 0;
         let mut parser = ParDataParser::new(&self.sm);
@@ -922,8 +916,7 @@ impl Space {
     pub fn dump_sexpr<W : Write>(&self, pattern: Expr, template: Expr, w: &mut W) -> usize {
         let constant_template_prefix = unsafe { template.prefix().unwrap_or_else(|_| template.span()).as_ref().unwrap() };
 
-        let mut buffer = Vec::with_capacity(1 << 32);
-        unsafe { buffer.set_len(1 << 32); }
+        let mut buffer = vec![0u8; 1 << 32];
         let mut pat = vec![item_byte(Tag::Arity(2)), item_byte(Tag::SymbolSize(1)), b','];
         pat.extend_from_slice(unsafe { pattern.span().as_ref().unwrap() });
 
@@ -1583,8 +1576,7 @@ impl Space {
 
     pub fn transform_multi_multi_io(&mut self, pat_expr: Expr, tpl_expr: Expr, add: Expr, no_source: bool, no_sink: bool) -> (usize, bool) {
         use super::execution::sinks::*;
-        let mut buffer = Vec::with_capacity(1 << 32);
-        unsafe { buffer.set_len(1 << 32); }
+        let mut buffer = vec![0u8; 1 << 32];
         let mut tpl_args = Vec::with_capacity(64);
         ExprEnv::new(0, tpl_expr).args(&mut tpl_args);
         let mut templates: Vec<_> = tpl_args[1..].iter().map(|ee| ee.subsexpr()).collect();

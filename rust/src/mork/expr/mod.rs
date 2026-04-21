@@ -1,19 +1,25 @@
 
+#![cfg_attr(test, allow(implicit_autoref))]
+
 #[allow(unused_imports)]
 use std::{
-    fmt::{format, Debug, Formatter, Write}, 
-    mem, 
-    ops::{self, ControlFlow}, 
-    ptr::{self, null, null_mut, slice_from_raw_parts, slice_from_raw_parts_mut}
+    fmt::{format, Debug, Formatter, Write},
+    hash::Hasher,
+    mem,
+    ops::{self, ControlFlow},
+    ptr::{self, null, null_mut, slice_from_raw_parts, slice_from_raw_parts_mut},
 };
 use std::collections::{BTreeMap, HashMap};
-use std::collections::hash_map::Entry;
-use std::hash::{Hash, Hasher};
-use std::ops::{Coroutine, CoroutineState};
-use std::pin::pin;
 use smallvec::SmallVec;
 
 pub mod macros;
+
+pub mod expr_tests {
+    #[cfg(test)]
+    pub use crate::parse;
+    #[cfg(test)]
+    pub use crate::compute_length;
+}
 
 // Re-export macros at module level for convenience (they are defined with #[macro_export] below)
 pub use crate::traverse;
@@ -23,19 +29,11 @@ pub use crate::destruct;
 pub use crate::construct;
 pub use crate::construct_impl;
 
-#[cfg(gxhash)]
-use gxhash;
-
-#[cfg(feature="mork")]
-#[path="lib_nightly.rs"]
+#[cfg(feature = "mork")]
+#[path = "lib_nightly.rs"]
 mod lib_nightly;
-#[cfg(feature="mork")]
+#[cfg(feature = "mork")]
 pub use lib_nightly::*;
-
-#[cfg(not(gxhash))]
-mod gxhash {
-    pub use crate::hash_fallback::*;
-}
 
 
 #[derive(Copy, Clone, Debug)]
@@ -1389,8 +1387,8 @@ const fn digit_value(b: u8) -> u8 {
 #[macro_export]
 macro_rules! parse {
     ($s:literal) => {{
-        const N: usize = super::compute_length($s);
-        const ARR: [u8; N] = super::parse::<N>($s);
+        const N: usize = $crate::mork::expr::compute_length($s);
+        const ARR: [u8; N] = $crate::mork::expr::parse::<N>($s);
         ARR
     }};
 }
@@ -1850,6 +1848,7 @@ pub fn apply(n: u8, mut original_intros: u8, mut new_intros: u8, ez: &mut ExprZi
 
 #[inline(never)]
 pub fn unify(mut stack: Vec<(ExprEnv, ExprEnv)>) -> Result<BTreeMap<ExprVar, ExprEnv>, UnificationFailure> {
+    use crate::pathmap::gxhash::HashSetExt;
     let mut bindings: BTreeMap<ExprVar, ExprEnv> = BTreeMap::new();
     let mut iterations = 0;
     let mut encountered: gxhash::HashSet<(ExprEnv, ExprEnv)> = gxhash::HashSet::new();
@@ -2195,6 +2194,7 @@ fn anti_unify_apply(
 }
 
 mod tests {
+    use std::hash::{Hasher, Hash};
     use crate::pathmap::gxhash::GxHasher;
     use super::*;
     #[test]
@@ -2503,6 +2503,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(implicit_autoref)]
     fn test_anti_unify() {
         {
             let mut xv = parse!(r"[2] a a");
@@ -2516,6 +2517,7 @@ mod tests {
             let to = Expr { ptr: tov.as_mut_ptr() };
 
             x.anti_unify(y, &mut ExprZipper::new(to));
+            let _ = x.anti_unify(y, &mut ExprZipper::new(to));
             println!("{:?}", to);
             assert_eq!(format!("{:?}", to), format!("{:?}", r));
         }
@@ -2531,6 +2533,7 @@ mod tests {
             let to = Expr { ptr: tov.as_mut_ptr() };
 
             x.anti_unify(y, &mut ExprZipper::new(to));
+            let _ = x.anti_unify(y, &mut ExprZipper::new(to));
             println!("{:?}", to);
             assert_eq!(format!("{:?}", to), format!("{:?}", r));
         }
@@ -2546,6 +2549,7 @@ mod tests {
             let to = Expr { ptr: tov.as_mut_ptr() };
 
             x.anti_unify(y, &mut ExprZipper::new(to));
+            let _ = x.anti_unify(y, &mut ExprZipper::new(to));
             println!("{:?}", to);
             assert_eq!(format!("{:?}", to), format!("{:?}", r));
         }
@@ -2561,6 +2565,7 @@ mod tests {
             let to = Expr { ptr: tov.as_mut_ptr() };
 
             x.anti_unify(y, &mut ExprZipper::new(to));
+            let _ = x.anti_unify(y, &mut ExprZipper::new(to));
             println!("{:?}", to);
             assert_eq!(format!("{:?}", to), format!("{:?}", r));
         }
@@ -2576,23 +2581,27 @@ mod tests {
             let to = Expr { ptr: tov.as_mut_ptr() };
 
             x.anti_unify(y, &mut ExprZipper::new(to));
+            let _ = x.anti_unify(y, &mut ExprZipper::new(to));
             println!("{:?}", to);
             assert_eq!(format!("{:?}", to), format!("{:?}", r));
         }
         {
-            let mut xv = parse!(r"[2] $ $");
-            let x = Expr { ptr: xv.as_mut_ptr() };
-            let mut yv = parse!(r"[2] $ _1");
-            let y = Expr { ptr: yv.as_mut_ptr() };
-            let mut rv = parse!(r"[2] $ $");
-            let r = Expr { ptr: rv.as_mut_ptr() };
+            #[allow(implicit_autoref)]
+            {
+                let mut xv = parse!(r"[2] $ $");
+                let x = Expr { ptr: xv.as_mut_ptr() };
+                let mut yv = parse!(r"[2] $ _1");
+                let y = Expr { ptr: yv.as_mut_ptr() };
+                let mut rv = parse!(r"[2] $ $");
+                let r = Expr { ptr: rv.as_mut_ptr() };
 
-            let mut tov = vec![0u8; 512];
-            let to = Expr { ptr: tov.as_mut_ptr() };
+                let mut tov = vec![0u8; 512];
+                let to = Expr { ptr: tov.as_mut_ptr() };
 
-            x.anti_unify(y, &mut ExprZipper::new(to));
-            println!("{:?}", to);
-            assert_eq!(format!("{:?}", to), format!("{:?}", r));
+                x.anti_unify(y, &mut ExprZipper::new(to));
+                println!("{:?}", to);
+                assert_eq!(format!("{:?}", to), format!("{:?}", r));
+            }
         }
     }
 

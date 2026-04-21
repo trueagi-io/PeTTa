@@ -21,10 +21,10 @@ pub fn serialize_fork<V : TrieValue, RZ : Catamorphism<V>, F: FnMut(usize, &[u8]
             let w0 = *w.get();
             // println!("child ptrs {:?}, w0 {}, targetlen {}", ws, w0, target.len());
             let mut l = 0;
-            target.write(jump.to_le_bytes().as_slice())?; l += 8;
-            target.write(&path[path.len()-jump..])?; l += jump;
-            target.write(slice_from_raw_parts(bm.0.as_ptr() as *const u8, 32).as_ref().unwrap())?; l += 32;
-            target.write(slice_from_raw_parts(ws.as_ptr() as *const u8, 8*ws.len()).as_ref().unwrap())?; l += 8*ws.len();
+            target.write_all(jump.to_le_bytes().as_slice())?; l += 8;
+            target.write_all(&path[path.len()-jump..])?; l += jump;
+            target.write_all(slice_from_raw_parts(bm.0.as_ptr() as *const u8, 32).as_ref().unwrap())?; l += 32;
+            target.write_all(slice_from_raw_parts(ws.as_ptr() as *const u8, 8*ws.len()).as_ref().unwrap())?; l += 8*ws.len();
             *w.get() = w0 + l;
 
             Ok(w0)

@@ -177,9 +177,9 @@ pub fn write_trie<C :Catamorphism<V> ,V: TrieValue>(
                                   let Ctx { count, entry: values, value_offsets, data_file, algf_scratch, .. } = ctx;
 
                                   let cur_idx = *count;
-                                  data_file.write(&[Tag::Branches as u8, b' '])?;
+                                  data_file.write_all(&[Tag::Branches as u8, b' '])?;
                                   data_file.write_all(algf_scratch.buffer[0..algf_scratch.len].as_flattened())?;
-                                  data_file.write(&[b'\n'])?;
+                                  data_file.write_all(&[b'\n'])?;
 
                                   let new_pos = data_file.stream_position()?;
 
@@ -346,13 +346,13 @@ fn serialize_with_rollback (
 
 
   hasher.write_u8(tag as u8);
-  context.data_file.write(&[tag as u8, b' '])?;
+  context.data_file.write_all(&[tag as u8, b' '])?;
   for b in i {
     hasher.write_u8(b);
-    context.data_file.write( &byte_to_hex_pair_be(b) )?;
+    context.data_file.write_all(&byte_to_hex_pair_be(b))?;
   }
   let hash = hasher.finish_u128();
-  context.data_file.write(&[b'\n'])?;
+  context.data_file.write_all(&[b'\n'])?;
 
   rollback_or_advance(context, hash, rollback_pos)
 }
@@ -383,10 +383,10 @@ fn write_node(
                        let c_offset = cont_idx.to_be_bytes();
                        let _type_check : [Offset; 2] = [v_offset, c_offset];
 
-                       context.data_file.write(&[tag as u8, b' '])?;
-                       context.data_file.write(&offset_to_hex_be( v_offset ))?;
-                       context.data_file.write(&offset_to_hex_be( c_offset ))?;
-                       context.data_file.write(&[b'\n'])?;
+context.data_file.write_all(&[tag as u8, b' '])?;
+                        context.data_file.write_all(&offset_to_hex_be( v_offset ))?;
+                        context.data_file.write_all(&offset_to_hex_be( c_offset ))?;
+                        context.data_file.write_all(&[b'\n'])?;
 
                        context.entry.insert(hash, cur_idx);
                        context.count += INCR;
@@ -567,7 +567,7 @@ fn offset_and_childmask_zero_compressor(
   // get past header
   while let Some(byte) = bytes.next() {
     let x = byte?;
-    out.write(&[x])?;
+    out.write_all(&[x])?;
     if x == b'\n' {break}
   }
   offsets.push(out.stream_position()?);
@@ -578,17 +578,17 @@ fn offset_and_childmask_zero_compressor(
     let mut n = *z;
     *z = 0;
     match n {
-      0..=3 => { 
-        file.write(&dummy[0..n])?; 
+      0..=3 => {
+        file.write_all(&dummy[0..n])?;
       }
       4..=64 => { 
                   if !boundary {
                     n -= 1;
                   }
                   let hex = byte_to_hex_pair_be((n) as u8);
-                  file.write(&[b'/', hex[0], hex[1],])?;
+                  file.write_all(&[b'/', hex[0], hex[1],])?;
                   if !boundary {
-                    file.write(&[b'0'])?;
+                    file.write_all(&[b'0'])?;
                   }
                 },
       _       => core::unreachable!(),
@@ -607,9 +607,9 @@ fn offset_and_childmask_zero_compressor(
     core::debug_assert!(ascii.is_ascii_alphanumeric() || ascii.is_ascii_whitespace());
 
     match ascii {
-      b'v' 
+      b'v'
     | b'p'  => { skip = true;
-                 out.write(&[ascii])?;
+                 out.write_all(&[ascii])?;
                },
       b'\n' => {
                  skip = false;
@@ -618,11 +618,11 @@ fn offset_and_childmask_zero_compressor(
                  }
                  if hit_x {
                    // only happens once for "nil"
-                   out.write(b"00")?;
+                   out.write_all(b"00")?;
                  }
                  hit_x = false;
                  byte_boundary = false;
-                 out.write(b"\n")?;
+                 out.write_all(b"\n")?;
                  offsets.push(out.stream_position()?);
                }
       b'0'  => {
@@ -632,22 +632,22 @@ fn offset_and_childmask_zero_compressor(
                  }
                  if skip {
                    core::debug_assert!(*zeroes == 0);
-                   out.write(b"0")?;
+                   out.write_all(b"0")?;
                  } else if !byte_boundary && *zeroes == 0 {
-                   out.write(b"0")?;
+                   out.write_all(b"0")?;
                    hit_x = false;
                  } else {
                    *zeroes += 1;
                  }
 
                }
-      b'x'  => { 
+      b'x'  => {
                  if *zeroes > 0 {
                    core::debug_assert!(!hit_x);
                    write_zeroes(zeroes, &mut out, byte_boundary)?;
                  }
                 if hit_x {panic!()}
-                 out.write(b"x")?;
+                 out.write_all(b"x")?;
                  byte_boundary = false;
                  hit_x = true;
                  *zeroes = 0;
@@ -658,9 +658,9 @@ fn offset_and_childmask_zero_compressor(
                    write_zeroes(zeroes, &mut out, byte_boundary)?;
                  }
                  if hit_x && !byte_boundary {
-                   out.write(b"0")?;
+                   out.write_all(b"0")?;
                  }
-                 out.write(&[ascii])?;
+                 out.write_all(&[ascii])?;
                  hit_x = false
                }
     };
@@ -1582,16 +1582,16 @@ pub fn dbg_hex_line_numbers(f : &std::fs::File, path : impl AsRef<std::path::Pat
         out
       };
 
-  out.write(b"|   hex index   |")?;
-  out.write(b" ")?;
+  out.write_all(b"|   hex index   |")?;
+  out.write_all(b" ")?;
 
 
   for b in read_buffer.bytes() {
     let c = b?;
-    out.write(&[c])?;
+    out.write_all(&[c])?;
     if let b'\n' = c {
-      out.write(&leading_offset(line_number))?;
-      out.write(b" ")?;
+      out.write_all(&leading_offset(line_number))?;
+      out.write_all(b" ")?;
       line_number += INCR as u64;
     }
   }

@@ -3,6 +3,25 @@ use std::time::Duration;
 
 use super::version::MIN_SWIPL_VERSION;
 
+/// Backend implementation to use for MeTTa execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Backend {
+    /// MORK - Native Rust zipper-based execution backend (default).
+    #[default]
+    Mork,
+    /// SWI-Prolog - Persistent subprocess backend.
+    Swipl,
+}
+
+impl std::fmt::Display for Backend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Backend::Mork => write!(f, "Mork"),
+            Backend::Swipl => write!(f, "Swipl"),
+        }
+    }
+}
+
 /// Configuration options for the [`PeTTaEngine`](super::PeTTaEngine).
 ///
 /// Uses the builder pattern:
@@ -14,6 +33,8 @@ use super::version::MIN_SWIPL_VERSION;
 /// ```
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
+    /// Backend implementation to use (default: Mork).
+    pub backend: Backend,
     /// Path to the SWI-Prolog binary (defaults to "swipl").
     pub swipl_path: PathBuf,
     /// Source directory containing .pl files (defaults to `<project_root>/src`).
@@ -33,6 +54,7 @@ pub struct EngineConfig {
 impl Default for EngineConfig {
     fn default() -> Self {
         Self {
+            backend: Backend::default(),
             swipl_path: PathBuf::from("swipl"),
             src_dir: None,
             verbose: false,
@@ -87,6 +109,12 @@ impl EngineConfig {
     /// Set the maximum number of automatic restarts on crash.
     pub fn max_restarts(mut self, n: u32) -> Self {
         self.max_restarts = n;
+        self
+    }
+
+    /// Set the backend implementation to use.
+    pub fn backend(mut self, backend: Backend) -> Self {
+        self.backend = backend;
         self
     }
 }

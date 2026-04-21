@@ -1,4 +1,3 @@
-use ::core::convert::TryFrom;
 use std::ptr::slice_from_raw_parts;
 use super::{Expr, Tag, byte_item, item_byte};
 
@@ -14,11 +13,11 @@ use super::{Expr, Tag, byte_item, item_byte};
 /// `destruct!(expression, (pattern...), good_expr, err_ident => bad_expr)`
 ///
 /// Example usage:
-/// ```
-/// // let mut expr = crate::mork::expr::parse!("(eq? (+ 2 2) 4)");
-/// let mut expr = crate::mork::expr::parse!("[3] eq? [3] + 2 2 4");
-/// let expr = crate::mork::expr::Expr { ptr: expr.as_mut_ptr() };
-/// crate::mork::expr::destruct!(
+/// ```ignore
+/// // let mut expr = crate::petta::mork::expr::parse!("(eq? (+ 2 2) 4)");
+/// let mut expr = crate::petta::mork::expr::parse!("[3] eq? [3] + 2 2 4");
+/// let expr = crate::petta::mork::expr::Expr { ptr: expr.as_mut_ptr() };
+/// crate::petta::mork::expr::destruct!(
 ///     expr, ("eq?" ("+" out_1 out_2) out_3),
 ///     eprintln!("{out_1:?}, {out_2:?}, {out_3:?}"),
 ///     err => { panic!("failed: {err:?}") }
@@ -325,10 +324,10 @@ impl SerializableExpr for usize {
 /// Returns `Result<Vec<u8>, String>`, where the error string indicates any issues encountered.
 ///
 /// Example usage:
-/// ```
-/// let buf = crate::mork::expr::construct!( "eq?" ( "+" "2" "2" ) "4" )
+/// ```ignore
+/// let buf = crate::petta::mork::expr::construct!( "eq?" ( "+" "2" "2" ) "4" )
 ///     .expect("construct failed");
-/// let expr = crate::mork::expr::Expr { ptr: buf.as_ptr() as *mut u8 };
+/// let expr = crate::petta::mork::expr::Expr { ptr: buf.as_ptr() as *mut u8 };
 /// ```
 #[macro_export]
 macro_rules! construct {

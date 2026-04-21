@@ -64,55 +64,33 @@ fn add_trait_dependencies(traits: &mut BTreeSet<PolyZipperTrait>) {
     while changed {
         changed = false;
         if traits.contains(&ZipperReadOnlyIteration) {
-            if traits.insert(ZipperReadOnlyValues) {
-                changed = true;
-            }
-            if traits.insert(ZipperIteration) {
-                changed = true;
-            }
+            changed |= traits.insert(ZipperReadOnlyValues);
+            changed |= traits.insert(ZipperIteration);
         }
         if traits.contains(&ZipperReadOnlyConditionalIteration) {
-            if traits.insert(ZipperReadOnlyConditionalValues) {
-                changed = true;
-            }
-            if traits.insert(ZipperIteration) {
-                changed = true;
-            }
+            changed |= traits.insert(ZipperReadOnlyConditionalValues);
+            changed |= traits.insert(ZipperIteration);
         }
-        if traits.contains(&ZipperReadOnlyValues) {
-            if traits.insert(ZipperValues) {
-                changed = true;
-            }
+        if traits.contains(&ZipperReadOnlyValues) && traits.insert(ZipperValues) {
+            changed = true;
         }
-        if traits.contains(&ZipperReadOnlyConditionalValues) {
-            if traits.insert(ZipperValues) {
-                changed = true;
-            }
+        if traits.contains(&ZipperReadOnlyConditionalValues) && traits.insert(ZipperValues) {
+            changed = true;
         }
-        if traits.contains(&ZipperIteration) {
-            if traits.insert(ZipperMoving) {
-                changed = true;
-            }
+        if traits.contains(&ZipperIteration) && traits.insert(ZipperMoving) {
+            changed = true;
         }
-        if traits.contains(&ZipperAbsolutePath) {
-            if traits.insert(ZipperMoving) {
-                changed = true;
-            }
+        if traits.contains(&ZipperAbsolutePath) && traits.insert(ZipperMoving) {
+            changed = true;
         }
-        if traits.contains(&ZipperPathBuffer) {
-            if traits.insert(ZipperMoving) {
-                changed = true;
-            }
+        if traits.contains(&ZipperPathBuffer) && traits.insert(ZipperMoving) {
+            changed = true;
         }
-        if traits.contains(&ZipperMoving) {
-            if traits.insert(Zipper) {
-                changed = true;
-            }
+        if traits.contains(&ZipperMoving) && traits.insert(Zipper) {
+            changed = true;
         }
-        if traits.contains(&ZipperSubtries) {
-            if traits.insert(ZipperValues) {
-                changed = true;
-            }
+        if traits.contains(&ZipperSubtries) && traits.insert(ZipperValues) {
+            changed = true;
         }
     }
 }
