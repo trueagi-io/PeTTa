@@ -7,37 +7,17 @@ prolog_interop_example :- register_fun(prologfunc),
                           listing(mettafunc),
                           mettafunc(30, R),
                           format("mettafunc(30) = ~w~n", [R]).
-main :-
-    current_prolog_flag(argv, Args),
-    profile(main_body(Args)),
-(   current_predicate(profiler:show_profile/0)
-    ->  profiler:show_profile
-    ;   true
-    ),
-    halt.
-main_body(Args) :-
-    ( Args = [] ->
-        prolog_interop_example
-    ; Args = [mork] ->
-        prolog_interop_example,
-        mork_test
-    ; Args = [File|_] ->
-        file_directory_name(File, Dir),
-        assertz(working_dir(Dir)),
-        load_metta_file(File, Results),
-        maplist(swrite, Results, ResultsR),
-        maplist(format("~w~n"), ResultsR)
-    ).
-% main_body :- current_prolog_flag(argv, Args),
-%         ( Args = [] -> prolog_interop_example
-%         ; Args = [mork] -> prolog_interop_example,
-%                            mork_test
-%         ; Args = [File|_] -> file_directory_name(File, Dir),
-%                              assertz(working_dir(Dir)),
-%                              load_metta_file(File,Results),
-%                              maplist(swrite,Results,ResultsR),
-%                              maplist(format("~w~n"), ResultsR)
-%         ),
-%         halt.
+
+main :- current_prolog_flag(argv, Args),
+        ( Args = [] -> prolog_interop_example
+        ; Args = [mork] -> prolog_interop_example,
+                           mork_test
+        ; Args = [File|_] -> file_directory_name(File, Dir),
+                             assertz(working_dir(Dir)),
+                             load_metta_file(File,Results),
+                             maplist(swrite,Results,ResultsR),
+                             maplist(format("~w~n"), ResultsR)
+        ),
+        halt.
 
 :- initialization(main, main).
