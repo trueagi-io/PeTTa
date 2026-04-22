@@ -70,7 +70,7 @@ pub use mork::expr::parse as metta_parse_macro;
 mod engine;
 
 // Re-export types that were previously top-level for backward compatibility.
-pub use engine::{Backend, BackendErrorKind, EngineConfig, MettaValue, MettaResult, PeTTaError, SwiplErrorKind, PeTTaEngine, swipl_available, MIN_SWIPL_VERSION};
+pub use engine::{Backend, BackendErrorKind, EngineConfig, MettaValue, MettaResult, PeTTaError, PeTTaEngine, swipl_available, MIN_SWIPL_VERSION};
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -252,24 +252,24 @@ mod tests {
             matches!(v, Some(MettaValue::Expression(ref f, ref args)) if f == "+" && args.len() == 2)
         );
     }
-    #[test]
-    fn test_parse_undefined_function_error() {
-        assert!(matches!(
-            engine::errors::parse_swipl_error("ERROR: existence_error(procedure, (/ foo 2))"),
-            SwiplErrorKind::UndefinedFunction {
-                name: _,
-                arity: 2,
-                ..
-            }
-        ));
-    }
-    #[test]
-    fn test_parse_stack_overflow() {
-        assert!(matches!(
-            engine::errors::parse_swipl_error("ERROR: Stack depth: 5000000"),
-            SwiplErrorKind::StackOverflow { .. }
-        ));
-    }
+#[test]
+fn test_parse_undefined_function_error() {
+    assert!(matches!(
+        engine::errors::parse_backend_error("ERROR: existence_error(procedure, (/ foo 2))"),
+        BackendErrorKind::UndefinedFunction {
+            name: _,
+            arity: 2,
+            ..
+        }
+    ));
+}
+#[test]
+fn test_parse_stack_overflow() {
+    assert!(matches!(
+        engine::errors::parse_backend_error("ERROR: Stack depth: 5000000"),
+        BackendErrorKind::StackOverflow { .. }
+    ));
+}
     #[test]
     fn test_result_parsed_value() {
         let r = MettaResult { value: "42".into() };
@@ -303,23 +303,23 @@ mod tests {
         assert_eq!(r[0].value, "3");
     }
 
-    #[test]
-    fn test_error_display() {
-        let e = PeTTaError::FileNotFound(PathBuf::from("/nonexistent"));
-        assert!(e.to_string().contains("/nonexistent"));
+#[test]
+fn test_error_display() {
+    let e = PeTTaError::FileNotFound(PathBuf::from("/nonexistent"));
+    assert!(e.to_string().contains("/nonexistent"));
 
-        let e = PeTTaError::ProtocolError("test error".into());
-        assert!(e.to_string().contains("test error"));
+    let e = PeTTaError::ProtocolError("test error".into());
+    assert!(e.to_string().contains("test error"));
 
-        let e = SwiplErrorKind::UndefinedFunction {
-            name: "foo".into(),
-            arity: 2,
-            suggestion: Some("bar".into()),
-        };
-        let s = e.to_string();
-        assert!(s.contains("foo/2"));
-        assert!(s.contains("bar"));
-    }
+    let e = BackendErrorKind::UndefinedFunction {
+        name: "foo".into(),
+        arity: 2,
+        suggestion: Some("bar".into()),
+    };
+    let s = e.to_string();
+    assert!(s.contains("foo/2"));
+    assert!(s.contains("bar"));
+}
 
     #[test]
     fn test_config_defaults() {

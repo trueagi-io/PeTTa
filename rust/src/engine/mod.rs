@@ -12,7 +12,7 @@ mod protocol;
 mod version;
 
 pub use config::{Backend, EngineConfig};
-pub use errors::{BackendErrorKind, SwiplErrorKind, PeTTaError};
+pub use errors::{BackendErrorKind, PeTTaError};
 pub use values::{MettaValue, MettaResult};
 pub use version::{swipl_available, MIN_SWIPL_VERSION};
 

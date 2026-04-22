@@ -94,6 +94,7 @@ pub enum SwiplErrorKind {
     Generic(String),
 }
 
+#[allow(deprecated)]
 impl From<BackendErrorKind> for SwiplErrorKind {
     fn from(kind: BackendErrorKind) -> Self {
         match kind {
@@ -129,9 +130,6 @@ pub enum PeTTaError {
     #[error(transparent)]
     BackendError(#[from] BackendErrorKind),
 
-    #[error(transparent)]
-    SwiplError(#[from] SwiplErrorKind),
-
     #[error("MORK error: {0}")]
     MorkError(String),
 
@@ -151,11 +149,17 @@ pub enum PeTTaError {
     SubprocessCrashed { restarts: u32 },
 }
 
-pub(crate) fn parse_swipl_error(raw: &str) -> SwiplErrorKind {
+pub(crate) fn parse_backend_error(raw: &str) -> BackendErrorKind {
     match parse_error_kind(raw) {
-        Ok(kind) => kind.into(),
-        Err(msg) => SwiplErrorKind::Generic(msg),
+        Ok(kind) => kind,
+        Err(msg) => BackendErrorKind::Generic(msg.lines().next().unwrap_or(raw).trim().to_string()),
     }
+}
+
+#[deprecated(since = "0.6.0", note = "Use parse_backend_error instead")]
+#[allow(deprecated)]
+pub(crate) fn parse_swipl_error(raw: &str) -> SwiplErrorKind {
+    parse_backend_error(raw).into()
 }
 
 // ---------------------------------------------------------------------------
@@ -180,10 +184,6 @@ fn extract_between(s: &str, start: &str, end: &str) -> Option<String> {
     let rest = &s[si + start.len()..];
     let ei = rest.find(end)?;
     Some(rest[..ei].to_string())
-}
-
-fn generic_error(raw: &str) -> BackendErrorKind {
-    BackendErrorKind::Generic(raw.lines().next().unwrap_or(raw).trim().to_string())
 }
 
 fn parse_error_kind(raw: &str) -> Result<BackendErrorKind, String> {

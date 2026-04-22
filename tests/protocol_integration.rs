@@ -3,7 +3,7 @@
 //! These tests verify the full request/response cycle between Rust and SWI-Prolog,
 //! covering all message types ('F', 'S', 'Q') and edge cases.
 
-use petta::{MettaValue, PeTTaError, SwiplErrorKind};
+use petta::{BackendErrorKind, MettaValue, PeTTaError};
 
 mod test_utils;
 use test_utils::{make_engine, project_root};
@@ -158,7 +158,7 @@ fn test_protocol_error_undefined_function() {
             // Empty result list is also valid for undefined functions
             let _ = results;
         }
-        Err(PeTTaError::SwiplError(SwiplErrorKind::UndefinedFunction { name, arity, .. })) => {
+        Err(PeTTaError::BackendError(BackendErrorKind::UndefinedFunction { name, arity, .. })) => {
             assert_eq!(name, "undefined_function");
             assert_eq!(arity, 2);
         }
@@ -175,7 +175,7 @@ fn test_protocol_error_type_mismatch() {
     // Either way, the protocol should handle it gracefully
     match results {
         Ok(_) => {} // Valid: returns false
-        Err(PeTTaError::SwiplError(_)) => {} // Also valid: type error
+        Err(PeTTaError::BackendError(_)) => {} // Also valid: type error
         Err(e) => panic!("Unexpected error: {:?}", e),
     }
 }

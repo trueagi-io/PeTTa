@@ -7,7 +7,7 @@ use tracing::{debug, trace, warn};
 use super::config::EngineConfig;
 use super::errors::PeTTaError;
 use super::values::MettaResult;
-use crate::engine::errors::parse_swipl_error;
+use crate::engine::errors::parse_backend_error;
 
 /// Helper struct to manage pipes with unified error handling.
 struct PipeManager<'a> {
@@ -126,7 +126,7 @@ fn send_query_inner(
             read_exact_with_timeout(reader, &mut buf, start_time, config)?;
             let msg = String::from_utf8_lossy(&buf).to_string();
             debug!("Prolog error response: {}", msg);
-            Err(PeTTaError::SwiplError(parse_swipl_error(&msg)))
+            Err(PeTTaError::BackendError(parse_backend_error(&msg)))
         }
         _ => Err(PeTTaError::ProtocolError(format!(
             "unknown status: {}",
