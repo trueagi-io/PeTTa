@@ -1,4 +1,7 @@
 ; %%%% Type definitions of MeTTa built-in operators. %%%%
+; This file contains type declarations for built-in MeTTa operators
+; Import shared library types
+(import! lib_types)
 
 ;; Type definitions of arithmetic operators
 (: + (-> Number Number Number))

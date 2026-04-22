@@ -1,7 +1,11 @@
+#!/bin/sh
+
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
-if [ -f $SCRIPT_DIR/mork_ffi/target/release/libmork_ffi.so ]; then
-    LD_PRELOAD=$SCRIPT_DIR/mork_ffi/target/release/libmork_ffi.so \
-    swipl --stack_limit=8g -q -s $SCRIPT_DIR/src/main.pl -- "$@" mork
-else
-    swipl --stack_limit=8g -q -s $SCRIPT_DIR/src/main.pl -- "$@"
+
+# If already built, run the release binary directly
+if [ -f "$SCRIPT_DIR/target/release/petta" ]; then
+    exec "$SCRIPT_DIR/target/release/petta" "$@"
 fi
+
+# Otherwise build and run
+exec cargo run --quiet -- "$@"

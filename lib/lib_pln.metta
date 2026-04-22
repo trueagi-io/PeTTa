@@ -1,5 +1,9 @@
+;; Import shared library modules
+(import! lib_truth)
+(import! lib_types)
+
 (= (clamp $v $min $max)
-   (min $max (max $v $min)))
+(min $max (max $v $min)))
 
 ;;Concat tuples
 (= (TupleConcat $Ev1 $Ev2)
@@ -17,13 +21,7 @@
 
 ;Shortcut for min with 5 args
 (= (min5 $0 $1 $2 $3 $4)
-   (min $0 (min $1 (min $2 (min $3 $4)))))
-
-;Exclude division by 0
-(= (/safe $A $B)
-   (if (> $B 0.0)
-       (/ $A $B)
-       (empty)))
+(min $0 (min $1 (min $2 (min $3 $4)))))
 
 ;Negate (1 minus)
 (= (negate $arg)
@@ -85,21 +83,18 @@
 ;                 (Unique $rest (TupleConcat ($x) $Ret))))))
 
 ;; Consistency Conditions: PLN book "5.2.2.2 PLN Deduction and Second-Order Probability", page 74:
-
 ; borrowed from https://github.com/trueagi-io/hyperon-pln/blob/main/metta/pln/dependent-types/DeductionDTL.metta
-(: smallest-intersection-probability (-> Number Number Number))
+
 (= (smallest-intersection-probability $As $Bs)
-   (clamp (/ (- (+ $As $Bs) 1) $As) 0 1))
+(clamp (/ (- (+ $As $Bs) 1) $As) 0 1))
 
-(: largest-intersection-probability (-> Number Number Number))
 (= (largest-intersection-probability $As $Bs)
-   (clamp (/ $Bs $As) 0 1))
+(clamp (/ $Bs $As) 0 1))
 
-(: conditional-probability-consistency (-> Number Number Number Bool))
 (= (conditional-probability-consistency $As $Bs $ABs)
-   (and (< 0 $As)
-        (and (<= (smallest-intersection-probability $As $Bs) $ABs)
-             (<= $ABs (largest-intersection-probability $As $Bs)))))
+(and (< 0 $As)
+(and (<= (smallest-intersection-probability $As $Bs) $ABs)
+(<= $ABs (largest-intersection-probability $As $Bs)))))
 
 (= (Consistency_ImplicationImplicantConjunction $As $Bs $Cs $ACs $BCs)
    ; Conditional probability consistency checks:
@@ -110,18 +105,10 @@
          (<= $ACs (/ $Cs $As))
          (<= $BCs (/ $Cs $Bs))))
 
-;; Truth functions
+;; Truth value functions (imported from lib_truth)
 
 ;Forward declaration
 (= (STV $stv) (empty))
-
-(: Truth_c2w (-> Number Number))
-(= (Truth_c2w $c)
-   (/safe $c (- 1 $c)))
-
-(: Truth_w2c (-> Number Number))
-(= (Truth_w2c $w)
-   (/safe $w (+ $w 1)))
 
 ; Deduction formula: PLN book "1.4 Truth-value Formulas", page 15:
 ; borrowed from https://github.com/trueagi-io/hyperon-pln/blob/main/metta/pln/dependent-types/DeductionDTL.metta

@@ -1,0 +1,124 @@
+[package]
+name = "petta"
+version = "0.5.0"
+edition = "2024"
+description = "Efficient MeTTa language implementation in Rust + persistent SWI-Prolog subprocess"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/patham9/petta"
+keywords = ["metta", "logic", "prolog", "agi", "trueagi"]
+categories = ["compilers", "parser-implementations"]
+
+# Workspace: petta + pathmap-derive (proc-macro for inlined PathMap)
+[workspace]
+resolver = "2"
+members = [
+    ".",
+    "rust/pathmap-derive",
+]
+default-members = ["."]
+
+[workspace.package]
+edition = "2024"
+
+[[bin]]
+name = "petta"
+path = "rust/src/main.rs"
+
+[lib]
+name = "petta"
+path = "rust/src/lib.rs"
+
+[dependencies]
+tempfile = "3"
+thiserror = "2"
+tracing = "0.1"
+nom = { version = "8", optional = true }
+
+# PathMap (inlined from repos/PathMap)
+pathmap-derive = { path = "rust/pathmap-derive" }
+
+# PathMap internal dependencies (always compiled)
+dyn-clone = "1.0"
+local-or-heap = "0.1.0"
+arrayvec = "0.7.6"
+fast-slice-utils = "0.1.2"
+maybe-dangling = "0.1.1"
+reusing-vec = { version = "0.2.0", features = ["smallvec"] }
+rand = "0.9"
+smallvec = { version = "1.13", features = ["union"] }
+memmap2 = "0.9.5"
+gxhash = "3.5"
+xxhash-rust = { version = "0.8", features = ["xxh64", "xxh3", "const_xxh3"] }
+num-traits = "0.2"
+
+# MORK (inlined from repos/MORK, compiled conditionally via 'mork' feature)
+# These dependencies are ONLY used by the MORK backend.
+typed-arena = { version = "2.0", optional = true }
+regex = { version = "1.10", optional = true }
+memchr = { version = "2.7", optional = true }
+zip = { version = "2.2", default-features = false, optional = true }
+futures = { version = "0.3", optional = true }
+itertools = { version = "0.14", optional = true }
+base64 = { version = "0.22", optional = true }
+hex = { version = "0.4", optional = true }
+subprocess = { version = "0.2", optional = true }
+libz-ng-sys = { version = "1.1", optional = true }
+
+# Optional features
+rayon = { version = "1.10", optional = true }
+rustyline = { version = "14", optional = true }
+
+[features]
+default = ["mork", "repl"]
+mork = [
+    "serialization",
+    "dep:typed-arena",
+    "dep:regex",
+    "dep:memchr",
+    "dep:zip",
+    "dep:futures",
+    "dep:itertools",
+    "dep:base64",
+    "dep:hex",
+    "dep:subprocess",
+]
+repl = ["dep:rustyline"]
+swipl = []
+pure-rust = ["dep:nom"]
+pathmap-internal-tests = []
+serialization = ["dep:libz-ng-sys"]
+parallel = ["dep:rayon"]
+profiling = []
+
+# Workspace dependencies
+[workspace.dependencies]
+pathmap-derive = { path = "rust/pathmap-derive" }
+gxhash = { version = "3.5" }
+smallvec = { version = "1.13", features = ["union"] }
+xxhash-rust = { version = "0.8", features = ["xxh64", "xxh3", "const_xxh3"] }
+fast-slice-utils = "0.1.2"
+typed-arena = { version = "2.0" }
+regex = { version = "1.10" }
+memmap2 = "0.9.5"
+rayon = "1.10"
+memchr = { version = "2.7" }
+zip = { version = "2.2", default-features = false }
+futures = { version = "0.3" }
+rand = "0.9"
+itertools = { version = "0.14" }
+base64 = { version = "0.22" }
+hex = { version = "0.4" }
+subprocess = { version = "0.2" }
+reusing-vec = { version = "0.2.0", features = ["smallvec"] }
+maybe-dangling = "0.1.1"
+dyn-clone = "1.0"
+local-or-heap = "0.1.0"
+arrayvec = "0.7.6"
+num-traits = { version = "0.2" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(feature, values("arena_compact", "zipper_tracking", "random", "counters", "viz", "old_cursor", "bridge_nodes", "slim_dispatch", "slim_ptrs", "all_dense_nodes", "graft_root_vals", "nightly", "zipper_alg", "wasm", "z3", "grounding", "neo4j", "interning", "no_search", "specialize_io", "periodic_merkleize", "debug_api", "gxhash", "serialization"))',
+    'cfg(gxhash)',
+] }

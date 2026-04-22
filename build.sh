@@ -1,11 +1,14 @@
-git clone https://github.com/patham9/mork_ffi
-cd ./mork_ffi
-git pull
-sh build.sh
+#!/bin/sh
+set -e
 
-cd ..
+# Check if SWI-Prolog is installed
+if ! command -v swipl >/dev/null 2>&1; then
+    echo "Error: swipl (SWI-Prolog) is not installed."
+    echo "Install it: https://www.swi-prolog.org/Download.html"
+    exit 1
+fi
 
-git clone https://github.com/patham9/faiss_ffi
-cd ./faiss_ffi
-git pull
-sh build.sh
+echo "Building petta (Rust)..."
+cargo build --release
+
+echo "Build successful."

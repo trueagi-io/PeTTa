@@ -1,53 +1,32 @@
 #!/bin/sh
+# Run all MeTTa examples through PeTTa integration tests.
+#
+# The full suite runs each example via the release CLI with per-file progress.
+# Failures in one example don't affect others.
+#
+# Usage: sh test.sh
+# Or:    cargo test --test examples -- --ignored --nocapture
 
-run_test() {
-    f="$1"
-    echo "Running $f"
-    output=$(sh run.sh "$f" | grep "is " | grep " should ")
-    echo "$output" | grep -q "❌"
-    fail=$?
-    echo "$output" | grep -q "✅"
-    pass=$?
-    if [ $fail -eq 0 ] || [ $pass -ne 0 ]; then
-        echo "FAILURE in $f:"
-        echo "$output"
-        return 1
-    else
-        echo "OK: $f"
-        echo "$output"
-        return 0
-    fi
-}
+SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 
-pids=""
-pidfile="/tmp/metta_pid_map.$$"
-: > "$pidfile"
+echo "Building release binary..."
+cd "$SCRIPT_DIR"
+RUSTFLAGS="-C target-cpu=native" cargo build --release 2>&1 || exit 1
 
-for f in ./examples/*.metta; do
-    base=$(basename "$f")
-    case "$base" in repl.metta|llm_cities.metta|torch.metta|greedy_chess.metta|git_import2.metta)
-        continue ;;
-    esac
-    run_test "$f" &
-    pid=$!
-    pids="$pids $pid"
-    echo "$pid $f" >> "$pidfile"
-done
+echo ""
+echo "Running MeTTa example tests (full suite)..."
+echo "============================================="
 
-status=0
-for pid in $pids; do
-    if ! wait "$pid"; then
-        failed_file=$(grep "^$pid " "$pidfile" | cut -d' ' -f2-)
-        echo ""
-        echo "==============================="
-        echo "Stopping tests due to failure:"
-        echo "❌ Failed test: $failed_file"
-        echo "==============================="
-        kill $pids 2>/dev/null
-        status=1
-        break
-    fi
-done
+# Run the full ignored test suite
+RUSTFLAGS="-C target-cpu=native" cargo test --test examples -- --ignored --nocapture 2>&1
+status=$?
 
-rm -f "$pidfile"
+if [ $status -eq 0 ]; then
+    echo ""
+    echo "All example tests passed."
+else
+    echo ""
+    echo "Some examples failed (see above)."
+fi
+
 exit $status
