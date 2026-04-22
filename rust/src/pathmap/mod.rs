@@ -7,7 +7,8 @@
 // local `hash_fallback` implementation. This avoids direct references to
 // ::gxhash throughout the codebase which caused platform-specific compile
 // failures.
-pub(crate) use crate::gxhash as gxhash;
+// Note: avoid duplicative re-export to silence unused-import warnings. Use
+// `crate::gxhash` directly where necessary.
 
 
 /// Traits to implement [ring](https://en.wikipedia.org/wiki/Ring_(mathematics)) and other algebraic

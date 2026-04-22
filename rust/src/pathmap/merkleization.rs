@@ -24,8 +24,7 @@
 
 use super::alloc::Allocator;
 use super::trie_core::node::{TrieNodeODRc, NODE_ITER_FINISHED};
-// Use crate-level gxhash wrapper
-use crate::gxhash;
+// Use crate-level gxhash wrapper via crate::gxhash when needed. Direct `use` is unnecessary here.
 
 /// Statistics created after merkleization
 #[derive(Default, Debug)]

@@ -7,9 +7,8 @@ use super::super::zipper::*;
 use super::super::merkleization::{MerkleizeResult, merkleize_impl};
 use super::super::ring::{AlgebraicResult, AlgebraicStatus, COUNTER_IDENT, SELF_IDENT, Lattice, LatticeRef, DistributiveLattice, DistributiveLatticeRef, Quantale};
 
-// Use the crate-level gxhash wrapper directly. This module references it via
-// the crate root to avoid private re-export issues.
-use crate::gxhash;
+// The crate-level gxhash wrapper is available at `crate::gxhash` when needed.
+// Avoid an unused local import; reference `crate::gxhash` directly where required.
 
 /// A map type that uses a trie based on byte slices (`&[u8]`) known as "paths"
 ///

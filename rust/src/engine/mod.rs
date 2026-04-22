@@ -18,6 +18,10 @@ pub use version::{swipl_available, MIN_SWIPL_VERSION};
 
 use std::io::{BufReader, Read, Write};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+// Module-level alias for the complex spawn return type
+type SpawnHandle = (Child, std::process::ChildStdin, BufReader<std::process::ChildStdout>, Arc<Mutex<Vec<u8>>>);
 #[cfg(feature = "parallel")]
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -50,6 +54,46 @@ pub struct PeTTaEngine {
 }
 
 impl PeTTaEngine {
+    // (kept intentionally empty - module-level alias used instead)
+    /// Spawn the SWI-Prolog child process, wire its stderr into a background
+    /// thread that appends to a shared buffer, and return the child, stdin,
+    /// stdout reader and the shared stderr buffer.
+    fn spawn_swipl(config: &EngineConfig, tmp_path: &Path) -> Result<SpawnHandle, PeTTaError> {
+        debug!("Launching SWI-Prolog subprocess: {:?}", config.swipl_path);
+        let mut child = Command::new(&config.swipl_path)
+            .arg("-q")
+            .arg("-t")
+            .arg("halt")
+            .arg(tmp_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| PeTTaError::SpawnSwipl(e.to_string()))?;
+
+        let stderr = child.stderr.take();
+        let stderr_output = Arc::new(Mutex::new(Vec::new()));
+        let stderr_output_clone = Arc::clone(&stderr_output);
+        std::thread::spawn(move || {
+            if let Some(mut s) = stderr {
+                let mut buf = [0u8; 4096];
+                while let Ok(n) = s.read(&mut buf) {
+                    if n == 0 { break; }
+                    trace!("Prolog stderr: {}", String::from_utf8_lossy(&buf[..n]));
+                    if let Ok(mut guard) = stderr_output_clone.lock() {
+                        guard.extend_from_slice(&buf[..n]);
+                    } else {
+                        // If the mutex is poisoned, drop the data rather than panic.
+                        break;
+                    }
+                }
+            }
+        });
+
+        let stdin = child.stdin.take().ok_or_else(|| PeTTaError::SpawnSwipl("no stdin".into()))?;
+        let stdout = BufReader::new(child.stdout.take().ok_or_else(|| PeTTaError::SpawnSwipl("no stdout".into()))?);
+        Ok((child, stdin, stdout, stderr_output))
+    }
     /// Create a new engine with default config for the given project root.
     pub fn new(project_root: &Path, verbose: bool) -> Result<Self, PeTTaError> {
         let config = EngineConfig::new(project_root).verbose(verbose);
@@ -86,50 +130,9 @@ impl PeTTaEngine {
         std::fs::write(&tmp_path, &server_source)
             .map_err(|e| PeTTaError::WriteError(e.to_string()))?;
 
-        debug!("Launching SWI-Prolog subprocess: {:?}", config.swipl_path);
-        let mut child = Command::new(&config.swipl_path)
-            .arg("-q")
-            .arg("-t")
-            .arg("halt")
-            .arg(&tmp_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| PeTTaError::SpawnSwipl(e.to_string()))?;
-
-        let stderr = child.stderr.take();
-        let stderr_output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let stderr_output_clone = std::sync::Arc::clone(&stderr_output);
-        std::thread::spawn(move || {
-            if let Some(mut s) = stderr {
-                let mut buf = [0u8; 4096];
-                while let Ok(n) = s.read(&mut buf) {
-                    if n == 0 {
-                        break;
-                    }
-                    trace!(
-                        "Prolog stderr: {}",
-                        String::from_utf8_lossy(&buf[..n])
-                    );
-                    stderr_output_clone
-                        .lock()
-                        .unwrap()
-                        .extend_from_slice(&buf[..n]);
-                }
-            }
-        });
-
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| PeTTaError::SpawnSwipl("no stdin".into()))?;
-        let stdout = BufReader::new(
-            child
-                .stdout
-                .take()
-                .ok_or_else(|| PeTTaError::SpawnSwipl("no stdout".into()))?,
-        );
+        // Centralize subprocess spawn + stderr wiring in a helper to avoid
+        // duplication with restart_subprocess.
+        let (child, stdin, stdout, stderr_output) = Self::spawn_swipl(config, &tmp_path)?;
         std::mem::forget(tmp);
 
         let mut engine = Self {
@@ -170,33 +173,7 @@ impl PeTTaEngine {
         let tmp_path = tmp.path().to_path_buf();
         std::fs::write(&tmp_path, &server_source).map_err(|e| PeTTaError::WriteError(e.to_string()))?;
 
-        let mut child = Command::new(&config.swipl_path)
-            .arg("-q")
-            .arg("-t")
-            .arg("halt")
-            .arg(&tmp_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| PeTTaError::SpawnSwipl(e.to_string()))?;
-
-        let stderr = child.stderr.take();
-        let stderr_output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let stderr_output_clone = std::sync::Arc::clone(&stderr_output);
-        std::thread::spawn(move || {
-            if let Some(mut s) = stderr {
-                let mut buf = [0u8; 4096];
-                while let Ok(n) = s.read(&mut buf) {
-                    if n == 0 { break; }
-                    trace!("Prolog stderr: {}", String::from_utf8_lossy(&buf[..n]));
-                    stderr_output_clone.lock().unwrap().extend_from_slice(&buf[..n]);
-                }
-            }
-        });
-
-        let stdin = child.stdin.take().ok_or_else(|| PeTTaError::SpawnSwipl("no stdin".into()))?;
-        let stdout = BufReader::new(child.stdout.take().ok_or_else(|| PeTTaError::SpawnSwipl("no stdout".into()))?);
+        let (child, stdin, stdout, stderr_output) = Self::spawn_swipl(config, &tmp_path)?;
         std::mem::forget(tmp);
 
         // replace old child and pipes
@@ -301,11 +278,12 @@ impl PeTTaEngine {
     }
 
     pub fn stderr_output(&self) -> String {
-        let data = self
-            .stderr_output
-            .lock()
-            .unwrap_or_else(|e| panic!("mutex poisoned: {}", e));
-        String::from_utf8_lossy(&data).to_string()
+        // If the stderr buffer mutex is poisoned, avoid panicking in library
+        // code. Return whatever we can or an explanatory message.
+        match self.stderr_output.lock() {
+            Ok(data) => String::from_utf8_lossy(&data).to_string(),
+            Err(e) => format!("<stderr buffer poisoned: {}>", e),
+        }
     }
 
     /// Returns the current configuration.

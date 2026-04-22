@@ -18,6 +18,9 @@ PeTTa is a high-performance, embeddable runtime for the [MeTTa](https://wiki.ope
 - **Rust (stable)** — the default configuration uses the SWI-Prolog subprocess backend and works on stable Rust
 - **Rust nightly** is only required if you explicitly enable the `mork` feature (native zipper backend)
 - **`aes` + `sse2` CPU support** (recommended when building with gxhash for MORK; use `RUSTFLAGS="-C target-cpu=native"`)
+ - Optional: the high-performance `gxhash` crate is now opt-in via the Cargo feature `fast-hasher`.
+   The crate provides faster hashing on CPUs with AES/SSE2; if you do not enable `fast-hasher` the
+   project uses a pure-Rust fallback hasher so builds succeed on all hosts.
 
 ### Build
 
@@ -26,7 +29,8 @@ PeTTa is a high-performance, embeddable runtime for the [MeTTa](https://wiki.ope
 cargo build --release
 
 # Full build with MORK + parallel execution + profiling (opt-in; requires nightly)
-RUSTFLAGS="-C target-cpu=native" cargo build --release --features mork,parallel,profiling
+# Enable the `fast-hasher` feature to opt into the external `gxhash` crate for improved performance:
+RUSTFLAGS="-C target-cpu=native" cargo build --release --features mork,parallel,profiling,fast-hasher
 ```
 
 ### Run
@@ -194,7 +198,8 @@ let results = engine.process_metta_strings_parallel(&[
 |---|---|---|
 | `swipl` (default) | SWI-Prolog subprocess backend | None (uses existing Prolog files) |
 | `pure-rust` | Future: disable Prolog fallback | — |
-| `mork` | MORK zipper-based execution backend (opt-in; requires nightly) | MORK crates, PathMap 0.3 (git), gxhash |
+| `mork` | MORK zipper-based execution backend (opt-in; requires nightly) | MORK crates, PathMap 0.3 (git); optionally `fast-hasher` (gxhash) |
+| `fast-hasher` | Opt-in high-performance hasher (gxhash) | `gxhash` (optional dependency) |
 | `parallel` | Rayon-based parallel batch execution | `rayon` |
 | `profiling` | Query timing & profiling support | `parking_lot` |
 | `faiss` | FAISS vector atom space support (future) | `faiss` |

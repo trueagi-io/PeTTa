@@ -1,0 +1,53 @@
+[config]
+default_task = "build"
+
+[env]
+RUSTFLAGS = ""
+
+[tasks.build]
+description = "cargo build"
+command = "cargo"
+args = ["build"]
+
+[tasks.release]
+description = "release build with native CPU optimizations"
+script = [
+  "@echo Building release with RUSTFLAGS=\"-C target-cpu=native\"",
+  "export RUSTFLAGS=\"-C target-cpu=native\"",
+  "cargo build --release"
+]
+
+[tasks.test]
+description = "cargo test"
+command = "cargo"
+args = ["test"]
+
+[tasks.examples-test]
+description = "Run full example test suite (test.sh)"
+script = [
+  "sh test.sh"
+]
+
+[tasks.fmt]
+description = "run rustfmt for all workspace crates"
+command = "cargo"
+args = ["fmt", "--all"]
+
+[tasks.fmt-check]
+description = "check formatting"
+command = "cargo"
+args = ["fmt", "--all", "--", "--check"]
+
+[tasks.clippy]
+description = "run clippy and deny warnings"
+command = "cargo"
+args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
+
+[tasks.run]
+description = "run the project using run.sh helper"
+script = ["./run.sh"]
+
+[tasks.clean]
+description = "cargo clean"
+command = "cargo"
+args = ["clean"]

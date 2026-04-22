@@ -1,6 +1,23 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+// Engine error parsing and mapping
+//
+// This module provides two main responsibilities:
+// 1) A unified set of backend error kinds (BackendErrorKind) used across
+//    PeTTa to represent errors produced by SWI-Prolog or other backends.
+// 2) Utilities to parse raw error strings emitted by SWI-Prolog. When
+//    available, the Prolog side may emit a small JSON object with fields
+//    such as {"kind":"swipl","message":"...","raw":"...","functor":"...","name":"foo","name_arity":"foo/2","suggestion":"bar"}.
+//
+// parse_backend_error prefers structured JSON when present, then falls back
+// to heuristic string matching for common Prolog error forms (existence_error,
+// type_error, syntax_error, permission_error, stack overflow, etc.).
+//
+// The parsing functions strive to be conservative and non-panicking: if parsing
+// fails, the raw message is returned inside BackendErrorKind::Generic.
+
+
 /// Unified backend error kinds (canonical type for all backends).
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum BackendErrorKind {
@@ -52,65 +69,6 @@ pub enum BackendErrorKind {
     Generic(String),
 }
 
-/// SWI-Prolog-specific error kinds parsed from raw error messages.
-#[derive(Debug, Clone, thiserror::Error)]
-#[deprecated(since = "0.6.0", note = "Use BackendErrorKind instead for unified error handling")]
-pub enum SwiplErrorKind {
-    #[error("MeTTa function '{name}/{arity}' is not defined{}", .suggestion.as_ref().map(|s| format!(". Did you mean '{}'?", s)).unwrap_or_default())]
-    UndefinedFunction {
-        name: String,
-        arity: usize,
-        suggestion: Option<String>,
-    },
-
-    #[error("Type error: expected {expected}, got {found}{}", .context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
-    TypeMismatch {
-        expected: String,
-        found: String,
-        context: Option<String>,
-    },
-
-    #[error("Syntax error: {detail}")]
-    SyntaxError {
-        line: Option<u32>,
-        column: Option<u32>,
-        detail: String,
-    },
-
-    #[error("Argument is not sufficiently instantiated{}", .location.as_ref().map(|l| format!(" at {}", l)).unwrap_or_default())]
-    UninstantiatedArgument { location: Option<String> },
-
-    #[error("Permission denied: {operation} on {target}")]
-    PermissionDenied { operation: String, target: String },
-
-    #[error("{error_type} {term} does not exist")]
-    ExistenceError { error_type: String, term: String },
-
-    #[error("Stack overflow{}", .limit.map(|l| format!(" (limit: {})", l)).unwrap_or_default())]
-    StackOverflow { limit: Option<u32> },
-
-    #[error("{0}")]
-    Generic(String),
-}
-
-#[allow(deprecated)]
-impl From<BackendErrorKind> for SwiplErrorKind {
-    fn from(kind: BackendErrorKind) -> Self {
-        match kind {
-            BackendErrorKind::UndefinedFunction { name, arity, suggestion } => SwiplErrorKind::UndefinedFunction { name, arity, suggestion },
-            BackendErrorKind::TypeMismatch { expected, found, context } => SwiplErrorKind::TypeMismatch { expected, found, context },
-            BackendErrorKind::SyntaxError { line, column, detail, .. } => SwiplErrorKind::SyntaxError { line, column, detail },
-            BackendErrorKind::UninstantiatedArgument { location } => SwiplErrorKind::UninstantiatedArgument { location },
-            BackendErrorKind::PermissionDenied { operation, target } => SwiplErrorKind::PermissionDenied { operation, target },
-            BackendErrorKind::ExistenceError { error_type, term } => SwiplErrorKind::ExistenceError { error_type, term },
-            BackendErrorKind::StackOverflow { limit } => SwiplErrorKind::StackOverflow { limit },
-            BackendErrorKind::EvaluationError(msg) => SwiplErrorKind::Generic(msg),
-            BackendErrorKind::UnboundVariable { location } => SwiplErrorKind::UninstantiatedArgument { location },
-            BackendErrorKind::Generic(msg) => SwiplErrorKind::Generic(msg),
-        }
-    }
-}
-
 /// Top-level error type for PeTTa operations.
 #[derive(Debug, thiserror::Error)]
 pub enum PeTTaError {
@@ -155,11 +113,7 @@ pub(crate) fn parse_backend_error(raw: &str) -> BackendErrorKind {
     }
 }
 
-#[deprecated(since = "0.6.0", note = "Use parse_backend_error instead")]
-#[allow(deprecated)]
-pub(crate) fn parse_swipl_error(raw: &str) -> SwiplErrorKind {
-    parse_backend_error(raw).into()
-}
+
 
 // ---------------------------------------------------------------------------
 // Shared error kind parser
