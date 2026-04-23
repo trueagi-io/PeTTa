@@ -1,4 +1,4 @@
-!(import! &self ../lib/lib_nars)
+!(import! &self lib/lib_nars)
 
 (= (kb)
    ((Sentence ((==> (--> (× $1 $2) friend)

@@ -1,4 +1,4 @@
-!(import! &self ../lib/lib_he)
+!(import! &self lib/lib_he)
 
 !(test (is-function (-> Atom Atom)) True)
 !(test (is-function Atom) False)

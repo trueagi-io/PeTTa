@@ -46,6 +46,7 @@ main :- current_prolog_flag(argv, Args),
         ; (Mode = 'INTERPRETER', [File|_] = PositionalArgs) ->
                 file_directory_name(File, Dir),
                 assertz(working_dir(Dir)),
+                (getenv("PETTA_HOME", PETTA_HOME) -> assertz(petta_home(PETTA_HOME)) ; assertz(petta_home(""))),
                 load_metta_file(File,Results),
                 maplist(swrite,Results,ResultsR),
                 maplist(format("~w~n"), ResultsR)

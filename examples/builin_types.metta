@@ -1,4 +1,4 @@
-!(import! &self ../lib/lib_builtin_types)
+!(import! &self lib/lib_builtin_types)
 
 ;; Test type definitions of arithmetic operators
 !(test (get-type +) (-> Number Number Number))

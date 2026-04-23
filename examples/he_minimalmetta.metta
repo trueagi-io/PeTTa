@@ -1,4 +1,4 @@
-!(import! &self ../lib/lib_he)
+!(import! &self lib/lib_he)
 
 (= (div $x $y $accum)
    (chain (eval (- $x $y)) $r1

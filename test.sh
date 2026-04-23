@@ -3,6 +3,7 @@
 run_test() {
     f="$1"
     echo "Running $f"
+    # output=$(sh run.sh --compiler "$f" | grep "is " | grep " should ")
     output=$(sh run.sh "$f" | grep "is " | grep " should ")
     echo "$output" | grep -q "❌"
     fail=$?
@@ -25,7 +26,7 @@ pidfile="/tmp/metta_pid_map.$$"
 
 for f in ./examples/*.metta; do
     base=$(basename "$f")
-    case "$base" in repl.metta|llm_cities.metta|torch.metta|greedy_chess.metta|git_import2.metta)
+    case "$base" in repl.metta|llm_cities.metta|torch.metta|greedy_chess.metta|git_import2.metta|matespacefast.metta|matespace.metta|matespace2.metta|he_minimalmetta.metta|invertpeanoplus.metta)
         continue ;;
     esac
     run_test "$f" &

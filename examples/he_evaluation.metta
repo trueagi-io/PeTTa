@@ -1,4 +1,4 @@
-!(import! &self ../lib/lib_he)
+!(import! &self lib/lib_he)
 
 (= (double $x) (+ $x $x))
 

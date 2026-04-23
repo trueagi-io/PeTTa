@@ -1,4 +1,4 @@
-!(import! &self ../lib/lib_he)
+!(import! &self lib/lib_he)
 
 !(test (quote (+ 1 2)) (quote (+ 1 2)))
 

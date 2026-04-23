@@ -243,22 +243,39 @@ retractPredicate(G, true) :- retract(G), !.
 retractPredicate(_, false).
 
 %%% Library / Import: %%%
-ensure_metta_ext(Path, Path) :- file_name_extension(_, metta, Path), !.
-ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWithExt).
 
-'import!'(Space, File, true) :- catch(importer_helper(Space, File), _, fail).
-importer_helper(Space, File) :- atom_string(File, SFile),
-                                working_dir(Base),
-                                ( file_name_extension(ModPath, 'py', SFile)
-                                  -> absolute_file_name(SFile, Path, [relative_to(Base)]),
-                                     file_directory_name(Path, Dir),
-                                     file_base_name(ModPath, ModuleName),
-                                     py_call(sys:path:append(Dir), _),
-                                     py_call(builtins:'__import__'(ModuleName), _)
-                                   ; ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
-                                     ensure_metta_ext(Path, PathWithExt),
-                                     exists_file(PathWithExt), !,
-                                     load_metta_file(PathWithExt, _, Space) ).
+% Checks for file existence and returns full path and extension
+ensure_file_exists(PathWithExt, PathWithExt, Ext) :-
+  exists_file(PathWithExt), !,
+  file_name_extension(_, Ext, PathWithExt).
+ensure_file_exists(Path, PathWithExt, Ext) :-
+  file_name_extension(Path, 'metta', PathWithExt),
+  exists_file(PathWithExt), !,
+  Ext = 'metta'.
+ensure_file_exists(Path, PathWithExt, Ext) :-
+  file_name_extension(Path, 'py', PathWithExt),
+  exists_file(PathWithExt),
+  Ext = 'py'.
+
+'import!'(Space, File, true) :- catch(import_file(Space, File), _, (writeln(fail), fail)).
+% If <> are used, then interpret import path as relative to PeTTa installation directory.
+% Otherwise, try the different search directories.
+import_file(Space, File) :- split_string(File, "<>", "", L),
+                            (L = ["", RelPath, ""] -> petta_home(Base) ; any_base(Base), RelPath = File),
+                            absolute_file_name(RelPath, AbsPath, [relative_to(Base)]),
+                            ensure_file_exists(AbsPath, AbsPathWithExt, Ext), !,
+                            (Ext = 'metta' ->
+                                load_metta_file(AbsPathWithExt, _, Space)
+                            ; Ext = 'py' ->
+                                file_directory_name(AbsPathWithExt, Dir),
+                                file_base_name(AbsPathWithExt, ModName),
+                                py_call(sys:path:append(Dir), _),
+                                py_call(builtins:'__import__'(ModName), _)
+                            ).
+
+% Import paths may be relative to the PeTTa installation dir, the working directory
+% or just absolute.
+any_base(Base) :- (Base = "" ; working_dir(Base) ; petta_home(Base)).
 
 :- dynamic translator_rule/1.
 'add-translator-rule!'(HV, true) :- ( translator_rule(HV)

@@ -324,101 +324,32 @@ translate_expr([H0|T0], Execute, Goals, Out) :-
         %--- Automatic 'smart' dispatch, translator deciding when to create a predicate call, data list, or dynamic dispatch: ---
         ; translate_args(T, Execute, GsT, AVs),
           append(GsH, GsT, Inner),
-          % Old implementation
-          % smart_dispatch(HV, T, Execute, GsH, GsT, Inner, AVs, Goals, Out)).
-          ( Execute ->
-              smart_dispatch_execute(HV, T, GsH, GsT, Inner, AVs, Goals, Out)
-            ; smart_dispatch_compile(HV, T, GsH, GsT, Inner, AVs, Goals, Out)
-          )
-        ).
-
-%Automatic 'smart' dispatch implementation:
-smart_dispatch(HV, T, Execute, GsH, _GsT, Inner, AVs, Goals, Out) :-
-  %Known function => direct call:
-  ( is_list(AVs), 
-    ( atom(HV), fun(HV), Fun = HV, AllAVs = AVs, IsPartial = false
-    ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
-    ) % Check for type definition [:,HV,TypeChain]
-    -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
-       ( TypeChains \= []
-         -> maplist({Execute,Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
-                    typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), TypeChains, Branches),
-            disj_list(Branches, Disj),
-            Goals = [Disj]
-      ; (Execute ->
-          build_call_or_partial(Fun, AllAVs, Out, Inner, [], Goals))
-        ; append(Inner, [runtime_call(Fun, AVs, Out)], Goals)
-        )
-  %Literals (numbers, strings, etc.), known non-function atom => data:
-  ; ( atomic(HV), \+ atom(HV) ) -> Out = [HV|AVs],
-                                   Goals = Inner
-  ; atom(HV), \+ fun(HV) -> ( Execute -> Out = [HV|AVs], Goals = Inner
-                                        ; append(Inner, [runtime_call(HV, AVs, Out)], Goals) )
-  %Plain data list: evaluate inner fun-sublists
-  ; is_list(HV) -> eval_data_term(Execute, HV, Gd, HV1),
-                   append(Inner, Gd, Goals),
-                   Out = [HV1|AVs]
-  %Unknown head (var/compound) => runtime dispatch:
-  ; append(Inner, [reduce([HV|AVs], Out)], Goals) ).
-
-%Automatic 'smart' dispatch specialized for Execute=true (interpreter mode):
-smart_dispatch_execute(HV, T, GsH, _GsT, Inner, AVs, Goals, Out) :-
-  %Known function => direct call:
-  ( is_list(AVs), 
-    ( atom(HV), fun(HV), Fun = HV, AllAVs = AVs, IsPartial = false
-    ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
-    ) % Check for type definition [:,HV,TypeChain]
-    -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
-       ( TypeChains \= []
-         -> maplist({Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
-                    typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), TypeChains, Branches),
-            disj_list(Branches, Disj),
-            Goals = [Disj]
-      ; length(AllAVs, N),
-        Arity is N + 1,
-        ( maybe_specialize_call(Fun, AllAVs, Out, Goal)
-          -> % Specialization succeeded during execution - use it
-             append(Inner, [Goal], Goals)
-        ; ( current_predicate(Fun/Arity) ; catch(arity(Fun, Arity), _, fail) ),
-          \+ ( current_op(_, _, Fun), Arity =< 2 )
-          -> % Direct call during execution
-             append(AllAVs, [Out], Args),
-             Goal =.. [Fun|Args],
-             append(Inner, [Goal], Goals)
-        ; Out = partial(Fun, AllAVs),
-          append(Inner, [], Goals)
-        )
-      )
-  %Literals (numbers, strings, etc.), known non-function atom => data:
-  ; ( atomic(HV), \+ atom(HV) ) -> Out = [HV|AVs],
-                                   Goals = Inner
-  ; atom(HV), \+ fun(HV) -> Out = [HV|AVs], Goals = Inner
-  %Plain data list: evaluate inner fun-sublists
-  ; is_list(HV) -> eval_data_term(true, HV, Gd, HV1),
-                   append(Inner, Gd, Goals),
-                   Out = [HV1|AVs]
-  %Unknown head (var/compound) => runtime dispatch:
-  ; append(Inner, [reduce([HV|AVs], Out)], Goals) ).
-
-%Automatic 'smart' dispatch specialized for Execute=false (compiler mode):
-smart_dispatch_compile(HV, T, GsH, _GsT, Inner, AVs, Goals, Out) :-
-  %Check for function call that might need type-aware handling:
-  ( atom(HV)
-    -> % Use runtime_call_typed to defer type checking to runtime
-       % Pass original unevaluated arguments T, not translated AVs
-       append(GsH, [runtime_call_typed(HV, T, Out)], Goals)
-  ; compound(HV), HV = partial(Fun, Bound)
-    -> % Partial application - append bound args to new args at runtime
-       append(GsH, [runtime_call_typed_partial(Fun, Bound, T, Out)], Goals)
-  %Literals (numbers, strings, etc.), known non-function atom => data:
-  ; ( atomic(HV), \+ atom(HV) ) -> Out = [HV|AVs],
-                                   Goals = Inner
-  %Plain data list: evaluate inner fun-sublists
-  ; is_list(HV) -> eval_data_term(false, HV, Gd, HV1),
-                   append(Inner, Gd, Goals),
-                   Out = [HV1|AVs]
-  %Unknown head (var/compound) => runtime dispatch:
-  ; append(Inner, [reduce([HV|AVs], Out)], Goals) ).
+          %Known function => direct call:
+          ( is_list(AVs), 
+            ( atom(HV), fun(HV), Fun = HV, AllAVs = AVs, IsPartial = false
+            ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
+            ) % Check for type definition [:,HV,TypeChain]
+            -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
+               ( TypeChains \= []
+                 -> maplist({Execute,Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
+                            typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), TypeChains, Branches),
+                    disj_list(Branches, Disj),
+                    Goals = [Disj]
+              ; (Execute ->
+                  build_call_or_partial(Fun, AllAVs, Out, Inner, [], Goals))
+                ; append(Inner, [runtime_call(Fun, AVs, Out)], Goals)
+                )
+          %Literals (numbers, strings, etc.), known non-function atom => data:
+          ; ( atomic(HV), \+ atom(HV) ) -> Out = [HV|AVs],
+                                           Goals = Inner
+          ; atom(HV), \+ fun(HV) -> ( Execute -> Out = [HV|AVs], Goals = Inner
+                                                ; append(Inner, [runtime_call(HV, AVs, Out)], Goals) )
+          %Plain data list: evaluate inner fun-sublists
+          ; is_list(HV) -> eval_data_term(Execute, HV, Gd, HV1),
+                           append(Inner, Gd, Goals),
+                           Out = [HV1|AVs]
+          %Unknown head (var/compound) => runtime dispatch:
+          ; append(Inner, [reduce([HV|AVs], Out)], Goals) )).
 
 %Generate actual function call or partial if arity not complete:
 build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- 
@@ -457,46 +388,6 @@ runtime_call(Fun, AVs, Out) :-
     ; % Not callable as predicate - use reduce for proper handling
       reduce([Fun|AVs], Out)
     ).
-
-% Runtime type-aware call: checks for type information at runtime and handles argument translation
-% This is used by the compiler to defer type-aware translation to runtime
-runtime_call_typed(Fun, OrigArgs, Out) :-
-    % Check for type information at runtime
-    findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
-    ( TypeChains \= [], TypeChains = [TypeChain|_]
-      -> % Type information exists - translate arguments according to their types
-         TypeChain = [->|Xs],
-         append(ArgTypes, [_OutType], Xs),
-         translate_args_by_type_runtime(OrigArgs, ArgTypes, AVs),
-         runtime_call(Fun, AVs, Out)
-    ; % No type information - evaluate all arguments and call
-      translate_args_runtime(OrigArgs, AVs),
-      runtime_call(Fun, AVs, Out)
-    ).
-
-% Helper: translate arguments at runtime according to their types
-translate_args_by_type_runtime([], _, []) :- !.
-translate_args_by_type_runtime([A|As], [T|Ts], [AV|AVs]) :-
-    ( T == 'Expression' 
-      -> % Keep as data - don't evaluate
-         AV = A
-    ; % Evaluate the argument
-      translate_expr_to_conj(A, true, Conj, AV),
-      call(Conj)
-    ),
-    translate_args_by_type_runtime(As, Ts, AVs).
-
-% Helper: translate/evaluate all arguments at runtime (no type info)
-translate_args_runtime([], []) :- !.
-translate_args_runtime([A|As], [AV|AVs]) :-
-    translate_expr_to_conj(A, true, Conj, AV),
-    call(Conj),
-    translate_args_runtime(As, AVs).
-
-% Runtime type-aware call for partial applications
-runtime_call_typed_partial(Fun, Bound, NewArgs, Out) :-
-    append(Bound, NewArgs, AllArgs),
-    runtime_call_typed(Fun, AllArgs, Out).
 
 %Type function call generation, returns function call plus typechecks for input and output:
 typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal) :-

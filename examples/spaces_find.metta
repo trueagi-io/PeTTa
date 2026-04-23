@@ -1,4 +1,4 @@
-!(import! &self ../lib/lib_spaces)
+!(import! &self lib/lib_spaces)
 
 (friend a b)
 (friend b c)

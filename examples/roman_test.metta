@@ -1,4 +1,4 @@
-!(import! &self ../lib/lib_roman)
+!(import! &self lib/lib_roman)
 ;Test hihger order functions
 !(test (map-flat (+ 1) (1 2 3)) (2 3 4))
 !(test (map-nested (+ 1) (1 (2 3))) (2 (3 4)))

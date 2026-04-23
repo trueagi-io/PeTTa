@@ -1,4 +1,4 @@
-!(import! &self ../lib/lib_he)
+!(import! &self lib/lib_he)
 
 !(add-atom &self (= (addnormal) (+ 1 3)))
 !(add-reduct &self (= (addreduct) (+ 1 3)))

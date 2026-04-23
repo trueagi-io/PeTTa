@@ -1,4 +1,4 @@
-!(import! &self ../lib/lib_he)
+!(import! &self lib/lib_he)
 
 !(test (let $result (catch (+ 40 2))
        (if-error $result

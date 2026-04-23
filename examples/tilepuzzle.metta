@@ -166,7 +166,7 @@
     $_4 $_5 $_6
     $_7 ___ $_8))
 
-!(import! &self ../lib/lib_datastructures)
+!(import! &self lib/lib_datastructures)
 
 (= (bfs_loop (empty-queue) $N0) $N0)
 (= (bfs_loop $Q $N0)

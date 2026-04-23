@@ -1,4 +1,4 @@
-!(import! &self ../lib/lib_llm)
+!(import! &self lib/lib_llm)
 
 ;GPT LLM use case, extract country cities are located in:
 !(let* (($city (superpose (stockholm vienna)))
