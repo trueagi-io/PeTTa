@@ -51,13 +51,13 @@ pub trait HashSetExt: Sized {
 }
 
 impl<K, V> HashMapExt for HashMap<K, V, GxBuildHasher> {
-    fn new() -> Self { HashMap::with_hasher(GxBuildHasher::default()) }
-    fn with_capacity(capacity: usize) -> Self { HashMap::with_capacity_and_hasher(capacity, GxBuildHasher::default()) }
+    fn new() -> Self { HashMap::with_hasher(GxBuildHasher) }
+    fn with_capacity(capacity: usize) -> Self { HashMap::with_capacity_and_hasher(capacity, GxBuildHasher) }
 }
 
 impl<T> HashSetExt for HashSet<T, GxBuildHasher> {
-    fn new() -> Self { HashSet::with_hasher(GxBuildHasher::default()) }
-    fn with_capacity(capacity: usize) -> Self { HashSet::with_capacity_and_hasher(capacity, GxBuildHasher::default()) }
+    fn new() -> Self { HashSet::with_hasher(GxBuildHasher) }
+    fn with_capacity(capacity: usize) -> Self { HashSet::with_capacity_and_hasher(capacity, GxBuildHasher) }
 }
 
 /// Build hasher for HashMap/HashSet.

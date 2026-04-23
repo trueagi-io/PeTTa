@@ -4,19 +4,14 @@ use std::time::Duration;
 use super::version::MIN_SWIPL_VERSION;
 
 /// Backend implementation to use for MeTTa execution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Backend {
     /// MORK - Native Rust zipper-based execution backend (opt-in, requires nightly).
     Mork,
     /// SWI-Prolog - Persistent subprocess backend (default, stable Rust).
+    #[default]
     #[allow(dead_code)]
     Swipl,
-}
-
-impl Default for Backend {
-    fn default() -> Self {
-        Backend::Swipl
-    }
 }
 
 impl std::fmt::Display for Backend {

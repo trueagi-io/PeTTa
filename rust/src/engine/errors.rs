@@ -154,46 +154,45 @@ fn parse_json_error(raw: &str) -> Option<BackendErrorKind> {
                 let name_arity = obj.get("name_arity").and_then(|v| v.as_str()).map(|s| s.to_string());
                 let suggestion = obj.get("suggestion").and_then(|v| v.as_str()).map(|s| s.to_string());
                 let context = obj.get("context").and_then(|v| v.as_str()).map(|s| s.to_string());
-                // kind-based parsing (for now treat as swipl-like)
-                if let Some(kind) = obj.get("kind").and_then(|k| k.as_str()) {
-                match kind {
-                    "swipl" | "prolog" => {
-                        // Use explicit structured fields when present to construct
-                        // precise BackendErrorKind variants.
-                        if let (Some(n), Some(a)) = (name.clone(), name_arity.clone()) {
-                            // Try to parse name_arity as an arity number
-                            if let Ok(arity) = a.parse::<usize>() {
-                                return Some(BackendErrorKind::UndefinedFunction { name: n, arity, suggestion });
-                            }
-                        }
-                        if let Some(f) = functor.clone() {
-                            // Map some known functors heuristically
-                            if f.contains("syntax_error") {
-                                return Some(BackendErrorKind::SyntaxError {
-                                    location: context.clone(),
-                                    line: None,
-                                    column: None,
-                                    detail: message.clone().unwrap_or_else(|| "syntax error".into()),
-                                });
-                            }
-                            if f.contains("existence_error") {
-                                return Some(BackendErrorKind::ExistenceError {
-                                    error_type: f,
-                                    term: raw_field.clone().unwrap_or_default(),
-                                });
-                            }
-                        }
-                        // Prefer the 'formal' or 'raw' fields if available; fall back to message.
-                        if let Some(formal) = obj.get("formal").and_then(|v| v.as_str()) {
-                            // Try parsing the formal representation first
-                            if let Ok(k) = parse_error_kind(formal) { return Some(k); }
-                        }
-                        let probe = raw_field.as_deref().or(message.as_deref()).unwrap_or(raw);
-                        return parse_error_kind(probe).ok();
-                    }
-                    _ => {}
-                }
-                }
+// kind-based parsing (for now treat as swipl-like)
+    if let Some(kind) = obj.get("kind").and_then(|k| k.as_str())
+        && matches!(kind, "swipl" | "prolog")
+    {
+        // Use explicit structured fields when present to construct
+        // precise BackendErrorKind variants.
+        if let (Some(n), Some(a)) = (name.clone(), name_arity.clone()) {
+            // Try to parse name_arity as an arity number
+            if let Ok(arity) = a.parse::<usize>() {
+                return Some(BackendErrorKind::UndefinedFunction { name: n, arity, suggestion });
+            }
+        }
+        if let Some(f) = functor.clone() {
+            // Map some known functors heuristically
+            if f.contains("syntax_error") {
+                return Some(BackendErrorKind::SyntaxError {
+                    location: context.clone(),
+                    line: None,
+                    column: None,
+                    detail: message.clone().unwrap_or_else(|| "syntax error".into()),
+                });
+            }
+            if f.contains("existence_error") {
+                return Some(BackendErrorKind::ExistenceError {
+                    error_type: f,
+                    term: raw_field.clone().unwrap_or_default(),
+                });
+            }
+        }
+        // Prefer the 'formal' or 'raw' fields if available; fall back to message.
+        if let Some(formal) = obj.get("formal").and_then(|v| v.as_str()) {
+            // Try parsing the formal representation first
+            if let Ok(k) = parse_error_kind(formal) {
+                return Some(k);
+            }
+        }
+        let probe = raw_field.as_deref().or(message.as_deref()).unwrap_or(raw);
+        return parse_error_kind(probe).ok();
+    }
                 // fallback: use message/raw or raw text
                 if let Some(msg) = message.or(raw_field) {
                     return Some(BackendErrorKind::Generic(msg));
