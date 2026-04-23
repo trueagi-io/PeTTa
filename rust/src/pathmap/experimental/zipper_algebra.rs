@@ -1,5 +1,5 @@
 //! Experimental zipper algebra operations.
-//! 
+//!
 //! Contains `ZipperAlgebraExt`, `zipper_join`, `zipper_meet`, and `zipper_subtract`.
 //! These are test stubs and may contain incomplete implementations.
 
@@ -617,11 +617,7 @@ mod tests {
                 "Path {expected_path:#?} does NOT exist in {result:#?}"
             );
             let actual_val = result.get_val_at(expected_path);
-            assert_eq!(
-                actual_val,
-                Some(expected_val),
-                "Value at {expected_path:#?}"
-            );
+            assert_eq!(actual_val, Some(expected_val), "Value at {expected_path:#?}");
 
             result_copy.remove_val_at(expected_path, true);
         }
@@ -670,11 +666,7 @@ mod tests {
             (&[0x01, 0x02, 0x03, 0x04, 0x05], 8),
             (&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06], 9),
         ],
-        &[
-            (&[0x00], 0),
-            (&[0x00, 0x01, 0x02, 0x03], 1),
-            (&[0x01, 0x02, 0x03, 0x04, 0x05], 2),
-        ],
+        &[(&[0x00], 0), (&[0x00, 0x01, 0x02, 0x03], 1), (&[0x01, 0x02, 0x03, 0x04, 0x05], 2)],
     );
 
     const ALMOST_IDENTICAL_PATHS: Test = (
@@ -706,16 +698,8 @@ mod tests {
     const RHS_EMPTY: Test = (&[(&[1], 0), (&[2], 1)], &[]);
 
     const PATHS_WITH_SAME_PREFIX_DIFFERENT_CHILDREN: Test = (
-        &[
-            (&[1, 2, 3], 0),
-            (&[1, 2, 3, 4], 1),
-            (&[1, 2, 3, 10, 11, 12], 2),
-        ],
-        &[
-            (&[1, 2, 3], 10),
-            (&[1, 2, 3, 5], 11),
-            (&[1, 2, 3, 10, 11, 0], 12),
-        ],
+        &[(&[1, 2, 3], 0), (&[1, 2, 3, 4], 1), (&[1, 2, 3, 10, 11, 12], 2)],
+        &[(&[1, 2, 3], 10), (&[1, 2, 3, 5], 11), (&[1, 2, 3, 10, 11, 0], 12)],
     );
 
     const ZIGZAG_PATHS: Test = (
@@ -728,22 +712,15 @@ mod tests {
             (&[4], 4),
             (&[4, 3, 2, 1], 5),
         ],
-        &[
-            (&[1], 0),
-            (&[1, 2], 1),
-            (&[2, 1], 2),
-            (&[3], 3),
-            (&[3, 4], 4),
-            (&[4, 3], 5),
-        ],
+        &[(&[1], 0), (&[1, 2], 1), (&[2, 1], 2), (&[3], 3), (&[3, 4], 4), (&[4, 3], 5)],
     );
 
     const PATHS_WITH_ROOT_VALS_AND_CHILDREN: Test =
         (&[(&[], 1), (&[1], 10)], &[(&[], 2), (&[1], 20)]);
 
     mod join {
-        use super::*;
         use super::experimental::zipper_algebra::{ZipperAlgebraExt, zipper_join};
+        use super::*;
 
         #[test]
         fn test_disjoint() {
@@ -774,18 +751,14 @@ mod tests {
 
         #[test]
         fn test_one_side_empty_at_many_levels() {
-            check(&ONE_SIDED_PATHS, ONE_SIDED_PATHS.0, |lhs, rhs, out| {
-                lhs.join(rhs, out)
-            });
+            check(&ONE_SIDED_PATHS, ONE_SIDED_PATHS.0, |lhs, rhs, out| lhs.join(rhs, out));
         }
 
         #[test]
         fn test_almost_identical_paths() {
-            check(
-                &ALMOST_IDENTICAL_PATHS,
-                ALMOST_IDENTICAL_PATHS.0,
-                |lhs, rhs, out| lhs.join(rhs, out),
-            );
+            check(&ALMOST_IDENTICAL_PATHS, ALMOST_IDENTICAL_PATHS.0, |lhs, rhs, out| {
+                lhs.join(rhs, out)
+            });
         }
 
         #[test]
@@ -803,20 +776,16 @@ mod tests {
                 (&[1, 2, 3, 10, 11, 0], 12),
                 (&[1, 2, 3, 10, 11, 12], 2),
             ];
-            check(
-                &PATHS_WITH_SAME_PREFIX_DIFFERENT_CHILDREN,
-                expected,
-                |lhs, rhs, out| lhs.join(rhs, out),
-            );
+            check(&PATHS_WITH_SAME_PREFIX_DIFFERENT_CHILDREN, expected, |lhs, rhs, out| {
+                lhs.join(rhs, out)
+            });
         }
 
         #[test]
         fn test_zigzag() {
-            check(
-                &ZIGZAG_PATHS,
-                &[ZIGZAG_PATHS.0, ZIGZAG_PATHS.1].concat(),
-                |lhs, rhs, out| lhs.join(rhs, out),
-            );
+            check(&ZIGZAG_PATHS, &[ZIGZAG_PATHS.0, ZIGZAG_PATHS.1].concat(), |lhs, rhs, out| {
+                lhs.join(rhs, out)
+            });
         }
 
         #[test]
@@ -830,8 +799,8 @@ mod tests {
     }
 
     mod meet {
-        use super::*;
         use super::experimental::zipper_algebra::{ZipperAlgebraExt, zipper_meet};
+        use super::*;
 
         #[test]
         fn test_disjoint() {
@@ -868,11 +837,9 @@ mod tests {
 
         #[test]
         fn test_almost_identical_paths() {
-            check(
-                &ALMOST_IDENTICAL_PATHS,
-                ALMOST_IDENTICAL_PATHS.1,
-                |lhs, rhs, out| lhs.meet(rhs, out),
-            );
+            check(&ALMOST_IDENTICAL_PATHS, ALMOST_IDENTICAL_PATHS.1, |lhs, rhs, out| {
+                lhs.meet(rhs, out)
+            });
         }
 
         #[test]
@@ -884,11 +851,9 @@ mod tests {
         #[test]
         fn test_exact_overlap_divergent_subtries() {
             let expected: Paths = &[(&[1, 2, 3], 0)];
-            check(
-                &PATHS_WITH_SAME_PREFIX_DIFFERENT_CHILDREN,
-                expected,
-                |lhs, rhs, out| lhs.meet(rhs, out),
-            );
+            check(&PATHS_WITH_SAME_PREFIX_DIFFERENT_CHILDREN, expected, |lhs, rhs, out| {
+                lhs.meet(rhs, out)
+            });
         }
 
         #[test]
@@ -910,8 +875,8 @@ mod tests {
     }
 
     mod subtract {
-        use super::*;
         use super::experimental::zipper_algebra::{ZipperAlgebraExt, zipper_subtract};
+        use super::*;
 
         #[test]
         fn test_disjoint() {
@@ -922,20 +887,16 @@ mod tests {
 
         #[test]
         fn test_deep_shared_prefix_then_split() {
-            check(
-                &PATHS_WITH_SHARED_PREFIX,
-                PATHS_WITH_SHARED_PREFIX.0,
-                |lhs, rhs, out| lhs.subtract(rhs, out),
-            );
+            check(&PATHS_WITH_SHARED_PREFIX, PATHS_WITH_SHARED_PREFIX.0, |lhs, rhs, out| {
+                lhs.subtract(rhs, out)
+            });
         }
 
         #[test]
         fn test_interleaving_paths() {
-            check(
-                &INTERLEAVING_PATHS,
-                INTERLEAVING_PATHS.0,
-                |lhs, rhs, out| lhs.subtract(rhs, out),
-            );
+            check(&INTERLEAVING_PATHS, INTERLEAVING_PATHS.0, |lhs, rhs, out| {
+                lhs.subtract(rhs, out)
+            });
         }
 
         #[test]
@@ -951,25 +912,19 @@ mod tests {
                 (&[0x01, 0x02, 0x03, 0x04, 0x05], 8),
                 (&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06], 9),
             ];
-            check(&ONE_SIDED_PATHS, expected, |lhs, rhs, out| {
-                lhs.subtract(rhs, out)
-            });
+            check(&ONE_SIDED_PATHS, expected, |lhs, rhs, out| lhs.subtract(rhs, out));
         }
 
         #[test]
         fn test_almost_identical_paths() {
             let expected: Paths = &[(b"hijklmnop", 1), (b"2", 5), (b"3", 6)];
-            check(&ALMOST_IDENTICAL_PATHS, expected, |lhs, rhs, out| {
-                lhs.subtract(rhs, out)
-            });
+            check(&ALMOST_IDENTICAL_PATHS, expected, |lhs, rhs, out| lhs.subtract(rhs, out));
         }
 
         #[test]
         fn test_one_side_empty() {
             check(&LHS_EMPTY, [], |lhs, rhs, out| lhs.subtract(rhs, out));
-            check(&RHS_EMPTY, RHS_EMPTY.0, |lhs, rhs, out| {
-                lhs.subtract(rhs, out)
-            });
+            check(&RHS_EMPTY, RHS_EMPTY.0, |lhs, rhs, out| lhs.subtract(rhs, out));
         }
 
         #[test]
@@ -983,16 +938,9 @@ mod tests {
 
         #[test]
         fn test_zigzag() {
-            let expected: Paths = &[
-                (&[1, 1], 0),
-                (&[2], 1),
-                (&[3, 2, 1], 4),
-                (&[4], 4),
-                (&[4, 3, 2, 1], 5),
-            ];
-            check(&ZIGZAG_PATHS, expected, |lhs, rhs, out| {
-                lhs.subtract(rhs, out)
-            });
+            let expected: Paths =
+                &[(&[1, 1], 0), (&[2], 1), (&[3, 2, 1], 4), (&[4], 4), (&[4, 3, 2, 1], 5)];
+            check(&ZIGZAG_PATHS, expected, |lhs, rhs, out| lhs.subtract(rhs, out));
         }
 
         #[test]

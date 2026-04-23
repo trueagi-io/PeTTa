@@ -17,41 +17,23 @@ use std::time::Duration;
 // The parsing functions strive to be conservative and non-panicking: if parsing
 // fails, the raw message is returned inside BackendErrorKind::Generic.
 
-
 /// Unified backend error kinds (canonical type for all backends).
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum BackendErrorKind {
     #[error("MeTTa function '{name}/{arity}' is not defined{}", .suggestion.as_ref().map(|s| format!(". Did you mean '{}'?", s)).unwrap_or_default())]
-    UndefinedFunction {
-        name: String,
-        arity: usize,
-        suggestion: Option<String>,
-    },
+    UndefinedFunction { name: String, arity: usize, suggestion: Option<String> },
 
     #[error("Type error: expected {expected}, got {found}{}", .context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
-    TypeMismatch {
-        expected: String,
-        found: String,
-        context: Option<String>,
-    },
+    TypeMismatch { expected: String, found: String, context: Option<String> },
 
     #[error("Syntax error: {detail}")]
-    SyntaxError {
-        location: Option<String>,
-        line: Option<u32>,
-        column: Option<u32>,
-        detail: String,
-    },
+    SyntaxError { location: Option<String>, line: Option<u32>, column: Option<u32>, detail: String },
 
     #[error("Variable is not bound")]
-    UnboundVariable {
-        location: Option<String>,
-    },
+    UnboundVariable { location: Option<String> },
 
     #[error("Argument is not sufficiently instantiated{}", .location.as_ref().map(|l| format!(" at {}", l)).unwrap_or_default())]
-    UninstantiatedArgument {
-        location: Option<String>,
-    },
+    UninstantiatedArgument { location: Option<String> },
 
     #[error("Permission denied: {operation} on {target}")]
     PermissionDenied { operation: String, target: String },
@@ -113,8 +95,6 @@ pub(crate) fn parse_backend_error(raw: &str) -> BackendErrorKind {
     }
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Shared error kind parser
 // ---------------------------------------------------------------------------
@@ -149,50 +129,57 @@ fn parse_json_error(raw: &str) -> Option<BackendErrorKind> {
                 let raw_field = obj.get("raw").and_then(|m| m.as_str()).map(|s| s.to_string());
                 // Additional structured fields we may emit from Prolog
                 let functor = obj.get("functor").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let _functor_arity = obj.get("functor_arity").and_then(|v| v.as_u64()).map(|n| n as usize);
+                let _functor_arity =
+                    obj.get("functor_arity").and_then(|v| v.as_u64()).map(|n| n as usize);
                 let name = obj.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let name_arity = obj.get("name_arity").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let suggestion = obj.get("suggestion").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let name_arity =
+                    obj.get("name_arity").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let suggestion =
+                    obj.get("suggestion").and_then(|v| v.as_str()).map(|s| s.to_string());
                 let context = obj.get("context").and_then(|v| v.as_str()).map(|s| s.to_string());
-// kind-based parsing (for now treat as swipl-like)
-    if let Some(kind) = obj.get("kind").and_then(|k| k.as_str())
-        && matches!(kind, "swipl" | "prolog")
-    {
-        // Use explicit structured fields when present to construct
-        // precise BackendErrorKind variants.
-        if let (Some(n), Some(a)) = (name.clone(), name_arity.clone()) {
-            // Try to parse name_arity as an arity number
-            if let Ok(arity) = a.parse::<usize>() {
-                return Some(BackendErrorKind::UndefinedFunction { name: n, arity, suggestion });
-            }
-        }
-        if let Some(f) = functor.clone() {
-            // Map some known functors heuristically
-            if f.contains("syntax_error") {
-                return Some(BackendErrorKind::SyntaxError {
-                    location: context.clone(),
-                    line: None,
-                    column: None,
-                    detail: message.clone().unwrap_or_else(|| "syntax error".into()),
-                });
-            }
-            if f.contains("existence_error") {
-                return Some(BackendErrorKind::ExistenceError {
-                    error_type: f,
-                    term: raw_field.clone().unwrap_or_default(),
-                });
-            }
-        }
-        // Prefer the 'formal' or 'raw' fields if available; fall back to message.
-        if let Some(formal) = obj.get("formal").and_then(|v| v.as_str()) {
-            // Try parsing the formal representation first
-            if let Ok(k) = parse_error_kind(formal) {
-                return Some(k);
-            }
-        }
-        let probe = raw_field.as_deref().or(message.as_deref()).unwrap_or(raw);
-        return parse_error_kind(probe).ok();
-    }
+                // kind-based parsing (for now treat as swipl-like)
+                if let Some(kind) = obj.get("kind").and_then(|k| k.as_str())
+                    && matches!(kind, "swipl" | "prolog")
+                {
+                    // Use explicit structured fields when present to construct
+                    // precise BackendErrorKind variants.
+                    if let (Some(n), Some(a)) = (name.clone(), name_arity.clone()) {
+                        // Try to parse name_arity as an arity number
+                        if let Ok(arity) = a.parse::<usize>() {
+                            return Some(BackendErrorKind::UndefinedFunction {
+                                name: n,
+                                arity,
+                                suggestion,
+                            });
+                        }
+                    }
+                    if let Some(f) = functor.clone() {
+                        // Map some known functors heuristically
+                        if f.contains("syntax_error") {
+                            return Some(BackendErrorKind::SyntaxError {
+                                location: context.clone(),
+                                line: None,
+                                column: None,
+                                detail: message.clone().unwrap_or_else(|| "syntax error".into()),
+                            });
+                        }
+                        if f.contains("existence_error") {
+                            return Some(BackendErrorKind::ExistenceError {
+                                error_type: f,
+                                term: raw_field.clone().unwrap_or_default(),
+                            });
+                        }
+                    }
+                    // Prefer the 'formal' or 'raw' fields if available; fall back to message.
+                    if let Some(formal) = obj.get("formal").and_then(|v| v.as_str()) {
+                        // Try parsing the formal representation first
+                        if let Ok(k) = parse_error_kind(formal) {
+                            return Some(k);
+                        }
+                    }
+                    let probe = raw_field.as_deref().or(message.as_deref()).unwrap_or(raw);
+                    return parse_error_kind(probe).ok();
+                }
                 // fallback: use message/raw or raw text
                 if let Some(msg) = message.or(raw_field) {
                     return Some(BackendErrorKind::Generic(msg));
@@ -244,12 +231,14 @@ fn parse_error_kind(raw: &str) -> Result<BackendErrorKind, String> {
         return Ok(BackendErrorKind::StackOverflow { limit });
     }
     if raw.contains("permission_error") {
-        let operation = extract_between(raw, "permission_error(", ",").unwrap_or_else(|| "unknown".into());
+        let operation =
+            extract_between(raw, "permission_error(", ",").unwrap_or_else(|| "unknown".into());
         let target = extract_between(raw, ", ", ")").unwrap_or_else(|| "unknown".into());
         return Ok(BackendErrorKind::PermissionDenied { operation, target });
     }
     if raw.contains("existence_error") {
-        let error_type = extract_between(raw, "existence_error(", ",").unwrap_or_else(|| "unknown".into());
+        let error_type =
+            extract_between(raw, "existence_error(", ",").unwrap_or_else(|| "unknown".into());
         let term = extract_between(raw, ", ", ")").unwrap_or_else(|| "unknown".into());
         return Ok(BackendErrorKind::ExistenceError { error_type, term });
     }

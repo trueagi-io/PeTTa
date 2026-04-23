@@ -15,9 +15,9 @@ pub mod interning;
 
 // Kernel modules - only compiled with mork feature
 #[cfg(feature = "mork")]
-pub mod space;
-#[cfg(feature = "mork")]
 pub mod execution;
+#[cfg(feature = "mork")]
+pub mod space;
 
 // Empty stub module when mork feature is not enabled.
 // Cargo requires that declared modules exist, even if empty.

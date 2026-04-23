@@ -1,18 +1,17 @@
-
+use arrayvec::ArrayVec;
 use core::hint::unreachable_unchecked;
 use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
-use std::collections::HashMap;
 use dyn_clone::*;
 use local_or_heap::LocalOrHeap;
-use arrayvec::ArrayVec;
+use std::collections::HashMap;
 
-use super::super::utils::ByteMask;
 use super::super::alloc::Allocator;
-use super::dense_byte::*;
 use super::super::ring::*;
-use super::tiny::TinyRefNode;
+use super::super::utils::ByteMask;
+use super::dense_byte::*;
 use super::line_list::LineListNode;
+use super::tiny::TinyRefNode;
 
 #[cfg(feature = "bridge_nodes")]
 use super::bridge::BridgeNode;
@@ -33,8 +32,9 @@ const _: [(); (MAX_NODE_KEY_BYTES < 253) as usize - 1] = [];
 ///
 /// 1. A TrieNode will never have a value or an onward link at a zero-length key.  A value associated with
 /// the path to the root of a TrieNode must be stored in the parent node.
-pub(crate) trait TrieNode<V: Clone + Send + Sync, A: Allocator>: TrieNodeDowncast<V, A> + DynClone + core::fmt::Debug + Send + Sync {
-
+pub(crate) trait TrieNode<V: Clone + Send + Sync, A: Allocator>:
+    TrieNodeDowncast<V, A> + DynClone + core::fmt::Debug + Send + Sync
+{
     /// Returns `true` if the node contains a key that begins with `key`, irrespective of whether the key
     /// specifies a child, value, or both
     ///
@@ -100,7 +100,11 @@ pub(crate) trait TrieNode<V: Clone + Send + Sync, A: Allocator>: TrieNodeDowncas
     ///
     /// NOTE: It perfectly fine for multiple keys to share a prefix, and sometimes that means multiple
     /// results will be identical if the node represents only the prefix portion of the key.
-    fn node_get_payloads<'node, 'res>(&'node self, keys: &[(&[u8], bool)], results: &'res mut [(usize, PayloadRef<'node, V, A>)]) -> bool;
+    fn node_get_payloads<'node, 'res>(
+        &'node self,
+        keys: &[(&[u8], bool)],
+        results: &'res mut [(usize, PayloadRef<'node, V, A>)],
+    ) -> bool;
 
     /// Returns `true` if the node contains a value at the specified key, otherwise returns `false`
     ///
@@ -126,7 +130,8 @@ pub(crate) trait TrieNode<V: Clone + Send + Sync, A: Allocator>: TrieNodeDowncas
     ///
     /// If this method returns Err(node), then the node was upgraded, and the new node must be
     /// substituted into the context formerly ocupied by this this node, and this node must be dropped.
-    fn node_set_val(&mut self, key: &[u8], val: V) -> Result<(Option<V>, bool), TrieNodeODRc<V, A>>;
+    fn node_set_val(&mut self, key: &[u8], val: V)
+    -> Result<(Option<V>, bool), TrieNodeODRc<V, A>>;
 
     /// Deletes the value specified by `key`
     ///
@@ -164,7 +169,11 @@ pub(crate) trait TrieNode<V: Clone + Send + Sync, A: Allocator>: TrieNodeDowncas
     ///
     /// If this method returns Err(node), then the `self` node was upgraded, and the new node must be
     /// substituted into the context formerly ocupied by this this node, and this node must be dropped.
-    fn node_set_branch(&mut self, key: &[u8], new_node: TrieNodeODRc<V, A>) -> Result<bool, TrieNodeODRc<V, A>>;
+    fn node_set_branch(
+        &mut self,
+        key: &[u8],
+        new_node: TrieNodeODRc<V, A>,
+    ) -> Result<bool, TrieNodeODRc<V, A>>;
 
     /// Removes the downstream branch from the specified `key`.  Does not affect the value at the `key`
     ///
@@ -265,7 +274,11 @@ pub(crate) trait TrieNode<V: Clone + Send + Sync, A: Allocator>: TrieNodeDowncas
     ///
     /// NOTE: onward paths that lead to values are still part of the enumeration
     /// NOTE: Unlike some other trait methods, method may be called with a zero-length key
-    fn nth_child_from_key(&self, key: &[u8], n: usize) -> (Option<u8>, Option<TaggedNodeRef<'_, V, A>>);
+    fn nth_child_from_key(
+        &self,
+        key: &[u8],
+        n: usize,
+    ) -> (Option<u8>, Option<TaggedNodeRef<'_, V, A>>);
 
     /// Behaves similarly to [Self::nth_child_from_key(0)] with the difference being that the returned
     /// prefix should be an entire path to the onward link or to the next branch
@@ -304,7 +317,11 @@ pub(crate) trait TrieNode<V: Clone + Send + Sync, A: Allocator>: TrieNodeDowncas
     /// `key`, otherwise it will be immedtely before
     ///
     /// NOTE: This method will never be called with a zero-length key
-    fn get_sibling_of_child(&self, key: &[u8], next: bool) -> (Option<u8>, Option<TaggedNodeRef<'_, V, A>>);
+    fn get_sibling_of_child(
+        &self,
+        key: &[u8],
+        next: bool,
+    ) -> (Option<u8>, Option<TaggedNodeRef<'_, V, A>>);
 
     /// Returns a new node which is a clone or reference to the portion of the node rooted at `key`, or
     /// `None` if `key` does not specify a path within the node
@@ -324,11 +341,18 @@ pub(crate) trait TrieNode<V: Clone + Send + Sync, A: Allocator>: TrieNodeDowncas
 
     /// Allows for the implementation of the Lattice trait on different node implementations, and
     /// the logic to promote nodes to other node types
-    fn pjoin_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>> where V: Lattice;
+    fn pjoin_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>>
+    where
+        V: Lattice;
 
     /// Allows for the implementation of the Lattice trait on different node implementations, and
     /// the logic to promote nodes to other node types
-    fn join_into_dyn(&mut self, other: TrieNodeODRc<V, A>) -> (AlgebraicStatus, Result<(), TrieNodeODRc<V, A>>) where V: Lattice;
+    fn join_into_dyn(
+        &mut self,
+        other: TrieNodeODRc<V, A>,
+    ) -> (AlgebraicStatus, Result<(), TrieNodeODRc<V, A>>)
+    where
+        V: Lattice;
 
     /// Returns a node composed of the children of `self`, `byte_cnt` bytes downstream, all joined together,
     /// or `None` if the node has no children at that depth
@@ -337,14 +361,20 @@ pub(crate) trait TrieNode<V: Clone + Send + Sync, A: Allocator>: TrieNodeDowncas
     ///
     /// QUESTION: Is there a value to a "copying" version of drop_head?  It has higher overheads but could
     /// be safely implemented by the [super::zipper::ReadZipper].
-    fn drop_head_dyn(&mut self, byte_cnt: usize) -> Option<TrieNodeODRc<V, A>> where V: Lattice;
+    fn drop_head_dyn(&mut self, byte_cnt: usize) -> Option<TrieNodeODRc<V, A>>
+    where
+        V: Lattice;
 
     /// Allows for the implementation of the Lattice trait on different node implementations, and
     /// the logic to promote nodes to other node types
-    fn pmeet_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>> where V: Lattice;
+    fn pmeet_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>>
+    where
+        V: Lattice;
 
     /// Allows for the implementation of the DistributiveLattice algebraic operations
-    fn psubtract_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>> where V: DistributiveLattice;
+    fn psubtract_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>>
+    where
+        V: DistributiveLattice;
 
     /// Allows for the implementation of the Quantale algebraic operations
     fn prestrict_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>>;
@@ -361,7 +391,7 @@ pub trait TrieNodeDowncast<V: Clone + Send + Sync, A: Allocator> {
     /// Returns a [TaggedNodeRef] referencing this node
     fn as_tagged(&self) -> TaggedNodeRef<'_, V, A>;
 
-    #[cfg(not(feature="slim_ptrs"))]
+    #[cfg(not(feature = "slim_ptrs"))]
     fn as_tagged_mut(&mut self) -> TaggedNodeRefMut<'_, V, A>;
 
     /// Migrates the contents of the node into a new CellByteNode.  After this method, `self` will be empty
@@ -397,7 +427,7 @@ impl<V: Clone + Send + Sync, A: Allocator> Clone for PayloadRef<'_, V, A> {
         match self {
             Self::None => Self::None,
             Self::Val(v) => Self::Val(v),
-            Self::Child(c) => Self::Child(c)
+            Self::Child(c) => Self::Child(c),
         }
     }
 }
@@ -410,7 +440,7 @@ impl<V: Clone + Send + Sync, A: Allocator> PartialEq for PayloadRef<'_, V, A> {
             (Self::None, Self::None) => true,
             (Self::Val(l_val), Self::Val(r_val)) => core::ptr::eq(*l_val, *r_val),
             (Self::Child(l_link), Self::Child(r_link)) => core::ptr::eq(*l_link, *r_link),
-            _ => false
+            _ => false,
         }
     }
 }
@@ -426,25 +456,25 @@ impl<'a, V: Clone + Send + Sync, A: Allocator> PayloadRef<'a, V, A> {
     pub fn is_none(&self) -> bool {
         match self {
             Self::None => true,
-            _ => false
+            _ => false,
         }
     }
     pub fn is_val(&self) -> bool {
         match self {
             Self::Val(_) => true,
-            _ => false
+            _ => false,
         }
     }
     pub fn child(&self) -> &'a TrieNodeODRc<V, A> {
         match self {
             Self::Child(child) => child,
-            _ => panic!()
+            _ => panic!(),
         }
     }
     pub fn val(&self) -> &'a V {
         match self {
             Self::Val(val) => val,
-            _ => panic!()
+            _ => panic!(),
         }
     }
 }
@@ -452,7 +482,7 @@ impl<'a, V: Clone + Send + Sync, A: Allocator> PayloadRef<'a, V, A> {
 #[derive(Clone)]
 pub(crate) enum ValOrChild<V: Clone + Send + Sync, A: Allocator> {
     Val(V),
-    Child(TrieNodeODRc<V, A>)
+    Child(TrieNodeODRc<V, A>),
 }
 
 impl<V: Clone + Send + Sync, A: Allocator> core::fmt::Debug for ValOrChild<V, A> {
@@ -468,19 +498,19 @@ impl<V: Clone + Send + Sync, A: Allocator> ValOrChild<V, A> {
     pub fn into_child(self) -> TrieNodeODRc<V, A> {
         match self {
             Self::Child(child) => child,
-            _ => panic!()
+            _ => panic!(),
         }
     }
     pub fn into_val(self) -> V {
         match self {
             Self::Val(val) => val,
-            _ => panic!()
+            _ => panic!(),
         }
     }
     pub fn from_union<const IS_CHILD: bool>(union: ValOrChildUnion<V, A>) -> Self {
         match IS_CHILD {
-            true => Self::Child(unsafe{ union.into_child() }),
-            false => Self::Val(unsafe{ union.into_val() })
+            true => Self::Child(unsafe { union.into_child() }),
+            false => Self::Val(unsafe { union.into_val() }),
         }
     }
 }
@@ -491,7 +521,7 @@ pub union ValOrChildUnion<V: Clone + Send + Sync, A: Allocator> {
     pub val: ManuallyDrop<LocalOrHeap<V, [u8; 8]>>,
     #[cfg(not(feature = "slim_ptrs"))]
     pub val: ManuallyDrop<LocalOrHeap<V, [u8; 16]>>,
-    pub _unused: ()
+    pub _unused: (),
 }
 
 impl<V: Clone + Send + Sync, A: Allocator> Default for ValOrChildUnion<V, A> {
@@ -501,28 +531,28 @@ impl<V: Clone + Send + Sync, A: Allocator> Default for ValOrChildUnion<V, A> {
 }
 impl<V: Clone + Send + Sync, A: Allocator> From<V> for ValOrChildUnion<V, A> {
     fn from(val: V) -> Self {
-        Self{ val: ManuallyDrop::new(LocalOrHeap::new(val)) }
+        Self { val: ManuallyDrop::new(LocalOrHeap::new(val)) }
     }
 }
 impl<V: Clone + Send + Sync, A: Allocator> From<TrieNodeODRc<V, A>> for ValOrChildUnion<V, A> {
     fn from(child: TrieNodeODRc<V, A>) -> Self {
-        Self{ child: ManuallyDrop::new(child) }
+        Self { child: ManuallyDrop::new(child) }
     }
 }
 impl<V: Clone + Send + Sync, A: Allocator> From<ValOrChild<V, A>> for ValOrChildUnion<V, A> {
     fn from(voc: ValOrChild<V, A>) -> Self {
         match voc {
-            ValOrChild::Child(child) => Self{ child: ManuallyDrop::new(child) },
-            ValOrChild::Val(val) => Self{ val: ManuallyDrop::new(LocalOrHeap::new(val)) }
+            ValOrChild::Child(child) => Self { child: ManuallyDrop::new(child) },
+            ValOrChild::Val(val) => Self { val: ManuallyDrop::new(LocalOrHeap::new(val)) },
         }
     }
 }
 impl<V: Clone + Send + Sync, A: Allocator> ValOrChildUnion<V, A> {
     pub unsafe fn into_val(self) -> V {
-        LocalOrHeap::into_inner(ManuallyDrop::into_inner(unsafe{ self.val }))
+        LocalOrHeap::into_inner(ManuallyDrop::into_inner(unsafe { self.val }))
     }
     pub unsafe fn into_child(self) -> TrieNodeODRc<V, A> {
-        ManuallyDrop::into_inner(unsafe{ self.child })
+        ManuallyDrop::into_inner(unsafe { self.child })
     }
 }
 
@@ -538,13 +568,18 @@ impl<V: Clone + Send + Sync, A: Allocator> ValOrChildUnion<V, A> {
 // was observed.  Therefore the the ~20% slowdown is simply the higher overheads of this generic function.
 //
 //The next port of call for optimization is probably to remove the recursion
-pub(crate) fn pmeet_generic<const MAX_PAYLOAD_CNT: usize, V, A: Allocator, MergeF>(self_payloads: &[(&[u8], PayloadRef<V, A>)], other: TaggedNodeRef<V, A>, merge_f: MergeF) -> AlgebraicResult<TrieNodeODRc<V, A>>
-    where
+pub(crate) fn pmeet_generic<const MAX_PAYLOAD_CNT: usize, V, A: Allocator, MergeF>(
+    self_payloads: &[(&[u8], PayloadRef<V, A>)],
+    other: TaggedNodeRef<V, A>,
+    merge_f: MergeF,
+) -> AlgebraicResult<TrieNodeODRc<V, A>>
+where
     MergeF: FnOnce(&mut [Option<ValOrChild<V, A>>]) -> TrieNodeODRc<V, A>,
-    V: Clone + Send + Sync + Lattice
+    V: Clone + Send + Sync + Lattice,
 {
     let mut request_keys = ArrayVec::<(&[u8], bool), MAX_PAYLOAD_CNT>::new();
-    let mut element_results = ArrayVec::<FatAlgebraicResult<ValOrChild<V, A>>, MAX_PAYLOAD_CNT>::new();
+    let mut element_results =
+        ArrayVec::<FatAlgebraicResult<ValOrChild<V, A>>, MAX_PAYLOAD_CNT>::new();
     let mut request_results = ArrayVec::<(usize, PayloadRef<V, A>), MAX_PAYLOAD_CNT>::new();
     for (self_key, self_payload) in self_payloads.iter() {
         debug_assert!(!self_payload.is_none());
@@ -553,7 +588,13 @@ pub(crate) fn pmeet_generic<const MAX_PAYLOAD_CNT: usize, V, A: Allocator, Merge
         request_results.push((0, PayloadRef::default()));
     }
 
-    let is_exhaustive = pmeet_generic_internal::<MAX_PAYLOAD_CNT, V, A>(self_payloads, &mut request_keys[..], &mut request_results[..], &mut element_results[..], other);
+    let is_exhaustive = pmeet_generic_internal::<MAX_PAYLOAD_CNT, V, A>(
+        self_payloads,
+        &mut request_keys[..],
+        &mut request_results[..],
+        &mut element_results[..],
+        other,
+    );
     let mut is_none = true;
     let mut combined_mask = SELF_IDENT | COUNTER_IDENT;
     let mut result_payloads = ArrayVec::<Option<ValOrChild<V, A>>, MAX_PAYLOAD_CNT>::new();
@@ -564,18 +605,21 @@ pub(crate) fn pmeet_generic<const MAX_PAYLOAD_CNT: usize, V, A: Allocator, Merge
     }
 
     if is_none {
-        return AlgebraicResult::None
+        return AlgebraicResult::None;
     }
     if !is_exhaustive {
         combined_mask &= !COUNTER_IDENT;
     }
     if combined_mask > 0 {
-        return AlgebraicResult::Identity(combined_mask)
+        return AlgebraicResult::Identity(combined_mask);
     }
     AlgebraicResult::Element(merge_f(&mut result_payloads[..]))
 }
 
-pub(crate) fn node_count_branches_recursive<V: Clone + Send + Sync, A: Allocator>(node: TaggedNodeRef<V, A>, key: &[u8]) -> usize {
+pub(crate) fn node_count_branches_recursive<V: Clone + Send + Sync, A: Allocator>(
+    node: TaggedNodeRef<V, A>,
+    key: &[u8],
+) -> usize {
     if key.len() == 0 {
         return node.count_branches(b"");
     }
@@ -587,14 +631,21 @@ pub(crate) fn node_count_branches_recursive<V: Clone + Send + Sync, A: Allocator
             } else {
                 0
             }
-        },
-        None => node.count_branches(key)
+        }
+        None => node.count_branches(key),
     }
 }
 
 /// Internal function to implement the recursive part of `pmeet_generic`
-pub(crate) fn pmeet_generic_internal<'trie, const MAX_PAYLOAD_CNT: usize, V, A: Allocator>(self_payloads: &[(&[u8], PayloadRef<V, A>)], keys: &mut [(&[u8], bool)], request_results: &mut [(usize, PayloadRef<'trie, V, A>)], results: &mut [FatAlgebraicResult<ValOrChild<V, A>>], other_node: TaggedNodeRef<'trie, V, A>) -> bool
-    where V: Clone + Send + Sync + Lattice
+pub(crate) fn pmeet_generic_internal<'trie, const MAX_PAYLOAD_CNT: usize, V, A: Allocator>(
+    self_payloads: &[(&[u8], PayloadRef<V, A>)],
+    keys: &mut [(&[u8], bool)],
+    request_results: &mut [(usize, PayloadRef<'trie, V, A>)],
+    results: &mut [FatAlgebraicResult<ValOrChild<V, A>>],
+    other_node: TaggedNodeRef<'trie, V, A>,
+) -> bool
+where
+    V: Clone + Send + Sync + Lattice,
 {
     //If is_exhaustive gets set to `false`, then the pmeet method cannot return a `COUNTER_IDENTITY` result
     let mut is_exhaustive = true;
@@ -624,15 +675,33 @@ pub(crate) fn pmeet_generic_internal<'trie, const MAX_PAYLOAD_CNT: usize, V, A: 
                 //Continue to grow range, or do the recursive call, depending on whether
                 // we have the same node as the previous time through the loop
                 if cur_group.is_some() {
-                    if (cur_group.as_ref().unwrap().1 as *const TrieNodeODRc<V, A>) != (child as *const TrieNodeODRc<V, A>) {
-                        pmeet_generic_recursive_reset::<MAX_PAYLOAD_CNT, V, A>(&mut cur_group, &mut is_exhaustive, idx, self_payloads, keys, request_results, results);
+                    if (cur_group.as_ref().unwrap().1 as *const TrieNodeODRc<V, A>)
+                        != (child as *const TrieNodeODRc<V, A>)
+                    {
+                        pmeet_generic_recursive_reset::<MAX_PAYLOAD_CNT, V, A>(
+                            &mut cur_group,
+                            &mut is_exhaustive,
+                            idx,
+                            self_payloads,
+                            keys,
+                            request_results,
+                            results,
+                        );
                         cur_group = Some((idx, child));
                     }
                 } else {
                     cur_group = Some((idx, child));
                 }
             } else {
-                pmeet_generic_recursive_reset::<MAX_PAYLOAD_CNT, V, A>(&mut cur_group, &mut is_exhaustive, idx, self_payloads, keys, request_results, results);
+                pmeet_generic_recursive_reset::<MAX_PAYLOAD_CNT, V, A>(
+                    &mut cur_group,
+                    &mut is_exhaustive,
+                    idx,
+                    self_payloads,
+                    keys,
+                    request_results,
+                    results,
+                );
 
                 //We've arrived at a contained value or onward link that has a correspondence
                 // to one of the values or links in `self`
@@ -644,50 +713,76 @@ pub(crate) fn pmeet_generic_internal<'trie, const MAX_PAYLOAD_CNT: usize, V, A: 
                         let result = self_link.pmeet(other_link);
                         FatAlgebraicResult::from_binary_op_result(result, self_link, other_link)
                             .map(|child| ValOrChild::Child(child))
-                    },
+                    }
                     PayloadRef::Val(self_val) => {
                         let other_val = payload.val();
                         let result = (*self_val).pmeet(other_val);
                         FatAlgebraicResult::from_binary_op_result(result, *self_val, other_val)
                             .map(|val| ValOrChild::Val(val))
-                    },
-                    _ => unreachable!()
+                    }
+                    _ => unreachable!(),
                 };
                 debug_assert!(results[idx].element.is_none());
                 debug_assert_eq!(results[idx].identity_mask, 0);
                 results[idx] = result;
             }
         } else {
-            pmeet_generic_recursive_reset::<MAX_PAYLOAD_CNT, V, A>(&mut cur_group, &mut is_exhaustive, idx, self_payloads, keys, request_results, results);
+            pmeet_generic_recursive_reset::<MAX_PAYLOAD_CNT, V, A>(
+                &mut cur_group,
+                &mut is_exhaustive,
+                idx,
+                self_payloads,
+                keys,
+                request_results,
+                results,
+            );
 
             let result = match &self_payloads[idx].1 {
                 PayloadRef::Child(self_link) => {
                     match other_node.get_node_at_key(keys[idx].0).into_option() {
                         Some(other_onward_node) => {
-                            let result = self_link.as_tagged().pmeet_dyn(other_onward_node.as_tagged());
-                            FatAlgebraicResult::from_binary_op_result(result, self_link, &other_onward_node)
-                                .map(|child| ValOrChild::Child(child))
-                        },
+                            let result =
+                                self_link.as_tagged().pmeet_dyn(other_onward_node.as_tagged());
+                            FatAlgebraicResult::from_binary_op_result(
+                                result,
+                                self_link,
+                                &other_onward_node,
+                            )
+                            .map(|child| ValOrChild::Child(child))
+                        }
                         None => {
                             //Check to see if we have a dangling path, because a dangling path meet with a value should result in a path, but no value
-                            if self_link.is_empty() && other_node.node_get_val(keys[idx].0).is_some() {
-                                FatAlgebraicResult::new(SELF_IDENT, Some(ValOrChild::Child(TrieNodeODRc::new_empty())))
+                            if self_link.is_empty()
+                                && other_node.node_get_val(keys[idx].0).is_some()
+                            {
+                                FatAlgebraicResult::new(
+                                    SELF_IDENT,
+                                    Some(ValOrChild::Child(TrieNodeODRc::new_empty())),
+                                )
                             } else {
                                 FatAlgebraicResult::new(COUNTER_IDENT, None)
                             }
                         }
                     }
-                },
+                }
                 PayloadRef::Val(_self_val) => {
                     //If self_payload is a val and we didn't get a corresponding val, then this result is None
                     FatAlgebraicResult::new(COUNTER_IDENT, None)
-                },
-                _ => unreachable!()
+                }
+                _ => unreachable!(),
             };
             results[idx] = result;
         }
     }
-    pmeet_generic_recursive_reset::<MAX_PAYLOAD_CNT, V, A>(&mut cur_group, &mut is_exhaustive, keys.len(), self_payloads, keys, request_results, results);
+    pmeet_generic_recursive_reset::<MAX_PAYLOAD_CNT, V, A>(
+        &mut cur_group,
+        &mut is_exhaustive,
+        keys.len(),
+        self_payloads,
+        keys,
+        request_results,
+        results,
+    );
 
     is_exhaustive
 }
@@ -695,18 +790,32 @@ pub(crate) fn pmeet_generic_internal<'trie, const MAX_PAYLOAD_CNT: usize, V, A: 
 /// Effectively part of `pmeet_generic_internal`, but factored out separately because it's called in
 /// several different places.  Resets the `cur_group` state and does a recursive call of `pmeet_generic_internal`
 #[inline]
-fn pmeet_generic_recursive_reset<'trie, const MAX_PAYLOAD_CNT: usize, V, A: Allocator>(cur_group: &mut Option<(usize, &'trie TrieNodeODRc<V, A>)>, is_exhaustive: &mut bool, idx: usize, self_payloads: &[(&[u8], PayloadRef<V, A>)], keys: &mut [(&[u8], bool)], request_results: &mut [(usize, PayloadRef<'trie, V, A>)], results: &mut [FatAlgebraicResult<ValOrChild<V, A>>])
-    where V: Clone + Send + Sync + Lattice
+fn pmeet_generic_recursive_reset<'trie, const MAX_PAYLOAD_CNT: usize, V, A: Allocator>(
+    cur_group: &mut Option<(usize, &'trie TrieNodeODRc<V, A>)>,
+    is_exhaustive: &mut bool,
+    idx: usize,
+    self_payloads: &[(&[u8], PayloadRef<V, A>)],
+    keys: &mut [(&[u8], bool)],
+    request_results: &mut [(usize, PayloadRef<'trie, V, A>)],
+    results: &mut [FatAlgebraicResult<ValOrChild<V, A>>],
+) where
+    V: Clone + Send + Sync + Lattice,
 {
     match core::mem::take(cur_group) {
         Some((group_start, next_node)) => {
             let group_keys = &mut keys[group_start..idx];
             let group_results = &mut results[group_start..idx];
             let group_self_payloads = &self_payloads[group_start..idx];
-            if !pmeet_generic_internal::<MAX_PAYLOAD_CNT, V, A>(group_self_payloads, group_keys, request_results, group_results, next_node.as_tagged()) {
+            if !pmeet_generic_internal::<MAX_PAYLOAD_CNT, V, A>(
+                group_self_payloads,
+                group_keys,
+                request_results,
+                group_results,
+                next_node.as_tagged(),
+            ) {
                 *is_exhaustive = false;
             }
-        },
+        }
         None => {}
     }
 }
@@ -716,7 +825,7 @@ pub enum AbstractNodeRef<'a, V: Clone + Send + Sync, A: Allocator> {
     BorrowedDyn(TaggedNodeRef<'a, V, A>), //GOAT eliminate this variant!
     BorrowedRc(&'a TrieNodeODRc<V, A>),
     BorrowedTiny(TinyRefNode<'a, V, A>),
-    OwnedRc(TrieNodeODRc<V, A>)
+    OwnedRc(TrieNodeODRc<V, A>),
 }
 
 impl<'a, V: Clone + Send + Sync, A: Allocator> core::fmt::Debug for AbstractNodeRef<'a, V, A> {
@@ -741,7 +850,7 @@ impl<'a, V: Clone + Send + Sync, A: Allocator> AbstractNodeRef<'a, V, A> {
             AbstractNodeRef::BorrowedDyn(_) => None,
             AbstractNodeRef::BorrowedRc(node) => Some(*node),
             AbstractNodeRef::BorrowedTiny(_) => None,
-            AbstractNodeRef::OwnedRc(node) => Some(node)
+            AbstractNodeRef::OwnedRc(node) => Some(node),
         }
     }
     pub fn into_option(self) -> Option<TrieNodeODRc<V, A>> {
@@ -754,9 +863,11 @@ impl<'a, V: Clone + Send + Sync, A: Allocator> AbstractNodeRef<'a, V, A> {
                 } else {
                     None
                 }
-            },
-            AbstractNodeRef::BorrowedTiny(tiny) => tiny.into_full().map(|list_node| TrieNodeODRc::new_in(list_node, tiny.alloc)),
-            AbstractNodeRef::OwnedRc(rc) => Some(rc)
+            }
+            AbstractNodeRef::BorrowedTiny(tiny) => {
+                tiny.into_full().map(|list_node| TrieNodeODRc::new_in(list_node, tiny.alloc))
+            }
+            AbstractNodeRef::OwnedRc(rc) => Some(rc),
         }
     }
     pub fn as_tagged(&self) -> TaggedNodeRef<'_, V, A> {
@@ -765,7 +876,7 @@ impl<'a, V: Clone + Send + Sync, A: Allocator> AbstractNodeRef<'a, V, A> {
             AbstractNodeRef::BorrowedDyn(node) => *node,
             AbstractNodeRef::BorrowedRc(rc) => rc.as_tagged(),
             AbstractNodeRef::BorrowedTiny(tiny) => tiny.as_tagged(),
-            AbstractNodeRef::OwnedRc(rc) => rc.as_tagged()
+            AbstractNodeRef::OwnedRc(rc) => rc.as_tagged(),
         }
     }
     pub fn try_as_tagged(&self) -> Option<TaggedNodeRef<'_, V, A>> {
@@ -774,7 +885,7 @@ impl<'a, V: Clone + Send + Sync, A: Allocator> AbstractNodeRef<'a, V, A> {
             AbstractNodeRef::BorrowedDyn(node) => Some(*node),
             AbstractNodeRef::BorrowedRc(rc) => Some(rc.as_tagged()),
             AbstractNodeRef::BorrowedTiny(tiny) => Some(tiny.as_tagged()),
-            AbstractNodeRef::OwnedRc(rc) => Some(rc.as_tagged())
+            AbstractNodeRef::OwnedRc(rc) => Some(rc.as_tagged()),
         }
     }
 }
@@ -786,14 +897,14 @@ pub(crate) const LINE_LIST_NODE_TAG: usize = 2;
 pub(crate) const CELL_BYTE_NODE_TAG: usize = 3;
 pub(crate) const TINY_REF_NODE_TAG: usize = 4;
 
+pub(crate) use tagged_node_ref::TaggedNodePtr;
 pub(crate) use tagged_node_ref::TaggedNodeRef;
 pub(crate) use tagged_node_ref::TaggedNodeRefMut;
-pub(crate) use tagged_node_ref::TaggedNodePtr;
 
 #[cfg(not(feature = "slim_dispatch"))]
 mod tagged_node_ref {
-    use super::*;
     use super::super::empty::EmptyNode;
+    use super::*;
 
     pub(crate) static EMPTY_NODE: EmptyNode = EmptyNode;
 
@@ -835,11 +946,19 @@ mod tagged_node_ref {
             let (ptr, tag) = ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => Self::EmptyNode,
-                DENSE_BYTE_NODE_TAG => Self::DenseByteNode(unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }),
-                LINE_LIST_NODE_TAG => Self::LineListNode(unsafe{ &*ptr.cast::<LineListNode<V, A>>() }),
-                CELL_BYTE_NODE_TAG => Self::CellByteNode(unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }),
-                TINY_REF_NODE_TAG => Self::TinyRefNode(unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    Self::DenseByteNode(unsafe { &*ptr.cast::<DenseByteNode<V, A>>() })
+                }
+                LINE_LIST_NODE_TAG => {
+                    Self::LineListNode(unsafe { &*ptr.cast::<LineListNode<V, A>>() })
+                }
+                CELL_BYTE_NODE_TAG => {
+                    Self::CellByteNode(unsafe { &*ptr.cast::<CellByteNode<V, A>>() })
+                }
+                TINY_REF_NODE_TAG => {
+                    Self::TinyRefNode(unsafe { &*ptr.cast::<TinyRefNode<V, A>>() })
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         ///Unneeded
@@ -883,28 +1002,28 @@ mod tagged_node_ref {
         pub unsafe fn as_dense_unchecked(&self) -> &'a DenseByteNode<V, A> {
             match self {
                 Self::DenseByteNode(node) => node,
-                _ => unsafe { unreachable_unchecked() }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         #[inline(always)]
         pub unsafe fn as_list_unchecked(&self) -> &'a LineListNode<V, A> {
             match self {
                 Self::LineListNode(node) => node,
-                _ => unsafe { unreachable_unchecked() }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         #[inline(always)]
         pub unsafe fn as_cell_unchecked(&self) -> &'a CellByteNode<V, A> {
             match self {
                 Self::CellByteNode(node) => node,
-                _ => unsafe { unreachable_unchecked() }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         #[inline(always)]
         pub unsafe fn as_tiny_unchecked(&self) -> &'a TinyRefNode<'a, V, A> {
             match self {
                 Self::TinyRefNode(node) => node,
-                _ => unsafe{ unreachable_unchecked() }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
     }
@@ -957,10 +1076,16 @@ mod tagged_node_ref {
         pub(super) fn from_slim_ptr(ptr: super::slim_node_ptr::SlimNodePtr<V, A>) -> Self {
             let (ptr, tag) = ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => Self::DenseByteNode(unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }),
-                LINE_LIST_NODE_TAG => Self::LineListNode(unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }),
-                CELL_BYTE_NODE_TAG => Self::CellByteNode(unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    Self::DenseByteNode(unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() })
+                }
+                LINE_LIST_NODE_TAG => {
+                    Self::LineListNode(unsafe { &mut *ptr.cast::<LineListNode<V, A>>() })
+                }
+                CELL_BYTE_NODE_TAG => {
+                    Self::CellByteNode(unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() })
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         #[inline]
@@ -977,21 +1102,21 @@ mod tagged_node_ref {
         pub unsafe fn into_dense_unchecked(self) -> &'a mut DenseByteNode<V, A> {
             match self {
                 Self::DenseByteNode(node) => node,
-                _ => unsafe { unreachable_unchecked() }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         #[inline(always)]
         pub unsafe fn into_list_unchecked(self) -> &'a mut LineListNode<V, A> {
             match self {
                 Self::LineListNode(node) => node,
-                _ => unsafe { unreachable_unchecked() }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         #[inline(always)]
         pub unsafe fn into_cell_unchecked(self) -> &'a mut CellByteNode<V, A> {
             match self {
                 Self::CellByteNode(node) => node,
-                _ => unsafe { unreachable_unchecked() }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
     }
@@ -1007,7 +1132,9 @@ mod tagged_node_ref {
     }
     impl<V: Clone + Send + Sync, A: Allocator> Copy for TaggedNodePtr<V, A> {}
 
-    impl<V: Clone + Send + Sync, A: Allocator> From<TaggedNodeRefMut<'_, V, A>> for TaggedNodePtr<V, A> {
+    impl<V: Clone + Send + Sync, A: Allocator> From<TaggedNodeRefMut<'_, V, A>>
+        for TaggedNodePtr<V, A>
+    {
         #[inline]
         fn from(src: TaggedNodeRefMut<'_, V, A>) -> Self {
             match src {
@@ -1026,11 +1153,19 @@ mod tagged_node_ref {
         #[inline]
         pub unsafe fn into_tagged_mut<'a>(self: TaggedNodePtr<V, A>) -> TaggedNodeRefMut<'a, V, A> {
             match self {
-                TaggedNodePtr::DenseByteNode(mut node) => TaggedNodeRefMut::DenseByteNode(unsafe{ node.as_mut() }),
-                TaggedNodePtr::LineListNode(mut node) => TaggedNodeRefMut::LineListNode(unsafe{ node.as_mut() }),
+                TaggedNodePtr::DenseByteNode(mut node) => {
+                    TaggedNodeRefMut::DenseByteNode(unsafe { node.as_mut() })
+                }
+                TaggedNodePtr::LineListNode(mut node) => {
+                    TaggedNodeRefMut::LineListNode(unsafe { node.as_mut() })
+                }
                 #[cfg(feature = "bridge_nodes")]
-                TaggedNodePtr::BridgeNode(mut node) => TaggedNodeRefMut::BridgeNode(unsafe{ node.as_mut() }),
-                TaggedNodePtr::CellByteNode(mut node) => TaggedNodeRefMut::CellByteNode(unsafe{ node.as_mut() }),
+                TaggedNodePtr::BridgeNode(mut node) => {
+                    TaggedNodeRefMut::BridgeNode(unsafe { node.as_mut() })
+                }
+                TaggedNodePtr::CellByteNode(mut node) => {
+                    TaggedNodeRefMut::CellByteNode(unsafe { node.as_mut() })
+                }
             }
         }
         /// Returns a [TaggedNodeRef] from the `TaggedNodePtr`.  It is unsafe because the
@@ -1038,11 +1173,19 @@ mod tagged_node_ref {
         #[inline]
         pub unsafe fn as_tagged<'a>(self: &TaggedNodePtr<V, A>) -> TaggedNodeRef<'a, V, A> {
             match self {
-                TaggedNodePtr::DenseByteNode(node) => TaggedNodeRef::DenseByteNode(unsafe{ node.as_ref() }),
-                TaggedNodePtr::LineListNode(node) => TaggedNodeRef::LineListNode(unsafe{ node.as_ref() }),
+                TaggedNodePtr::DenseByteNode(node) => {
+                    TaggedNodeRef::DenseByteNode(unsafe { node.as_ref() })
+                }
+                TaggedNodePtr::LineListNode(node) => {
+                    TaggedNodeRef::LineListNode(unsafe { node.as_ref() })
+                }
                 #[cfg(feature = "bridge_nodes")]
-                TaggedNodePtr::BridgeNode(node) => TaggedNodeRef::BridgeNode(unsafe{ node.as_ref() }),
-                TaggedNodePtr::CellByteNode(node) => TaggedNodeRef::CellByteNode(unsafe{ node.as_ref() }),
+                TaggedNodePtr::BridgeNode(node) => {
+                    TaggedNodeRef::BridgeNode(unsafe { node.as_ref() })
+                }
+                TaggedNodePtr::CellByteNode(node) => {
+                    TaggedNodeRef::CellByteNode(unsafe { node.as_ref() })
+                }
             }
         }
     }
@@ -1113,7 +1256,7 @@ mod tagged_node_ref {
                 Self::BridgeNode(node) => node.node_key_overlap(key),
                 Self::CellByteNode(node) => node.node_key_overlap(key),
                 Self::TinyRefNode(node) => node.node_key_overlap(key),
-                Self::EmptyNode => 0
+                Self::EmptyNode => 0,
             }
         }
         pub fn node_contains_partial_key(&self, key: &[u8]) -> bool {
@@ -1124,7 +1267,7 @@ mod tagged_node_ref {
                 Self::BridgeNode(node) => node.node_contains_partial_key(key),
                 Self::CellByteNode(node) => node.node_contains_partial_key(key),
                 Self::TinyRefNode(node) => node.node_contains_partial_key(key),
-                Self::EmptyNode => false
+                Self::EmptyNode => false,
             }
         }
         #[inline(always)]
@@ -1140,7 +1283,11 @@ mod tagged_node_ref {
             }
         }
 
-        pub(crate) fn node_get_payloads<'res>(&self, keys: &[(&[u8], bool)], results: &'res mut [(usize, PayloadRef<'a, V, A>)]) -> bool {
+        pub(crate) fn node_get_payloads<'res>(
+            &self,
+            keys: &[(&[u8], bool)],
+            results: &'res mut [(usize, PayloadRef<'a, V, A>)],
+        ) -> bool {
             match self {
                 Self::DenseByteNode(node) => node.node_get_payloads(keys, results),
                 Self::LineListNode(node) => node.node_get_payloads(keys, results),
@@ -1205,11 +1352,16 @@ mod tagged_node_ref {
                 Self::BridgeNode(node) => node.iter_token_for_path(key),
                 Self::CellByteNode(node) => node.iter_token_for_path(key),
                 Self::TinyRefNode(node) => node.iter_token_for_path(key),
-                Self::EmptyNode => <EmptyNode as TrieNode<V, A>>::iter_token_for_path(&EMPTY_NODE, key),
+                Self::EmptyNode => {
+                    <EmptyNode as TrieNode<V, A>>::iter_token_for_path(&EMPTY_NODE, key)
+                }
             }
         }
         #[inline(always)]
-        pub fn next_items(&self, token: u128) -> (u128, &'a[u8], Option<&'a TrieNodeODRc<V, A>>, Option<&'a V>) {
+        pub fn next_items(
+            &self,
+            token: u128,
+        ) -> (u128, &'a [u8], Option<&'a TrieNodeODRc<V, A>>, Option<&'a V>) {
             match self {
                 Self::DenseByteNode(node) => node.next_items(token),
                 Self::LineListNode(node) => node.next_items(token),
@@ -1280,7 +1432,11 @@ mod tagged_node_ref {
             }
         }
 
-        pub fn nth_child_from_key(&self, key: &[u8], n: usize) -> (Option<u8>, Option<TaggedNodeRef<'a, V, A>>) {
+        pub fn nth_child_from_key(
+            &self,
+            key: &[u8],
+            n: usize,
+        ) -> (Option<u8>, Option<TaggedNodeRef<'a, V, A>>) {
             match self {
                 Self::DenseByteNode(node) => node.nth_child_from_key(key, n),
                 Self::LineListNode(node) => node.nth_child_from_key(key, n),
@@ -1288,10 +1444,15 @@ mod tagged_node_ref {
                 Self::BridgeNode(node) => node.nth_child_from_key(key, n),
                 Self::CellByteNode(node) => node.nth_child_from_key(key, n),
                 Self::TinyRefNode(node) => node.nth_child_from_key(key, n),
-                Self::EmptyNode => <EmptyNode as TrieNode<V, A>>::nth_child_from_key(&EMPTY_NODE, key, n),
+                Self::EmptyNode => {
+                    <EmptyNode as TrieNode<V, A>>::nth_child_from_key(&EMPTY_NODE, key, n)
+                }
             }
         }
-        pub fn first_child_from_key(&self, key: &[u8]) -> (Option<&'a [u8]>, Option<TaggedNodeRef<'a, V, A>>) {
+        pub fn first_child_from_key(
+            &self,
+            key: &[u8],
+        ) -> (Option<&'a [u8]>, Option<TaggedNodeRef<'a, V, A>>) {
             match self {
                 Self::DenseByteNode(node) => node.first_child_from_key(key),
                 Self::LineListNode(node) => node.first_child_from_key(key),
@@ -1299,7 +1460,9 @@ mod tagged_node_ref {
                 Self::BridgeNode(node) => node.first_child_from_key(key),
                 Self::CellByteNode(node) => node.first_child_from_key(key),
                 Self::TinyRefNode(node) => node.first_child_from_key(key),
-                Self::EmptyNode => <EmptyNode as TrieNode<V, A>>::first_child_from_key(&EMPTY_NODE, key),
+                Self::EmptyNode => {
+                    <EmptyNode as TrieNode<V, A>>::first_child_from_key(&EMPTY_NODE, key)
+                }
             }
         }
         #[inline(always)]
@@ -1323,7 +1486,9 @@ mod tagged_node_ref {
                 Self::BridgeNode(node) => node.node_branches_mask(key),
                 Self::CellByteNode(node) => node.node_branches_mask(key),
                 Self::TinyRefNode(node) => node.node_branches_mask(key),
-                Self::EmptyNode => <EmptyNode as TrieNode<V, A>>::node_branches_mask(&EMPTY_NODE, key),
+                Self::EmptyNode => {
+                    <EmptyNode as TrieNode<V, A>>::node_branches_mask(&EMPTY_NODE, key)
+                }
             }
         }
         pub fn prior_branch_key<'key>(&self, key: &'key [u8]) -> &'key [u8] {
@@ -1334,10 +1499,16 @@ mod tagged_node_ref {
                 Self::BridgeNode(node) => node.prior_branch_key(key),
                 Self::CellByteNode(node) => node.prior_branch_key(key),
                 Self::TinyRefNode(node) => node.prior_branch_key(key),
-                Self::EmptyNode => <EmptyNode as TrieNode<V, A>>::prior_branch_key(&EMPTY_NODE, key),
+                Self::EmptyNode => {
+                    <EmptyNode as TrieNode<V, A>>::prior_branch_key(&EMPTY_NODE, key)
+                }
             }
         }
-        pub fn get_sibling_of_child(&self, key: &[u8], next: bool) -> (Option<u8>, Option<TaggedNodeRef<'a, V, A>>) {
+        pub fn get_sibling_of_child(
+            &self,
+            key: &[u8],
+            next: bool,
+        ) -> (Option<u8>, Option<TaggedNodeRef<'a, V, A>>) {
             match self {
                 Self::DenseByteNode(node) => node.get_sibling_of_child(key, next),
                 Self::LineListNode(node) => node.get_sibling_of_child(key, next),
@@ -1345,7 +1516,9 @@ mod tagged_node_ref {
                 Self::BridgeNode(node) => node.get_sibling_of_child(key, next),
                 Self::CellByteNode(node) => node.get_sibling_of_child(key, next),
                 Self::TinyRefNode(node) => node.get_sibling_of_child(key, next),
-                Self::EmptyNode => <EmptyNode as TrieNode<V, A>>::get_sibling_of_child(&EMPTY_NODE, key, next),
+                Self::EmptyNode => {
+                    <EmptyNode as TrieNode<V, A>>::get_sibling_of_child(&EMPTY_NODE, key, next)
+                }
             }
         }
         pub fn get_node_at_key(&self, key: &[u8]) -> AbstractNodeRef<'a, V, A> {
@@ -1360,7 +1533,10 @@ mod tagged_node_ref {
             }
         }
 
-        pub fn pjoin_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>> where V: Lattice {
+        pub fn pjoin_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>>
+        where
+            V: Lattice,
+        {
             match self {
                 Self::DenseByteNode(node) => node.pjoin_dyn(other),
                 Self::LineListNode(node) => node.pjoin_dyn(other),
@@ -1370,7 +1546,10 @@ mod tagged_node_ref {
             }
         }
 
-        pub fn pmeet_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>> where V: Lattice {
+        pub fn pmeet_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>>
+        where
+            V: Lattice,
+        {
             match self {
                 Self::DenseByteNode(node) => node.pmeet_dyn(other),
                 Self::LineListNode(node) => node.pmeet_dyn(other),
@@ -1380,7 +1559,13 @@ mod tagged_node_ref {
             }
         }
 
-        pub fn psubtract_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>> where V: DistributiveLattice {
+        pub fn psubtract_dyn(
+            &self,
+            other: TaggedNodeRef<V, A>,
+        ) -> AlgebraicResult<TrieNodeODRc<V, A>>
+        where
+            V: DistributiveLattice,
+        {
             match self {
                 Self::DenseByteNode(node) => node.psubtract_dyn(other),
                 Self::LineListNode(node) => node.psubtract_dyn(other),
@@ -1390,7 +1575,10 @@ mod tagged_node_ref {
             }
         }
 
-        pub fn prestrict_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>> {
+        pub fn prestrict_dyn(
+            &self,
+            other: TaggedNodeRef<V, A>,
+        ) -> AlgebraicResult<TrieNodeODRc<V, A>> {
             match self {
                 Self::DenseByteNode(node) => node.prestrict_dyn(other),
                 Self::LineListNode(node) => node.prestrict_dyn(other),
@@ -1454,7 +1642,7 @@ mod tagged_node_ref {
         pub fn is_cell_node(&self) -> bool {
             match self {
                 Self::CellByteNode(_) => true,
-                _ => false
+                _ => false,
             }
         }
 
@@ -1522,7 +1710,10 @@ mod tagged_node_ref {
             }
         }
 
-        pub fn node_get_child_mut(&mut self, key: &[u8]) -> Option<(usize, &mut TrieNodeODRc<V, A>)> {
+        pub fn node_get_child_mut(
+            &mut self,
+            key: &[u8],
+        ) -> Option<(usize, &mut TrieNodeODRc<V, A>)> {
             match self {
                 Self::DenseByteNode(node) => node.node_get_child_mut(key),
                 Self::LineListNode(node) => node.node_get_child_mut(key),
@@ -1531,7 +1722,10 @@ mod tagged_node_ref {
         }
 
         /// Similar to [`TaggedNodeRefMut::node_get_child_mut`], but consumes the `TaggedNodeRefMut`, and returns the child node, or None
-        pub fn node_into_child_mut(self, key: &[u8]) -> Option<(usize, &'a mut TrieNodeODRc<V, A>)> {
+        pub fn node_into_child_mut(
+            self,
+            key: &[u8],
+        ) -> Option<(usize, &'a mut TrieNodeODRc<V, A>)> {
             match self {
                 Self::DenseByteNode(node) => node.node_get_child_mut(key),
                 Self::LineListNode(node) => node.node_get_child_mut(key),
@@ -1539,7 +1733,10 @@ mod tagged_node_ref {
             }
         }
 
-        pub fn node_create_dangling(&mut self, key: &[u8]) -> Result<(bool, bool), TrieNodeODRc<V, A>> {
+        pub fn node_create_dangling(
+            &mut self,
+            key: &[u8],
+        ) -> Result<(bool, bool), TrieNodeODRc<V, A>> {
             match self {
                 Self::DenseByteNode(node) => node.node_create_dangling(key),
                 Self::LineListNode(node) => node.node_create_dangling(key),
@@ -1581,7 +1778,11 @@ mod tagged_node_ref {
             }
         }
 
-        pub fn node_set_val(&mut self, key: &[u8], val: V) -> Result<(Option<V>, bool), TrieNodeODRc<V, A>> {
+        pub fn node_set_val(
+            &mut self,
+            key: &[u8],
+            val: V,
+        ) -> Result<(Option<V>, bool), TrieNodeODRc<V, A>> {
             match self {
                 Self::DenseByteNode(node) => node.node_set_val(key, val),
                 Self::LineListNode(node) => node.node_set_val(key, val),
@@ -1597,7 +1798,11 @@ mod tagged_node_ref {
             }
         }
 
-        pub fn node_set_branch(&mut self, key: &[u8], new_node: TrieNodeODRc<V, A>) -> Result<bool, TrieNodeODRc<V, A>> {
+        pub fn node_set_branch(
+            &mut self,
+            key: &[u8],
+            new_node: TrieNodeODRc<V, A>,
+        ) -> Result<bool, TrieNodeODRc<V, A>> {
             match self {
                 Self::DenseByteNode(node) => node.node_set_branch(key, new_node),
                 Self::LineListNode(node) => node.node_set_branch(key, new_node),
@@ -1627,7 +1832,13 @@ mod tagged_node_ref {
                 Self::CellByteNode(node) => node.take_node_at_key(key, prune),
             }
         }
-        pub fn join_into_dyn(&mut self, other: TrieNodeODRc<V, A>) -> (AlgebraicStatus, Result<(), TrieNodeODRc<V, A>>) where V: Lattice {
+        pub fn join_into_dyn(
+            &mut self,
+            other: TrieNodeODRc<V, A>,
+        ) -> (AlgebraicStatus, Result<(), TrieNodeODRc<V, A>>)
+        where
+            V: Lattice,
+        {
             match self {
                 Self::DenseByteNode(node) => node.join_into_dyn(other),
                 Self::LineListNode(node) => node.join_into_dyn(other),
@@ -1635,7 +1846,10 @@ mod tagged_node_ref {
             }
         }
 
-        pub fn drop_head_dyn(&mut self, byte_cnt: usize) -> Option<TrieNodeODRc<V, A>> where V: Lattice {
+        pub fn drop_head_dyn(&mut self, byte_cnt: usize) -> Option<TrieNodeODRc<V, A>>
+        where
+            V: Lattice,
+        {
             match self {
                 Self::DenseByteNode(node) => node.drop_head_dyn(byte_cnt),
                 Self::LineListNode(node) => node.drop_head_dyn(byte_cnt),
@@ -1655,23 +1869,23 @@ mod tagged_node_ref {
 
 #[cfg(feature = "slim_dispatch")]
 mod tagged_node_ref {
-    use core::marker::PhantomData;
     use super::trie_node::slim_node_ptr::SlimNodePtr;
     use super::*;
+    use core::marker::PhantomData;
 
-    #[cfg(not(feature="slim_ptrs"))]
+    #[cfg(not(feature = "slim_ptrs"))]
     compile_error!("slim_ptrs is required for slim_dispatch");
 
     pub struct TaggedNodeRef<'a, V: Clone + Send + Sync, A: Allocator> {
         ptr: SlimNodePtr<V, A>,
-        phantom: PhantomData<&'a V>
+        phantom: PhantomData<&'a V>,
     }
 
     impl<V: Clone + Send + Sync, A: Allocator> Clone for TaggedNodeRef<'_, V, A> {
         fn clone(&self) -> Self {
             //Ugh!  This manual impl is so we can implement `Copy` without a bound on `V: Copy`
             //But hopefully there is a way to do this without so much boilerplate (or unsafe either)
-            Self{ ptr: self.ptr, phantom: PhantomData }
+            Self { ptr: self.ptr, phantom: PhantomData }
         }
     }
     impl<V: Clone + Send + Sync, A: Allocator> Copy for TaggedNodeRef<'_, V, A> {}
@@ -1686,7 +1900,13 @@ mod tagged_node_ref {
     impl<'a, V: Clone + Send + Sync + 'a, A: Allocator + 'a> TaggedNodeRef<'a, V, A> {
         #[inline]
         pub(crate) fn empty_node() -> Self {
-            Self { ptr: SlimNodePtr::from_raw_parts(core::ptr::without_provenance_mut::<usize>(0xBAADF00D), EMPTY_NODE_TAG), phantom: PhantomData }
+            Self {
+                ptr: SlimNodePtr::from_raw_parts(
+                    core::ptr::without_provenance_mut::<usize>(0xBAADF00D),
+                    EMPTY_NODE_TAG,
+                ),
+                phantom: PhantomData,
+            }
         }
         #[inline]
         pub(super) fn from_slim_ptr(ptr: SlimNodePtr<V, A>) -> Self {
@@ -1702,19 +1922,43 @@ mod tagged_node_ref {
         // }
         #[inline]
         pub fn from_dense(node: &DenseByteNode<V, A>) -> Self {
-            Self{ ptr: SlimNodePtr::from_raw_parts((node as *const DenseByteNode<V, A>).cast_mut(), DENSE_BYTE_NODE_TAG), phantom: PhantomData }
+            Self {
+                ptr: SlimNodePtr::from_raw_parts(
+                    (node as *const DenseByteNode<V, A>).cast_mut(),
+                    DENSE_BYTE_NODE_TAG,
+                ),
+                phantom: PhantomData,
+            }
         }
         #[inline]
         pub fn from_list(node: &LineListNode<V, A>) -> Self {
-            Self{ ptr: SlimNodePtr::from_raw_parts((node as *const LineListNode<V, A>).cast_mut(), LINE_LIST_NODE_TAG), phantom: PhantomData }
+            Self {
+                ptr: SlimNodePtr::from_raw_parts(
+                    (node as *const LineListNode<V, A>).cast_mut(),
+                    LINE_LIST_NODE_TAG,
+                ),
+                phantom: PhantomData,
+            }
         }
         #[inline]
         pub fn from_cell(node: &CellByteNode<V, A>) -> Self {
-            Self{ ptr: SlimNodePtr::from_raw_parts((node as *const CellByteNode<V, A>).cast_mut(), CELL_BYTE_NODE_TAG), phantom: PhantomData }
+            Self {
+                ptr: SlimNodePtr::from_raw_parts(
+                    (node as *const CellByteNode<V, A>).cast_mut(),
+                    CELL_BYTE_NODE_TAG,
+                ),
+                phantom: PhantomData,
+            }
         }
         #[inline]
         pub fn from_tiny(node: &'a TinyRefNode<V, A>) -> Self {
-            Self{ ptr: SlimNodePtr::from_raw_parts((node as *const TinyRefNode<V, A>).cast_mut(), TINY_REF_NODE_TAG), phantom: PhantomData }
+            Self {
+                ptr: SlimNodePtr::from_raw_parts(
+                    (node as *const TinyRefNode<V, A>).cast_mut(),
+                    TINY_REF_NODE_TAG,
+                ),
+                phantom: PhantomData,
+            }
         }
         #[inline]
         pub fn tag(&self) -> usize {
@@ -1733,11 +1977,19 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => 0,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_key_overlap(key),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_key_overlap(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_key_overlap(key),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_key_overlap(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.node_key_overlap(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.node_key_overlap(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.node_key_overlap(key)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_key_overlap(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         #[inline]
@@ -1745,33 +1997,61 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => None,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_get_child(key),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_get_child(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_get_child(key),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_get_child(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.node_get_child(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.node_get_child(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.node_get_child(key)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_get_child(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
-        pub fn node_get_payloads<'res>(&self, keys: &[(&[u8], bool)], results: &'res mut [(usize, PayloadRef<'a, V, A>)]) -> bool {
+        pub fn node_get_payloads<'res>(
+            &self,
+            keys: &[(&[u8], bool)],
+            results: &'res mut [(usize, PayloadRef<'a, V, A>)],
+        ) -> bool {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => true,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_get_payloads(keys, results),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_get_payloads(keys, results),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_get_payloads(keys, results),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_get_payloads(keys, results),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.node_get_payloads(keys, results)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.node_get_payloads(keys, results)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.node_get_payloads(keys, results)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_get_payloads(keys, results)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         pub fn node_contains_val(&self, key: &[u8]) -> bool {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => false,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_contains_val(key),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_contains_val(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_contains_val(key),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_contains_val(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.node_contains_val(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.node_contains_val(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.node_contains_val(key)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_contains_val(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -1779,11 +2059,17 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => None,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_get_val(key),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_get_val(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_get_val(key),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_get_val(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.node_get_val(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.node_get_val(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.node_get_val(key)
+                }
+                TINY_REF_NODE_TAG => unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_get_val(key),
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         #[inline]
@@ -1791,11 +2077,13 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => true,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_is_empty(),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_is_empty(),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_is_empty(),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_is_empty(),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.node_is_empty()
+                }
+                LINE_LIST_NODE_TAG => unsafe { &*ptr.cast::<LineListNode<V, A>>() }.node_is_empty(),
+                CELL_BYTE_NODE_TAG => unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.node_is_empty(),
+                TINY_REF_NODE_TAG => unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_is_empty(),
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -1804,11 +2092,17 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => 0,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.new_iter_token(),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.new_iter_token(),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.new_iter_token(),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.new_iter_token(),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.new_iter_token()
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.new_iter_token()
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.new_iter_token()
+                }
+                TINY_REF_NODE_TAG => unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.new_iter_token(),
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         #[inline]
@@ -1816,23 +2110,40 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => 0,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.iter_token_for_path(key),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.iter_token_for_path(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.iter_token_for_path(key),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.iter_token_for_path(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.iter_token_for_path(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.iter_token_for_path(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.iter_token_for_path(key)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.iter_token_for_path(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         #[inline]
-        pub fn next_items(&self, token: u128) -> (u128, &[u8], Option<&'a TrieNodeODRc<V, A>>, Option<&'a V>) {
+        pub fn next_items(
+            &self,
+            token: u128,
+        ) -> (u128, &[u8], Option<&'a TrieNodeODRc<V, A>>, Option<&'a V>) {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => (NODE_ITER_FINISHED, &[], None, None),
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.next_items(token),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.next_items(token),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.next_items(token),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.next_items(token),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.next_items(token)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.next_items(token)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.next_items(token)
+                }
+                TINY_REF_NODE_TAG => unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.next_items(token),
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -1840,11 +2151,19 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => 0,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_val_count(cache),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_val_count(cache),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_val_count(cache),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_val_count(cache),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.node_val_count(cache)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.node_val_count(cache)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.node_val_count(cache)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_val_count(cache)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -1852,11 +2171,19 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => 0,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_goat_val_count(),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_goat_val_count(),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_goat_val_count(),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_goat_val_count(),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.node_goat_val_count()
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.node_goat_val_count()
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.node_goat_val_count()
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_goat_val_count()
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -1864,11 +2191,19 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => (0, None),
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_child_iter_start(),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_child_iter_start(),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_child_iter_start(),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_child_iter_start(),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.node_child_iter_start()
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.node_child_iter_start()
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.node_child_iter_start()
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_child_iter_start()
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -1876,11 +2211,19 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => (0, None),
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_child_iter_next(token),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_child_iter_next(token),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_child_iter_next(token),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_child_iter_next(token),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.node_child_iter_next(token)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.node_child_iter_next(token)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.node_child_iter_next(token)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_child_iter_next(token)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -1891,35 +2234,63 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => None,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_first_val_depth_along_key(key),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_first_val_depth_along_key(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_first_val_depth_along_key(key),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_first_val_depth_along_key(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }
+                    .node_first_val_depth_along_key(key),
+                LINE_LIST_NODE_TAG => unsafe { &*ptr.cast::<LineListNode<V, A>>() }
+                    .node_first_val_depth_along_key(key),
+                CELL_BYTE_NODE_TAG => unsafe { &*ptr.cast::<CellByteNode<V, A>>() }
+                    .node_first_val_depth_along_key(key),
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_first_val_depth_along_key(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
-        pub fn nth_child_from_key(&self, key: &[u8], n: usize) -> (Option<u8>, Option<TaggedNodeRef<'a, V, A>>) {
+        pub fn nth_child_from_key(
+            &self,
+            key: &[u8],
+            n: usize,
+        ) -> (Option<u8>, Option<TaggedNodeRef<'a, V, A>>) {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => (None, None),
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.nth_child_from_key(key, n),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.nth_child_from_key(key, n),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.nth_child_from_key(key, n),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.nth_child_from_key(key, n),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.nth_child_from_key(key, n)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.nth_child_from_key(key, n)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.nth_child_from_key(key, n)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.nth_child_from_key(key, n)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
-        pub fn first_child_from_key(&self, key: &[u8]) -> (Option<&'a [u8]>, Option<TaggedNodeRef<'a, V, A>>) {
+        pub fn first_child_from_key(
+            &self,
+            key: &[u8],
+        ) -> (Option<&'a [u8]>, Option<TaggedNodeRef<'a, V, A>>) {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => (None, None),
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.first_child_from_key(key),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.first_child_from_key(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.first_child_from_key(key),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.first_child_from_key(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.first_child_from_key(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.first_child_from_key(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.first_child_from_key(key)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.first_child_from_key(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -1928,11 +2299,19 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => 0,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.count_branches(key),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.count_branches(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.count_branches(key),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.count_branches(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.count_branches(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.count_branches(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.count_branches(key)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.count_branches(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         #[inline]
@@ -1940,11 +2319,19 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => ByteMask::EMPTY,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.node_branches_mask(key),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.node_branches_mask(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.node_branches_mask(key),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.node_branches_mask(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.node_branches_mask(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.node_branches_mask(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.node_branches_mask(key)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.node_branches_mask(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         // #[inline]
@@ -1954,23 +2341,43 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => &[],
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.prior_branch_key(key),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.prior_branch_key(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.prior_branch_key(key),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.prior_branch_key(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.prior_branch_key(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.prior_branch_key(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.prior_branch_key(key)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.prior_branch_key(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
-        pub fn get_sibling_of_child(&self, key: &[u8], next: bool) -> (Option<u8>, Option<TaggedNodeRef<'a, V, A>>) {
+        pub fn get_sibling_of_child(
+            &self,
+            key: &[u8],
+            next: bool,
+        ) -> (Option<u8>, Option<TaggedNodeRef<'a, V, A>>) {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => (None, None),
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.get_sibling_of_child(key, next),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.get_sibling_of_child(key, next),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.get_sibling_of_child(key, next),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.get_sibling_of_child(key, next),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.get_sibling_of_child(key, next)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.get_sibling_of_child(key, next)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.get_sibling_of_child(key, next)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.get_sibling_of_child(key, next)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -1978,59 +2385,110 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => AbstractNodeRef::None,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.get_node_at_key(key),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.get_node_at_key(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.get_node_at_key(key),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.get_node_at_key(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.get_node_at_key(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.get_node_at_key(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.get_node_at_key(key)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.get_node_at_key(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
-        pub fn pjoin_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>> where V: Lattice {
+        pub fn pjoin_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>>
+        where
+            V: Lattice,
+        {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => super::super::empty::EmptyNode.pjoin_dyn(other),
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.pjoin_dyn(other),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.pjoin_dyn(other),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.pjoin_dyn(other),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.pjoin_dyn(other),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.pjoin_dyn(other)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.pjoin_dyn(other)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.pjoin_dyn(other)
+                }
+                TINY_REF_NODE_TAG => unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.pjoin_dyn(other),
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
-        pub fn pmeet_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>> where V: Lattice {
+        pub fn pmeet_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>>
+        where
+            V: Lattice,
+        {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => AlgebraicResult::None,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.pmeet_dyn(other),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.pmeet_dyn(other),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.pmeet_dyn(other),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.pmeet_dyn(other),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.pmeet_dyn(other)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.pmeet_dyn(other)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.pmeet_dyn(other)
+                }
+                TINY_REF_NODE_TAG => unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.pmeet_dyn(other),
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
-        pub fn psubtract_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>> where V: DistributiveLattice {
+        pub fn psubtract_dyn(
+            &self,
+            other: TaggedNodeRef<V, A>,
+        ) -> AlgebraicResult<TrieNodeODRc<V, A>>
+        where
+            V: DistributiveLattice,
+        {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => AlgebraicResult::None,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.psubtract_dyn(other),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.psubtract_dyn(other),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.psubtract_dyn(other),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.psubtract_dyn(other),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.psubtract_dyn(other)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.psubtract_dyn(other)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.psubtract_dyn(other)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.psubtract_dyn(other)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
-        pub fn prestrict_dyn(&self, other: TaggedNodeRef<V, A>) -> AlgebraicResult<TrieNodeODRc<V, A>> {
+        pub fn prestrict_dyn(
+            &self,
+            other: TaggedNodeRef<V, A>,
+        ) -> AlgebraicResult<TrieNodeODRc<V, A>> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => AlgebraicResult::None,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.prestrict_dyn(other),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.prestrict_dyn(other),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.prestrict_dyn(other),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.prestrict_dyn(other),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.prestrict_dyn(other)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &*ptr.cast::<LineListNode<V, A>>() }.prestrict_dyn(other)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.prestrict_dyn(other)
+                }
+                TINY_REF_NODE_TAG => {
+                    unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.prestrict_dyn(other)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -2038,11 +2496,11 @@ mod tagged_node_ref {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => TrieNodeODRc::new_empty(),
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.clone_self(),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.clone_self(),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.clone_self(),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.clone_self(),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.clone_self(),
+                LINE_LIST_NODE_TAG => unsafe { &*ptr.cast::<LineListNode<V, A>>() }.clone_self(),
+                CELL_BYTE_NODE_TAG => unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.clone_self(),
+                TINY_REF_NODE_TAG => unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.clone_self(),
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -2055,66 +2513,66 @@ mod tagged_node_ref {
         pub fn as_dense(&self) -> Option<&'a DenseByteNode<V, A>> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => Some( unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() } ),
-                _ => None
+                DENSE_BYTE_NODE_TAG => Some(unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }),
+                _ => None,
             }
         }
         #[inline]
         pub fn as_list(&self) -> Option<&'a LineListNode<V, A>> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                LINE_LIST_NODE_TAG => Some( unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() } ),
-                _ => None
+                LINE_LIST_NODE_TAG => Some(unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }),
+                _ => None,
             }
         }
         #[inline]
         pub fn as_cell(&self) -> Option<&'a CellByteNode<V, A>> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                CELL_BYTE_NODE_TAG => Some( unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() } ),
-                _ => None
+                CELL_BYTE_NODE_TAG => Some(unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }),
+                _ => None,
             }
         }
         #[inline]
         pub unsafe fn as_dense_unchecked(&self) -> &'a DenseByteNode<V, A> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             debug_assert_eq!(tag, DENSE_BYTE_NODE_TAG);
-            unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }
+            unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }
         }
         #[inline]
         pub unsafe fn as_list_unchecked(&self) -> &'a LineListNode<V, A> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             debug_assert_eq!(tag, LINE_LIST_NODE_TAG);
-            unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }
+            unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }
         }
         #[inline]
         pub unsafe fn as_cell_unchecked(&self) -> &'a CellByteNode<V, A> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             debug_assert_eq!(tag, CELL_BYTE_NODE_TAG);
-            unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }
+            unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }
         }
         #[inline]
         pub unsafe fn as_tiny_unchecked(&self) -> &'a TinyRefNode<'a, V, A> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             debug_assert_eq!(tag, TINY_REF_NODE_TAG);
-            unsafe{ &mut *ptr.cast::<TinyRefNode<V, A>>() }
+            unsafe { &mut *ptr.cast::<TinyRefNode<V, A>>() }
         }
         pub fn item_count(&self) -> usize {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => 0,
-                DENSE_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<DenseByteNode<V, A>>() }.item_count(),
-                LINE_LIST_NODE_TAG => unsafe{ &*ptr.cast::<LineListNode<V, A>>() }.item_count(),
-                CELL_BYTE_NODE_TAG => unsafe{ &*ptr.cast::<CellByteNode<V, A>>() }.item_count(),
-                TINY_REF_NODE_TAG => unsafe{ &*ptr.cast::<TinyRefNode<V, A>>() }.item_count(),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => unsafe { &*ptr.cast::<DenseByteNode<V, A>>() }.item_count(),
+                LINE_LIST_NODE_TAG => unsafe { &*ptr.cast::<LineListNode<V, A>>() }.item_count(),
+                CELL_BYTE_NODE_TAG => unsafe { &*ptr.cast::<CellByteNode<V, A>>() }.item_count(),
+                TINY_REF_NODE_TAG => unsafe { &*ptr.cast::<TinyRefNode<V, A>>() }.item_count(),
+                _ => unsafe { unreachable_unchecked() },
             }
         }
     }
 
     pub struct TaggedNodeRefMut<'a, V: Clone + Send + Sync, A: Allocator> {
         ptr: SlimNodePtr<V, A>,
-        phantom: PhantomData<&'a mut V>
+        phantom: PhantomData<&'a mut V>,
     }
 
     //NOTE: this is a not derived because we don't want to restrict the impl to V: Debug
@@ -2131,15 +2589,24 @@ mod tagged_node_ref {
         }
         #[inline]
         pub fn from_dense(node: &mut DenseByteNode<V, A>) -> Self {
-            Self { ptr: SlimNodePtr::from_raw_parts(node, DENSE_BYTE_NODE_TAG), phantom: PhantomData }
+            Self {
+                ptr: SlimNodePtr::from_raw_parts(node, DENSE_BYTE_NODE_TAG),
+                phantom: PhantomData,
+            }
         }
         #[inline]
         pub fn from_list(node: &mut LineListNode<V, A>) -> Self {
-            Self { ptr: SlimNodePtr::from_raw_parts(node, LINE_LIST_NODE_TAG), phantom: PhantomData }
+            Self {
+                ptr: SlimNodePtr::from_raw_parts(node, LINE_LIST_NODE_TAG),
+                phantom: PhantomData,
+            }
         }
         #[inline]
         pub fn from_cell(node: &mut CellByteNode<V, A>) -> Self {
-            Self { ptr: SlimNodePtr::from_raw_parts(node, CELL_BYTE_NODE_TAG), phantom: PhantomData }
+            Self {
+                ptr: SlimNodePtr::from_raw_parts(node, CELL_BYTE_NODE_TAG),
+                phantom: PhantomData,
+            }
         }
         #[inline]
         pub fn tag(&self) -> usize {
@@ -2155,133 +2622,233 @@ mod tagged_node_ref {
             self.ptr.as_tagged()
         }
 
-        pub fn node_get_child_mut(&mut self, key: &[u8]) -> Option<(usize, &'a mut TrieNodeODRc<V, A>)> {
+        pub fn node_get_child_mut(
+            &mut self,
+            key: &[u8],
+        ) -> Option<(usize, &'a mut TrieNodeODRc<V, A>)> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_get_child_mut(key),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.node_get_child_mut(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.node_get_child_mut(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_get_child_mut(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }.node_get_child_mut(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }.node_get_child_mut(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
         /// Similar to [`TaggedNodeRefMut::node_get_child_mut`], but consumes the `TaggedNodeRefMut`, and returns the child node, or None
-        pub fn node_into_child_mut(self, key: &[u8]) -> Option<(usize, &'a mut TrieNodeODRc<V, A>)> {
+        pub fn node_into_child_mut(
+            self,
+            key: &[u8],
+        ) -> Option<(usize, &'a mut TrieNodeODRc<V, A>)> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_get_child_mut(key),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.node_get_child_mut(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.node_get_child_mut(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_get_child_mut(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }.node_get_child_mut(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }.node_get_child_mut(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
         pub fn node_replace_child(&mut self, key: &[u8], new_node: TrieNodeODRc<V, A>) {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_replace_child(key, new_node),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.node_replace_child(key, new_node),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.node_replace_child(key, new_node),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }
+                    .node_replace_child(key, new_node),
+                LINE_LIST_NODE_TAG => unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }
+                    .node_replace_child(key, new_node),
+                CELL_BYTE_NODE_TAG => unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }
+                    .node_replace_child(key, new_node),
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
         pub fn node_get_val_mut(&mut self, key: &[u8]) -> Option<&mut V> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_get_val_mut(key),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.node_get_val_mut(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.node_get_val_mut(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_get_val_mut(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }.node_get_val_mut(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }.node_get_val_mut(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         pub fn node_into_val_ref_mut(self, key: &[u8]) -> Option<&'a mut V> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ core::mem::transmute::<_, Option<&'a mut V>>((&mut *ptr.cast::<DenseByteNode<V, A>>()).node_get_val_mut(key)) },
-                LINE_LIST_NODE_TAG => unsafe{ core::mem::transmute::<_, Option<&'a mut V>>((&mut *ptr.cast::<LineListNode<V, A>>()).node_get_val_mut(key)) },
-                CELL_BYTE_NODE_TAG => unsafe{ core::mem::transmute::<_, Option<&'a mut V>>((&mut *ptr.cast::<CellByteNode<V, A>>()).node_get_val_mut(key)) },
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => unsafe {
+                    core::mem::transmute::<_, Option<&'a mut V>>(
+                        (&mut *ptr.cast::<DenseByteNode<V, A>>()).node_get_val_mut(key),
+                    )
+                },
+                LINE_LIST_NODE_TAG => unsafe {
+                    core::mem::transmute::<_, Option<&'a mut V>>(
+                        (&mut *ptr.cast::<LineListNode<V, A>>()).node_get_val_mut(key),
+                    )
+                },
+                CELL_BYTE_NODE_TAG => unsafe {
+                    core::mem::transmute::<_, Option<&'a mut V>>(
+                        (&mut *ptr.cast::<CellByteNode<V, A>>()).node_get_val_mut(key),
+                    )
+                },
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
-        pub fn node_set_val(&mut self, key: &[u8], val: V) -> Result<(Option<V>, bool), TrieNodeODRc<V, A>> {
+        pub fn node_set_val(
+            &mut self,
+            key: &[u8],
+            val: V,
+        ) -> Result<(Option<V>, bool), TrieNodeODRc<V, A>> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_set_val(key, val),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.node_set_val(key, val),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.node_set_val(key, val),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_set_val(key, val)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }.node_set_val(key, val)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }.node_set_val(key, val)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
         pub fn node_remove_val(&mut self, key: &[u8]) -> Option<V> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_remove_val(key),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.node_remove_val(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.node_remove_val(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_remove_val(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }.node_remove_val(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }.node_remove_val(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
-        pub fn node_set_branch(&mut self, key: &[u8], new_node: TrieNodeODRc<V, A>) -> Result<bool, TrieNodeODRc<V, A>> {
+        pub fn node_set_branch(
+            &mut self,
+            key: &[u8],
+            new_node: TrieNodeODRc<V, A>,
+        ) -> Result<bool, TrieNodeODRc<V, A>> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_set_branch(key, new_node),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.node_set_branch(key, new_node),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.node_set_branch(key, new_node),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }
+                    .node_set_branch(key, new_node),
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }.node_set_branch(key, new_node)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }.node_set_branch(key, new_node)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
         pub fn node_remove_all_branches(&mut self, key: &[u8]) -> bool {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_remove_all_branches(key),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.node_remove_all_branches(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.node_remove_all_branches(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_remove_all_branches(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }.node_remove_all_branches(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }.node_remove_all_branches(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
         pub fn node_remove_unmasked_branches(&mut self, key: &[u8], mask: ByteMask) {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.node_remove_unmasked_branches(key, mask),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.node_remove_unmasked_branches(key, mask),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.node_remove_unmasked_branches(key, mask),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }
+                    .node_remove_unmasked_branches(key, mask),
+                LINE_LIST_NODE_TAG => unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }
+                    .node_remove_unmasked_branches(key, mask),
+                CELL_BYTE_NODE_TAG => unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }
+                    .node_remove_unmasked_branches(key, mask),
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
         pub fn take_node_at_key(&mut self, key: &[u8]) -> Option<TrieNodeODRc<V, A>> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.take_node_at_key(key),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.take_node_at_key(key),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.take_node_at_key(key),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }.take_node_at_key(key)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }.take_node_at_key(key)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }.take_node_at_key(key)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
-        pub fn join_into_dyn(&mut self, other: TrieNodeODRc<V, A>) -> (AlgebraicStatus, Result<(), TrieNodeODRc<V, A>>) where V: Lattice {
+        pub fn join_into_dyn(
+            &mut self,
+            other: TrieNodeODRc<V, A>,
+        ) -> (AlgebraicStatus, Result<(), TrieNodeODRc<V, A>>)
+        where
+            V: Lattice,
+        {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.join_into_dyn(other),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.join_into_dyn(other),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.join_into_dyn(other),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }.join_into_dyn(other)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }.join_into_dyn(other)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }.join_into_dyn(other)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
-        pub fn drop_head_dyn(&mut self, byte_cnt: usize) -> Option<TrieNodeODRc<V, A>> where V: Lattice {
+        pub fn drop_head_dyn(&mut self, byte_cnt: usize) -> Option<TrieNodeODRc<V, A>>
+        where
+            V: Lattice,
+        {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.drop_head_dyn(byte_cnt),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.drop_head_dyn(byte_cnt),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.drop_head_dyn(byte_cnt),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }.drop_head_dyn(byte_cnt)
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }.drop_head_dyn(byte_cnt)
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }.drop_head_dyn(byte_cnt)
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
 
@@ -2289,73 +2856,84 @@ mod tagged_node_ref {
         pub fn into_dense(self) -> Option<&'a mut DenseByteNode<V, A>> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                DENSE_BYTE_NODE_TAG => Some( unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() } ),
-                _ => None
+                DENSE_BYTE_NODE_TAG => Some(unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }),
+                _ => None,
             }
         }
         #[inline(always)]
         pub fn into_list(self) -> Option<&'a mut LineListNode<V, A>> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                LINE_LIST_NODE_TAG => Some( unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() } ),
-                _ => None
+                LINE_LIST_NODE_TAG => Some(unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }),
+                _ => None,
             }
         }
         #[inline(always)]
         pub fn into_cell_node(self) -> Option<&'a mut CellByteNode<V, A>> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                CELL_BYTE_NODE_TAG => Some( unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() } ),
-                _ => None
+                CELL_BYTE_NODE_TAG => Some(unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }),
+                _ => None,
             }
         }
         pub fn as_cell_node(&mut self) -> Option<&mut CellByteNode<V, A>> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
-                CELL_BYTE_NODE_TAG => Some( unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() } ),
-                _ => None
+                CELL_BYTE_NODE_TAG => Some(unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }),
+                _ => None,
             }
         }
         #[inline(always)]
         pub unsafe fn into_dense_unchecked(self) -> &'a mut DenseByteNode<V, A> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             debug_assert_eq!(tag, DENSE_BYTE_NODE_TAG);
-            unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }
+            unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }
         }
         #[inline(always)]
         pub unsafe fn into_list_unchecked(self) -> &'a mut LineListNode<V, A> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             debug_assert_eq!(tag, LINE_LIST_NODE_TAG);
-            unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }
+            unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }
         }
         #[inline(always)]
         pub unsafe fn into_cell_unchecked(self) -> &'a mut CellByteNode<V, A> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             debug_assert_eq!(tag, CELL_BYTE_NODE_TAG);
-            unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }
+            unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }
         }
         pub fn convert_to_cell_node(self) -> TrieNodeODRc<V, A> {
             let (ptr, tag) = self.ptr.get_raw_parts();
             match tag {
                 EMPTY_NODE_TAG => unreachable!(),
-                DENSE_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<DenseByteNode<V, A>>() }.convert_to_cell_node(),
-                LINE_LIST_NODE_TAG => unsafe{ &mut *ptr.cast::<LineListNode<V, A>>() }.convert_to_cell_node(),
-                CELL_BYTE_NODE_TAG => unsafe{ &mut *ptr.cast::<CellByteNode<V, A>>() }.convert_to_cell_node(),
-                _ => unsafe{ unreachable_unchecked() }
+                DENSE_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<DenseByteNode<V, A>>() }.convert_to_cell_node()
+                }
+                LINE_LIST_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<LineListNode<V, A>>() }.convert_to_cell_node()
+                }
+                CELL_BYTE_NODE_TAG => {
+                    unsafe { &mut *ptr.cast::<CellByteNode<V, A>>() }.convert_to_cell_node()
+                }
+                _ => unsafe { unreachable_unchecked() },
             }
         }
     }
 }
 
 /// Returns the count of values in the subtrie descending from the node, caching shared subtries
-pub(crate) fn val_count_below_root<V: Clone + Send + Sync, A: Allocator>(node: TaggedNodeRef<V, A>) -> usize {
+pub(crate) fn val_count_below_root<V: Clone + Send + Sync, A: Allocator>(
+    node: TaggedNodeRef<V, A>,
+) -> usize {
     let mut cache = std::collections::HashMap::new();
     node.node_val_count(&mut cache)
 }
 
-pub(crate) fn val_count_below_node<V: Clone + Send + Sync, A: Allocator>(node: &TrieNodeODRc<V, A>, cache: &mut HashMap<u64, usize>) -> usize {
+pub(crate) fn val_count_below_node<V: Clone + Send + Sync, A: Allocator>(
+    node: &TrieNodeODRc<V, A>,
+    cache: &mut HashMap<u64, usize>,
+) -> usize {
     if node.is_empty() {
-        return 0
+        return 0;
     }
     if node.refcount() > 1 {
         let hash = node.shared_node_id();
@@ -2365,7 +2943,7 @@ pub(crate) fn val_count_below_node<V: Clone + Send + Sync, A: Allocator>(node: &
                 let val = node.as_tagged().node_val_count(cache);
                 cache.insert(hash, val);
                 val
-            },
+            }
         }
     } else {
         node.as_tagged().node_val_count(cache)
@@ -2373,28 +2951,37 @@ pub(crate) fn val_count_below_node<V: Clone + Send + Sync, A: Allocator>(node: &
 }
 
 /// Recursively traverses a trie descending from `node`, visiting every physical non-empty node once
-pub(crate) fn traverse_physical<Ctx, NodeF, FoldF, V, A>(node: &TrieNodeODRc<V, A>, node_f: NodeF, fold_f: FoldF) -> Ctx
-    where
+pub(crate) fn traverse_physical<Ctx, NodeF, FoldF, V, A>(
+    node: &TrieNodeODRc<V, A>,
+    node_f: NodeF,
+    fold_f: FoldF,
+) -> Ctx
+where
     V: Clone + Send + Sync,
     A: Allocator,
     Ctx: Clone + Default,
     NodeF: Fn(TaggedNodeRef<V, A>, Ctx) -> Ctx + Copy,
-    FoldF: Fn(Ctx, Ctx) -> Ctx + Copy
+    FoldF: Fn(Ctx, Ctx) -> Ctx + Copy,
 {
     let mut cache = std::collections::HashMap::new();
     traverse_physical_internal(node, node_f, fold_f, &mut cache)
 }
 
-fn traverse_physical_internal<Ctx, NodeF, FoldF, V, A>(node: &TrieNodeODRc<V, A>, node_f: NodeF, fold_f: FoldF, cache: &mut HashMap<u64, Ctx>) -> Ctx
-    where
+fn traverse_physical_internal<Ctx, NodeF, FoldF, V, A>(
+    node: &TrieNodeODRc<V, A>,
+    node_f: NodeF,
+    fold_f: FoldF,
+    cache: &mut HashMap<u64, Ctx>,
+) -> Ctx
+where
     V: Clone + Send + Sync,
     A: Allocator,
     Ctx: Clone + Default,
     NodeF: Fn(TaggedNodeRef<V, A>, Ctx) -> Ctx + Copy,
-    FoldF: Fn(Ctx, Ctx) -> Ctx + Copy
+    FoldF: Fn(Ctx, Ctx) -> Ctx + Copy,
 {
     if node.is_empty() {
-        return Ctx::default()
+        return Ctx::default();
     }
 
     if node.refcount() > 1 {
@@ -2402,23 +2989,29 @@ fn traverse_physical_internal<Ctx, NodeF, FoldF, V, A>(node: &TrieNodeODRc<V, A>
         match cache.get(&hash) {
             Some(cached) => cached.clone(),
             None => {
-                let ctx = traverse_physical_children_internal(node.as_tagged(), node_f, fold_f, cache);
+                let ctx =
+                    traverse_physical_children_internal(node.as_tagged(), node_f, fold_f, cache);
                 cache.insert(hash, ctx.clone());
                 ctx
-            },
+            }
         }
     } else {
         traverse_physical_children_internal(node.as_tagged(), node_f, fold_f, cache)
     }
 }
 
-fn traverse_physical_children_internal<Ctx, NodeF, FoldF, V, A>(node: TaggedNodeRef<V, A>, node_f: NodeF, fold_f: FoldF, cache: &mut HashMap<u64, Ctx>) -> Ctx
-    where
+fn traverse_physical_children_internal<Ctx, NodeF, FoldF, V, A>(
+    node: TaggedNodeRef<V, A>,
+    node_f: NodeF,
+    fold_f: FoldF,
+    cache: &mut HashMap<u64, Ctx>,
+) -> Ctx
+where
     V: Clone + Send + Sync,
     A: Allocator,
     Ctx: Clone + Default,
     NodeF: Fn(TaggedNodeRef<V, A>, Ctx) -> Ctx + Copy,
-    FoldF: Fn(Ctx, Ctx) -> Ctx + Copy
+    FoldF: Fn(Ctx, Ctx) -> Ctx + Copy,
 {
     let mut ctx = Ctx::default();
 
@@ -2438,7 +3031,11 @@ fn traverse_physical_children_internal<Ctx, NodeF, FoldF, V, A>(node: TaggedNode
 /// a zero-length continuation path.  If `stop_early` is `false`, the returned continuation path may be
 /// zero-length and the returned node will represent as much of the path as is possible.
 #[inline]
-pub(crate) fn node_along_path_mut<'a, 'k, V: Clone + Send + Sync, A: Allocator>(start_node: &'a mut TrieNodeODRc<V, A>, path: &'k [u8], stop_early: bool) -> (&'k [u8], &'a mut TrieNodeODRc<V, A>) {
+pub(crate) fn node_along_path_mut<'a, 'k, V: Clone + Send + Sync, A: Allocator>(
+    start_node: &'a mut TrieNodeODRc<V, A>,
+    path: &'k [u8],
+    stop_early: bool,
+) -> (&'k [u8], &'a mut TrieNodeODRc<V, A>) {
     let mut key = path;
     let mut node = start_node;
 
@@ -2461,14 +3058,16 @@ pub(crate) fn node_along_path_mut<'a, 'k, V: Clone + Send + Sync, A: Allocator>(
 
     //SAFETY: Polonius is ok with this code.  All mutable borrows of the current version of the
     //  `node` &mut ref have ended by this point
-    node = unsafe{ &mut *node_ptr };
+    node = unsafe { &mut *node_ptr };
     (key, node)
 }
 
 /// Ensures the node is a CellByteNode
 ///
 /// Returns `true` if the node was upgraded and `false` if it already was a CellByteNode
-pub(crate) fn make_cell_node<V: Clone + Send + Sync, A: Allocator>(node: &mut TrieNodeODRc<V, A>) -> bool {
+pub(crate) fn make_cell_node<V: Clone + Send + Sync, A: Allocator>(
+    node: &mut TrieNodeODRc<V, A>,
+) -> bool {
     if !node.as_tagged().is_cell_node() {
         let replacement = node.make_mut().convert_to_cell_node();
         *node = replacement;
@@ -2485,10 +3084,10 @@ pub(crate) fn make_cell_node<V: Clone + Send + Sync, A: Allocator>(node: &mut Tr
 pub(crate) use opaque_dyn_rc_trie_node::TrieNodeODRc;
 #[cfg(not(feature = "slim_ptrs"))]
 mod opaque_dyn_rc_trie_node {
-    use std::sync::Arc;
-    use super::TrieNode;
-    use super::{TaggedNodeRefMut, super::super::alloc::Allocator};
     use super::TaggedNodeRef;
+    use super::TrieNode;
+    use super::{super::super::alloc::Allocator, TaggedNodeRefMut};
+    use std::sync::Arc;
 
     //TODO_FUTURE: make a type alias within the trait to refer to this type, as soon as
     // https://github.com/rust-lang/rust/issues/29661 is addressed
@@ -2506,8 +3105,9 @@ mod opaque_dyn_rc_trie_node {
     impl<V: Clone + Send + Sync, A: Allocator> TrieNodeODRc<V, A> {
         #[inline]
         pub(crate) fn new_in<'odb, T>(obj: T, alloc: A) -> Self
-            where T: 'odb + TrieNode<V, A>,
-            V: 'odb
+        where
+            T: 'odb + TrieNode<V, A>,
+            V: 'odb,
         {
             #[cfg(not(feature = "nightly"))]
             let inner: Arc<dyn TrieNode<V, A>> = {
@@ -2527,7 +3127,11 @@ mod opaque_dyn_rc_trie_node {
         ///
         /// This method is needed because it's impossible to get a mutable reference to the EmptyNode, but WriteZippers
         /// carry a mutable reference ato the node at their root
-        pub(crate) fn new_allocated_in(_child_cnt_capacity: usize, _val_cnt_capacity: usize, alloc: A) -> Self {
+        pub(crate) fn new_allocated_in(
+            _child_cnt_capacity: usize,
+            _val_cnt_capacity: usize,
+            alloc: A,
+        ) -> Self {
             let new_node = super::super::line_list::LineListNode::new_in(alloc.clone());
             Self::new_in(new_node, alloc)
         }
@@ -2599,13 +3203,15 @@ mod opaque_dyn_rc_trie_node {
             Arc::ptr_eq(&self.0, &rhs.0)
         }
     }
-    impl<V: Clone + Send + Sync, A: Allocator> Eq for TrieNodeODRc<V, A> { }
+    impl<V: Clone + Send + Sync, A: Allocator> Eq for TrieNodeODRc<V, A> {}
 
     /// Code adapted from https://docs.rs/dyn-clone/latest/src/dyn_clone/lib.rs.html#154-177
     /// Modified to use a custom allocator.  Used under the terms of the MIT license
     #[cfg(feature = "nightly")]
     #[inline]
-    fn odrc_arc_make_mut<V: Clone + Send + Sync, A: Allocator>(arc: &mut TrieNodeODRc<V, A>) -> &mut (dyn TrieNode<V, A> + 'static) {
+    fn odrc_arc_make_mut<V: Clone + Send + Sync, A: Allocator>(
+        arc: &mut TrieNodeODRc<V, A>,
+    ) -> &mut (dyn TrieNode<V, A> + 'static) {
         let is_unique = Arc::get_mut(&mut arc.0).is_some();
         if !is_unique {
             let clone = arc.borrow().clone_self();
@@ -2617,7 +3223,8 @@ mod opaque_dyn_rc_trie_node {
     }
 
     impl<V, A: Allocator> core::fmt::Debug for TrieNodeODRc<V, A>
-        where for<'a> &'a dyn TrieNode<V, A>: core::fmt::Debug
+    where
+        for<'a> &'a dyn TrieNode<V, A>: core::fmt::Debug,
     {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             core::fmt::Debug::fmt(&self.0, f)
@@ -2630,13 +3237,13 @@ mod opaque_dyn_rc_trie_node {
 /// <https://github.com/irrustible/ointers/blob/main/src/lib.rs>
 #[cfg(feature = "slim_ptrs")]
 mod slim_node_ptr {
+    use super::super::super::alloc::Allocator;
+    use super::{EMPTY_NODE_TAG, TaggedNodeRef, TaggedNodeRefMut};
     use core::marker::PhantomData;
     use core::ptr::NonNull;
     use core::sync::atomic::AtomicU32;
-    use super::super::super::alloc::Allocator;
-    use super::{TaggedNodeRef, TaggedNodeRefMut, EMPTY_NODE_TAG};
 
-    #[cfg(not(target_pointer_width="64"))]
+    #[cfg(not(target_pointer_width = "64"))]
     compile_error!("slim_ptrs is only compatible with 64-bit architectures");
 
     #[repr(align(8))]
@@ -2651,17 +3258,14 @@ mod slim_node_ptr {
     impl<V: Clone + Send + Sync, A: Allocator> Clone for SlimNodePtr<V, A> {
         #[inline]
         fn clone(&self) -> Self {
-            Self{
-                ptr: self.ptr,
-                phantom: PhantomData,
-            }
+            Self { ptr: self.ptr, phantom: PhantomData }
         }
     }
     impl<V: Clone + Send + Sync, A: Allocator> Copy for SlimNodePtr<V, A> {}
 
     impl<V, A: Allocator> core::fmt::Debug for SlimNodePtr<V, A>
     where
-    V: Clone + Send + Sync
+        V: Clone + Send + Sync,
     {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             core::fmt::Debug::fmt(&self.as_tagged(), f)
@@ -2674,13 +3278,16 @@ mod slim_node_ptr {
             self.ptr_eq(rhs)
         }
     }
-    impl<V: Clone + Send + Sync, A: Allocator> Eq for SlimNodePtr<V, A> { }
+    impl<V: Clone + Send + Sync, A: Allocator> Eq for SlimNodePtr<V, A> {}
 
     impl<V: Clone + Send + Sync, A: Allocator> SlimNodePtr<V, A> {
         #[allow(unused)]
         #[inline]
         pub(crate) fn new_empty() -> Self {
-            Self::from_raw_parts(core::ptr::without_provenance_mut::<usize>(0xBAADF00D), EMPTY_NODE_TAG)
+            Self::from_raw_parts(
+                core::ptr::without_provenance_mut::<usize>(0xBAADF00D),
+                EMPTY_NODE_TAG,
+            )
         }
         #[inline]
         pub(crate) fn get_raw_parts(&self) -> (*mut AtomicU32, usize) {
@@ -2692,10 +3299,7 @@ mod slim_node_ptr {
         pub(super) fn from_raw_parts<T>(ptr: *mut T, tag: usize) -> Self {
             let packed_addr = pack(ptr, 0, false, 7).addr() | (tag << 59);
             let packed_ptr = ptr.with_addr(packed_addr);
-            Self{
-                ptr: unsafe{ NonNull::new_unchecked(packed_ptr.cast()) },
-                phantom: PhantomData,
-            }
+            Self { ptr: unsafe { NonNull::new_unchecked(packed_ptr.cast()) }, phantom: PhantomData }
         }
         #[inline]
         pub(crate) fn tag(&self) -> usize {
@@ -2728,9 +3332,13 @@ mod slim_node_ptr {
 
     /// From [ointers](https://github.com/irrustible/ointers) crate, used under terms of Apache-2 license
     /// Produces a mask where the stolen bits (at the top) are set
-    const fn mask(bits: u8) -> usize { (isize::MIN >> (max(bits as usize,1) - 1)) as usize }
+    const fn mask(bits: u8) -> usize {
+        (isize::MIN >> (max(bits as usize, 1) - 1)) as usize
+    }
 
-    pub const fn asv_mask(a: u8, s: bool, v: u8) -> usize { mask(a + s as u8 + v) }
+    pub const fn asv_mask(a: u8, s: bool, v: u8) -> usize {
+        mask(a + s as u8 + v)
+    }
 
     // core::cmp::max and usize::max aren't const fns
     const fn max(x: usize, y: usize) -> usize {
@@ -2802,14 +3410,17 @@ mod slim_node_ptr {
 
 #[cfg(feature = "slim_ptrs")]
 mod opaque_dyn_rc_trie_node {
-    use core::mem::MaybeUninit;
-    use core::sync::atomic::{AtomicU32, Ordering::Acquire, Ordering::Relaxed, Ordering::Release};
     use super::super::super::alloc::Allocator;
-    use super::super::dense_byte::{DenseByteNode, CellByteNode};
+    use super::super::dense_byte::{CellByteNode, DenseByteNode};
     use super::super::line_list::LineListNode;
     use super::slim_node_ptr::SlimNodePtr;
+    use core::mem::MaybeUninit;
+    use core::sync::atomic::{AtomicU32, Ordering::Acquire, Ordering::Relaxed, Ordering::Release};
 
-    use super::{TaggedNodeRef, TaggedNodeRefMut, TrieNode, EMPTY_NODE_TAG, DENSE_BYTE_NODE_TAG, LINE_LIST_NODE_TAG, CELL_BYTE_NODE_TAG};
+    use super::{
+        CELL_BYTE_NODE_TAG, DENSE_BYTE_NODE_TAG, EMPTY_NODE_TAG, LINE_LIST_NODE_TAG, TaggedNodeRef,
+        TaggedNodeRefMut, TrieNode,
+    };
 
     /// TrieNodeODRc = TrieNode Opaque Dynamic RefCounting Pointer
     ///
@@ -2826,7 +3437,7 @@ mod opaque_dyn_rc_trie_node {
             self.ptr == rhs.ptr
         }
     }
-    impl<V: Clone + Send + Sync, A: Allocator> Eq for TrieNodeODRc<V, A> { }
+    impl<V: Clone + Send + Sync, A: Allocator> Eq for TrieNodeODRc<V, A> {}
 
     impl<V: Clone + Send + Sync, A: Allocator> Clone for TrieNodeODRc<V, A> {
         /// Increases the node refcount.  See the implementation of Arc::clone in the stdlib
@@ -2834,7 +3445,7 @@ mod opaque_dyn_rc_trie_node {
         fn clone(&self) -> Self {
             // Empty nodes are sentinels with invalid pointers (0xBAADF00D), don't need refcounting
             if self.is_empty() {
-                return Self{ ptr: self.ptr.clone(), alloc: MaybeUninit::uninit() };
+                return Self { ptr: self.ptr.clone(), alloc: MaybeUninit::uninit() };
             }
 
             //NOTE: This explanation copied verbatim from the Arc implementation in stdlib
@@ -2851,14 +3462,17 @@ mod opaque_dyn_rc_trie_node {
             //
             // [1]: (www.boost.org/doc/libs/1_55_0/doc/html/atomic/usage_examples.html)
             let (ptr, _tag) = self.ptr.get_raw_parts();
-            let old_count = unsafe{ &*ptr }.fetch_add(1, Relaxed);
+            let old_count = unsafe { &*ptr }.fetch_add(1, Relaxed);
 
             if old_count > MAX_REFCOUNT {
                 //Saturate the refcount
-                unsafe{ &*ptr }.store(REFCOUNT_SATURATION_VAL, Relaxed);
+                unsafe { &*ptr }.store(REFCOUNT_SATURATION_VAL, Relaxed);
             }
 
-            Self{ ptr: self.ptr.clone(), alloc: unsafe{ MaybeUninit::new(self.alloc.assume_init_ref().clone()) } }
+            Self {
+                ptr: self.ptr.clone(),
+                alloc: unsafe { MaybeUninit::new(self.alloc.assume_init_ref().clone()) },
+            }
         }
     }
 
@@ -2870,7 +3484,9 @@ mod opaque_dyn_rc_trie_node {
     /// never "un-saturate"
     const REFCOUNT_SATURATION_VAL: u32 = 0xBFFFFFFF;
 
-    const _: [(); (REFCOUNT_SATURATION_VAL > MAX_REFCOUNT && REFCOUNT_SATURATION_VAL < u32::MAX) as usize - 1] = [];
+    const _: [(); (REFCOUNT_SATURATION_VAL > MAX_REFCOUNT && REFCOUNT_SATURATION_VAL < u32::MAX)
+        as usize
+        - 1] = [];
 
     impl<V: Clone + Send + Sync, A: Allocator> Drop for TrieNodeODRc<V, A> {
         /// Decrements the refcount, and deletes the node if the refcount reaches 0
@@ -2878,7 +3494,7 @@ mod opaque_dyn_rc_trie_node {
         fn drop(&mut self) {
             let (ptr, tag) = self.ptr.get_raw_parts();
             if tag == EMPTY_NODE_TAG {
-                return
+                return;
             }
 
             //NOTE: This explanation copied verbatim from the Arc implementation in stdlib
@@ -2887,11 +3503,11 @@ mod opaque_dyn_rc_trie_node {
             // Because `fetch_sub` is already atomic, we do not need to synchronize
             // with other threads unless we are going to delete the object. This
             // same logic applies to the below `fetch_sub` to the `weak` count.
-            let old_count = unsafe{ &*ptr }.fetch_sub(1, Release);
+            let old_count = unsafe { &*ptr }.fetch_sub(1, Release);
 
             if old_count > MAX_REFCOUNT {
                 //Make sure the refcount stays saturated, and the decrement didn't have an effect
-                unsafe{ &*ptr }.store(REFCOUNT_SATURATION_VAL, Relaxed);
+                unsafe { &*ptr }.store(REFCOUNT_SATURATION_VAL, Relaxed);
                 return;
             }
 
@@ -2930,41 +3546,62 @@ mod opaque_dyn_rc_trie_node {
 
             //The fence from Arc is overkill here, so we'll go with an Acquire load
             //Code from Arc with macro expanded: fence(Acquire);
-            let refcount = unsafe{ &*ptr }.load(Acquire);
+            let refcount = unsafe { &*ptr }.load(Acquire);
             debug_assert_eq!(refcount, 0);
 
-            drop_inner_in::<V, A>(ptr, tag, unsafe{ self.alloc.assume_init_ref().clone() } );
+            drop_inner_in::<V, A>(ptr, tag, unsafe { self.alloc.assume_init_ref().clone() });
         }
     }
 
     #[cfg(feature = "nightly")]
     #[inline]
-    fn drop_inner_in<V: Clone + Send + Sync, A: Allocator>(ptr: *mut AtomicU32, tag: usize, alloc: A) {
+    fn drop_inner_in<V: Clone + Send + Sync, A: Allocator>(
+        ptr: *mut AtomicU32,
+        tag: usize,
+        alloc: A,
+    ) {
         //Convert the pointer back into a box, so it will drop
         match tag {
-            EMPTY_NODE_TAG => {},
-            DENSE_BYTE_NODE_TAG => unsafe { let _ = Box::<DenseByteNode<V, A>, A>::from_raw_in(ptr.cast(), alloc); },
-            LINE_LIST_NODE_TAG => unsafe { let _ = Box::<LineListNode<V, A>, A>::from_raw_in(ptr.cast(), alloc); },
-            CELL_BYTE_NODE_TAG => unsafe { let _ = Box::<CellByteNode<V, A>, A>::from_raw_in(ptr.cast(), alloc); },
-            _ => unsafe{ core::hint::unreachable_unchecked() }
+            EMPTY_NODE_TAG => {}
+            DENSE_BYTE_NODE_TAG => unsafe {
+                let _ = Box::<DenseByteNode<V, A>, A>::from_raw_in(ptr.cast(), alloc);
+            },
+            LINE_LIST_NODE_TAG => unsafe {
+                let _ = Box::<LineListNode<V, A>, A>::from_raw_in(ptr.cast(), alloc);
+            },
+            CELL_BYTE_NODE_TAG => unsafe {
+                let _ = Box::<CellByteNode<V, A>, A>::from_raw_in(ptr.cast(), alloc);
+            },
+            _ => unsafe { core::hint::unreachable_unchecked() },
         };
     }
 
     #[cfg(not(feature = "nightly"))]
     #[inline]
-    fn drop_inner_in<V: Clone + Send + Sync, A: Allocator>(ptr: *mut AtomicU32, tag: usize, _alloc: A) {
+    fn drop_inner_in<V: Clone + Send + Sync, A: Allocator>(
+        ptr: *mut AtomicU32,
+        tag: usize,
+        _alloc: A,
+    ) {
         //Convert the pointer back into a box, so it will drop
         match tag {
-            EMPTY_NODE_TAG => {},
-            DENSE_BYTE_NODE_TAG => unsafe { let _ = Box::<DenseByteNode<V, A>>::from_raw(ptr.cast()); },
-            LINE_LIST_NODE_TAG => unsafe { let _ = Box::<LineListNode<V, A>>::from_raw(ptr.cast()); },
-            CELL_BYTE_NODE_TAG => unsafe { let _ = Box::<CellByteNode<V, A>>::from_raw(ptr.cast()); },
-            _ => unsafe{ core::hint::unreachable_unchecked() }
+            EMPTY_NODE_TAG => {}
+            DENSE_BYTE_NODE_TAG => unsafe {
+                let _ = Box::<DenseByteNode<V, A>>::from_raw(ptr.cast());
+            },
+            LINE_LIST_NODE_TAG => unsafe {
+                let _ = Box::<LineListNode<V, A>>::from_raw(ptr.cast());
+            },
+            CELL_BYTE_NODE_TAG => unsafe {
+                let _ = Box::<CellByteNode<V, A>>::from_raw(ptr.cast());
+            },
+            _ => unsafe { core::hint::unreachable_unchecked() },
         };
     }
 
     impl<V, A: Allocator> core::fmt::Debug for TrieNodeODRc<V, A>
-        where V: Clone + Send + Sync
+    where
+        V: Clone + Send + Sync,
     {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             core::fmt::Debug::fmt(&self.ptr, f)
@@ -2975,8 +3612,8 @@ mod opaque_dyn_rc_trie_node {
         #[inline]
         pub(crate) fn new_in<'odb, T>(node: T, alloc: A) -> Self
         where
-        T: 'odb + TrieNode<V, A>,
-        V: 'odb
+            T: 'odb + TrieNode<V, A>,
+            V: 'odb,
         {
             let tag = node.tag() as usize;
             #[cfg(not(feature = "nightly"))]
@@ -2986,7 +3623,7 @@ mod opaque_dyn_rc_trie_node {
             };
             #[cfg(feature = "nightly")]
             let (boxed, _) = Box::into_raw_with_allocator(Box::new_in(node, alloc.clone()));
-            Self{ ptr: SlimNodePtr::from_raw_parts(boxed, tag), alloc: MaybeUninit::new(alloc) }
+            Self { ptr: SlimNodePtr::from_raw_parts(boxed, tag), alloc: MaybeUninit::new(alloc) }
         }
         #[allow(unused)]
         #[inline]
@@ -3002,7 +3639,11 @@ mod opaque_dyn_rc_trie_node {
         /// This method is needed because it's impossible to get a mutable reference to the EmptyNode, but WriteZippers
         /// carry a mutable reference ato the node at their root
         #[inline]
-        pub(crate) fn new_allocated_in(_child_cnt_capacity: usize, _val_cnt_capacity: usize, alloc: A) -> Self {
+        pub(crate) fn new_allocated_in(
+            _child_cnt_capacity: usize,
+            _val_cnt_capacity: usize,
+            alloc: A,
+        ) -> Self {
             let new_node = super::super::line_list::LineListNode::new_in(alloc.clone());
             Self::new_in(new_node, alloc)
         }
@@ -3036,7 +3677,7 @@ mod opaque_dyn_rc_trie_node {
         #[inline]
         pub(crate) fn refcount(&self) -> usize {
             let (ptr, _tag) = self.ptr.get_raw_parts();
-            unsafe{ &*ptr }.load(Acquire) as usize
+            unsafe { &*ptr }.load(Acquire) as usize
         }
         /// Ensures that we hold the only reference to a node, by cloning it if necessary
         #[inline]
@@ -3046,16 +3687,15 @@ mod opaque_dyn_rc_trie_node {
 
             let (ptr, _tag) = self.ptr.get_raw_parts();
 
-            if unsafe{ &*ptr }.compare_exchange(1, 0, Acquire, Relaxed).is_err() {
+            if unsafe { &*ptr }.compare_exchange(1, 0, Acquire, Relaxed).is_err() {
                 // Another pointer exists, so we must clone.
                 let cloned_node = self.as_tagged().clone_self();
 
                 //The decrement of the old `self` refcount will happen at this assignment
                 *self = cloned_node;
-
             } else {
                 // We were the sole reference so bump back up the  ref count.
-                unsafe{ &*ptr }.store(1, Release);
+                unsafe { &*ptr }.store(1, Release);
             }
         }
         #[inline]
@@ -3093,7 +3733,7 @@ impl<V: Lattice + Clone + Send + Sync, A: Allocator> TrieNodeODRc<V, A> {
     pub fn join_into(&mut self, node: TrieNodeODRc<V, A>) -> AlgebraicStatus {
         let (status, result) = self.make_mut().join_into_dyn(node);
         match result {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(replacement_node) => {
                 *self = replacement_node;
             }
@@ -3121,8 +3761,11 @@ impl<V: DistributiveLattice + Clone + Send + Sync, A: Allocator> TrieNodeODRc<V,
     }
 }
 
-impl <V: Clone + Send + Sync, A: Allocator> Quantale for TrieNodeODRc<V, A> {
-    fn prestrict(&self, other: &Self) -> AlgebraicResult<Self> where Self: Sized {
+impl<V: Clone + Send + Sync, A: Allocator> Quantale for TrieNodeODRc<V, A> {
+    fn prestrict(&self, other: &Self) -> AlgebraicResult<Self>
+    where
+        Self: Sized,
+    {
         self.as_tagged().prestrict_dyn(other.as_tagged())
     }
 }
@@ -3131,13 +3774,13 @@ impl<V: Lattice + Clone + Send + Sync, A: Allocator> Lattice for Option<TrieNode
     fn pjoin(&self, other: &Self) -> AlgebraicResult<Self> {
         match self {
             None => match other {
-                None => { AlgebraicResult::None }
-                Some(_) => { AlgebraicResult::Identity(COUNTER_IDENT) }
+                None => AlgebraicResult::None,
+                Some(_) => AlgebraicResult::Identity(COUNTER_IDENT),
             },
             Some(l) => match other {
-                None => { AlgebraicResult::Identity(SELF_IDENT) }
-                Some(r) => { l.pjoin(r).map(|result| Some(result)) }
-            }
+                None => AlgebraicResult::Identity(SELF_IDENT),
+                Some(r) => l.pjoin(r).map(|result| Some(result)),
+            },
         }
     }
     // GOAT, maybe the default impl is fine... Or maybe not... I need to think through whether any efficiency
@@ -3154,15 +3797,16 @@ impl<V: Lattice + Clone + Send + Sync, A: Allocator> Lattice for Option<TrieNode
     //         }
     //     }
     // }
-    fn pmeet(&self, other: &Option<TrieNodeODRc<V, A>>) -> AlgebraicResult<Option<TrieNodeODRc<V, A>>> {
+    fn pmeet(
+        &self,
+        other: &Option<TrieNodeODRc<V, A>>,
+    ) -> AlgebraicResult<Option<TrieNodeODRc<V, A>>> {
         match self {
-            None => { AlgebraicResult::None }
-            Some(l) => {
-                match other {
-                    None => { AlgebraicResult::None }
-                    Some(r) => l.pmeet(r).map(|result| Some(result))
-                }
-            }
+            None => AlgebraicResult::None,
+            Some(l) => match other {
+                None => AlgebraicResult::None,
+                Some(r) => l.pmeet(r).map(|result| Some(result)),
+            },
         }
     }
 }
@@ -3172,53 +3816,54 @@ impl<V: Lattice + Clone + Send + Sync, A: Allocator> LatticeRef for Option<&Trie
     fn pjoin(&self, other: &Self) -> AlgebraicResult<Self::T> {
         match self {
             None => match other {
-                None => { AlgebraicResult::None }
-                Some(_) => { AlgebraicResult::Identity(COUNTER_IDENT) }
+                None => AlgebraicResult::None,
+                Some(_) => AlgebraicResult::Identity(COUNTER_IDENT),
             },
             Some(l) => match other {
-                None => { AlgebraicResult::Identity(SELF_IDENT) }
-                Some(r) => { l.pjoin(r).map(|result| Some(result)) }
-            }
+                None => AlgebraicResult::Identity(SELF_IDENT),
+                Some(r) => l.pjoin(r).map(|result| Some(result)),
+            },
         }
     }
-    fn pmeet(&self, other: &Option<&TrieNodeODRc<V, A>>) -> AlgebraicResult<Option<TrieNodeODRc<V, A>>> {
+    fn pmeet(
+        &self,
+        other: &Option<&TrieNodeODRc<V, A>>,
+    ) -> AlgebraicResult<Option<TrieNodeODRc<V, A>>> {
         match self {
-            None => { AlgebraicResult::None }
-            Some(l) => {
-                match other {
-                    None => { AlgebraicResult::None }
-                    Some(r) => l.pmeet(r).map(|result| Some(result))
-                }
-            }
+            None => AlgebraicResult::None,
+            Some(l) => match other {
+                None => AlgebraicResult::None,
+                Some(r) => l.pmeet(r).map(|result| Some(result)),
+            },
         }
     }
 }
 
-impl<V: DistributiveLattice + Clone + Send + Sync, A: Allocator> DistributiveLattice for Option<TrieNodeODRc<V, A>> {
+impl<V: DistributiveLattice + Clone + Send + Sync, A: Allocator> DistributiveLattice
+    for Option<TrieNodeODRc<V, A>>
+{
     fn psubtract(&self, other: &Self) -> AlgebraicResult<Self> {
         match self {
-            None => { AlgebraicResult::None }
-            Some(s) => {
-                match other {
-                    None => { AlgebraicResult::Identity(SELF_IDENT) }
-                    Some(o) => { s.psubtract(o).map(|v| Some(v)) }
-                }
-            }
+            None => AlgebraicResult::None,
+            Some(s) => match other {
+                None => AlgebraicResult::Identity(SELF_IDENT),
+                Some(o) => s.psubtract(o).map(|v| Some(v)),
+            },
         }
     }
 }
 
-impl<V: DistributiveLattice + Clone + Send + Sync, A: Allocator> DistributiveLatticeRef for Option<&TrieNodeODRc<V, A>> {
+impl<V: DistributiveLattice + Clone + Send + Sync, A: Allocator> DistributiveLatticeRef
+    for Option<&TrieNodeODRc<V, A>>
+{
     type T = Option<TrieNodeODRc<V, A>>;
     fn psubtract(&self, other: &Self) -> AlgebraicResult<Self::T> {
         match self {
-            None => { AlgebraicResult::None }
-            Some(s) => {
-                match other {
-                    None => { AlgebraicResult::Identity(SELF_IDENT) }
-                    Some(o) => { s.psubtract(o).map(|v| Some(v)) }
-                }
-            }
+            None => AlgebraicResult::None,
+            Some(s) => match other {
+                None => AlgebraicResult::Identity(SELF_IDENT),
+                Some(o) => s.psubtract(o).map(|v| Some(v)),
+            },
         }
     }
 }
@@ -3227,10 +3872,10 @@ impl<V: DistributiveLattice + Clone + Send + Sync, A: Allocator> DistributiveLat
 #[cfg(all(test, feature = "pathmap-internal-tests"))]
 mod tests {
     use super::super::super::alloc::{GlobalAlloc, global_alloc};
-    use super::super::line_list::LineListNode;
-    use super::TrieNodeODRc;
     use super::super::PathMap;
+    use super::super::line_list::LineListNode;
     use super::super::zipper::*;
+    use super::TrieNodeODRc;
 
     #[test]
     fn slim_ptrs_test1() {
@@ -3261,5 +3906,4 @@ mod tests {
         node_ref.make_unique();
         drop(cloned);
     }
-
 }

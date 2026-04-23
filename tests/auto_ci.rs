@@ -37,9 +37,7 @@ fn auto_ci_orchestrator() {
     // Build & run tests with the mork feature in a child process. Set env var so child exits early.
     let run_cargo_with = |cmd: &str, args: &[&str]| -> Result<(), (i32, String)> {
         let mut c = Command::new(cmd);
-        c.args(args)
-            .env("PETTA_AUTO_TEST_CHILD", "1")
-            .env("RUST_BACKTRACE", "1");
+        c.args(args).env("PETTA_AUTO_TEST_CHILD", "1").env("RUST_BACKTRACE", "1");
         // Inherit stdio so output is visible in CI logs
         let status = c.status().expect("failed to spawn child cargo process");
         if status.success() {
@@ -54,20 +52,27 @@ fn auto_ci_orchestrator() {
     match run_cargo_with("cargo", &["test", "--workspace", "--all", "--features", "mork"]) {
         Ok(()) => return,
         Err((_, _)) => {
-            println!("auto-ci: cargo test --features mork failed; trying 'rustup run nightly' fallback");
+            println!(
+                "auto-ci: cargo test --features mork failed; trying 'rustup run nightly' fallback"
+            );
         }
     }
 
     // Try using rustup nightly if available
     match Command::new("rustup").arg("--version").output() {
         Ok(output) if output.status.success() => {
-            match run_cargo_with("rustup", &["run", "nightly", "cargo", "test", "--workspace", "--all", "--features", "mork"]) {
+            match run_cargo_with(
+                "rustup",
+                &["run", "nightly", "cargo", "test", "--workspace", "--all", "--features", "mork"],
+            ) {
                 Ok(()) => return,
                 Err((_, msg)) => panic!("auto-ci: nightly run failed: {}", msg),
             }
         }
         _ => {
-            panic!("auto-ci: swipl not found and rustup unavailable; cannot run mork tests automatically")
+            panic!(
+                "auto-ci: swipl not found and rustup unavailable; cannot run mork tests automatically"
+            )
         }
     }
 }

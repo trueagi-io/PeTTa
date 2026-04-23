@@ -63,7 +63,7 @@
 //!
 //! Object types:
 //! line data:   [length: varint64][u8; length]
-//!    function: 
+//!    function:
 //!
 //! branch node: [header: u8] (header & 0x80 == 0)
 //!              [if (header&0x40 != 0) node_value : varint64         ]
@@ -76,10 +76,10 @@
 //!              [if (header&0x3f != 0) first_child: varint64]
 //!              [                      line_offset: varint64]
 //! ```ignore
-use std::{io::Write, hash::Hasher};
+use fast_slice_utils::starts_with;
 use std::cell::Cell;
 use std::marker::PhantomData;
-use fast_slice_utils::starts_with;
+use std::{hash::Hasher, io::Write};
 
 use super::alloc::{GlobalAlloc, global_alloc};
 use super::{
@@ -87,14 +87,14 @@ use super::{
     morphisms::Catamorphism,
     utils::{BitMask, ByteMask, find_prefix_overlap},
     zipper::{
-        Zipper, ZipperValues, ZipperForking, ZipperAbsolutePath, ZipperIteration,
-        ZipperMoving, ZipperPathBuffer, ZipperReadOnlyValues, ZipperSubtries,
-        ZipperConcrete, ZipperReadOnlyConditionalValues
+        Zipper, ZipperAbsolutePath, ZipperConcrete, ZipperForking, ZipperIteration, ZipperMoving,
+        ZipperPathBuffer, ZipperReadOnlyConditionalValues, ZipperReadOnlyValues, ZipperSubtries,
+        ZipperValues,
     },
 };
 
-use super::trie_core::r#ref::{TrieRef, TrieRefBorrowed, TrieRefOwned};
 use super::trie_core::node::PayloadRef;
+use super::trie_core::r#ref::{TrieRef, TrieRefBorrowed, TrieRefOwned};
 
 use crate::gxhash::{GxHasher, HashMap, HashMapExt};
 
@@ -185,10 +185,7 @@ pub fn read_varint_u64(data: &[u8]) -> (u64, usize) {
         return (first as u64, 1);
     }
     let len = (first - VARINT_LEN_BIAS) as usize;
-    let rest = unsafe {
-        data.as_ptr().add(1)
-            .cast::<u64>().read_unaligned()
-    };
+    let rest = unsafe { data.as_ptr().add(1).cast::<u64>().read_unaligned() };
     let zeros = (64 - len * 8) as u32;
     let value = (rest << zeros) >> zeros;
     (value, len + 1)
@@ -224,12 +221,10 @@ pub fn read_varint_u64(data: &[u8]) -> (u64, usize) {
 /// push_varint_u64(&mut buf, u64::MAX).unwrap();
 /// assert_eq!(buf, [255, 255, 255, 255, 255, 255, 255, 255, 255]);
 /// ```ignore
-pub fn push_varint_u64(dst: &mut impl Write, int: u64)
-    -> Result<usize, std::io::Error>
-{
+pub fn push_varint_u64(dst: &mut impl Write, int: u64) -> Result<usize, std::io::Error> {
     if int <= VARINT_LEN_BIAS as u64 {
         dst.write_all(&[int as u8])?;
-        return Ok(1)
+        return Ok(1);
     }
     let nbytes = (8 - int.leading_zeros() / 8) as usize;
     let arr = int.to_le_bytes();
@@ -414,7 +409,7 @@ fn read_node(data: &[u8], node_id: NodeId) -> (Node, usize) {
     }
 }
 
-const USE_COUNTERS: bool = cfg!(feature="act_counters");
+const USE_COUNTERS: bool = cfg!(feature = "act_counters");
 
 #[derive(Default, Clone)]
 pub struct Counters {
@@ -455,32 +450,32 @@ impl std::fmt::Display for SiCount {
 
 impl std::fmt::Debug for Counters {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let total_size = self.nodes_size + self.lines_size
-            + self.line_data_size + 16 + 8;
-        write!(fmt,
-"Total file size: {total}B
+        let total_size = self.nodes_size + self.lines_size + self.line_data_size + 16 + 8;
+        write!(
+            fmt,
+            "Total file size: {total}B
 Offsets: {offsets_size}B / {offsets} ({offsets_avg:1.3})
 Contents:
     Line data: {line_data_size}B / {line_data} ({line_data_avg:1.3}) (saved by reuse={reuse})
     Line nodes: {lines_size}B / {lines} ({lines_avg:1.3})
     Branch nodes: {nodes_size}B / {nodes} ({nodes_avg:1.3})
         Children: average={children_avg:1.3}, mask size={mask_avg:1.3}",
-            total=SiCount(total_size),
-            offsets_size=SiCount(self.offsets_size),
-            offsets=SiCount(self.offsets),
-            offsets_avg=self.offsets_size as f64 / self.offsets as f64,
-            line_data_size=SiCount(self.line_data_size),
-            line_data=SiCount(self.line_data),
-            line_data_avg=self.line_data_size as f64 / self.line_data as f64,
-            reuse=SiCount(self.line_data_reuse_size),
-            lines_size=SiCount(self.lines_size),
-            lines=SiCount(self.lines),
-            lines_avg=self.lines_size as f64 / self.lines as f64,
-            nodes_size=SiCount(self.nodes_size),
-            nodes=SiCount(self.nodes),
-            nodes_avg=self.nodes_size as f64 / self.nodes as f64,
-            children_avg=self.children as f64 / self.nodes as f64,
-            mask_avg=self.child_mask_size as f64 / self.nodes as f64,
+            total = SiCount(total_size),
+            offsets_size = SiCount(self.offsets_size),
+            offsets = SiCount(self.offsets),
+            offsets_avg = self.offsets_size as f64 / self.offsets as f64,
+            line_data_size = SiCount(self.line_data_size),
+            line_data = SiCount(self.line_data),
+            line_data_avg = self.line_data_size as f64 / self.line_data as f64,
+            reuse = SiCount(self.line_data_reuse_size),
+            lines_size = SiCount(self.lines_size),
+            lines = SiCount(self.lines),
+            lines_avg = self.lines_size as f64 / self.lines as f64,
+            nodes_size = SiCount(self.nodes_size),
+            nodes = SiCount(self.nodes),
+            nodes_avg = self.nodes_size as f64 / self.nodes as f64,
+            children_avg = self.children as f64 / self.nodes as f64,
+            mask_avg = self.child_mask_size as f64 / self.nodes as f64,
         )
     }
 }
@@ -488,43 +483,57 @@ Contents:
 impl Counters {
     #[inline(always)]
     fn add_line(&mut self, size: usize) {
-        if !USE_COUNTERS { return; }
+        if !USE_COUNTERS {
+            return;
+        }
         self.lines += 1;
         self.lines_size += size;
     }
     #[inline(always)]
     fn add_line_data(&mut self, size: usize) {
-        if !USE_COUNTERS { return; }
+        if !USE_COUNTERS {
+            return;
+        }
         self.line_data += 1;
         self.line_data_size += size;
     }
     #[inline(always)]
     fn add_line_data_reuse(&mut self, size: usize) {
-        if !USE_COUNTERS { return; }
+        if !USE_COUNTERS {
+            return;
+        }
         self.line_data_reuse += 1;
         self.line_data_reuse_size += size;
     }
     #[inline(always)]
     fn add_node(&mut self, size: usize) {
-        if !USE_COUNTERS { return; }
+        if !USE_COUNTERS {
+            return;
+        }
         self.nodes += 1;
         self.nodes_size += size;
     }
     #[inline(always)]
     fn add_offset(&mut self, size: usize) {
-        if !USE_COUNTERS { return; }
+        if !USE_COUNTERS {
+            return;
+        }
         self.offsets += 1;
         self.offsets_size += size;
     }
     #[inline(always)]
     fn add_value(&mut self, size: usize) {
-        if !USE_COUNTERS { return; }
+        if !USE_COUNTERS {
+            return;
+        }
         self.values += 1;
         self.values_size += size;
     }
     #[inline(always)]
     fn add_children(&mut self, children: usize, size: usize) {
-        if !USE_COUNTERS { return; }
+        if !USE_COUNTERS {
+            return;
+        }
         self.children += children;
         self.child_mask_size += size;
     }
@@ -569,7 +578,9 @@ pub type ACTMmapZipper<'tree, Value> = ACTZipper<'tree, Mmap, Value>;
 
 impl<Storage> ArenaCompactTree<Storage> {
     fn write_line(
-        dst: &mut impl Write, line: &NodeLine, node_id: NodeId,
+        dst: &mut impl Write,
+        line: &NodeLine,
+        node_id: NodeId,
         counters: &mut Counters,
     ) -> Result<(), std::io::Error> {
         const ARC_HEAD: u8 = 0x80;
@@ -582,20 +593,22 @@ impl<Storage> ArenaCompactTree<Storage> {
             counters.add_value(size);
         }
         if let Some(child) = line.child {
-            let offset = node_id.0.checked_sub(child.0)
-                .expect("Children are expected to be written first");
+            let offset =
+                node_id.0.checked_sub(child.0).expect("Children are expected to be written first");
             let size = push_varint_u64(dst, offset as u64)?;
             counters.add_offset(size);
         }
-        let offset = node_id.0.checked_sub(line.path.0)
-            .expect("Children are expected to be written first");
+        let offset =
+            node_id.0.checked_sub(line.path.0).expect("Children are expected to be written first");
         let size = push_varint_u64(dst, offset as u64)?;
         counters.add_offset(size);
         Ok(())
     }
 
     fn write_node(
-        dst: &mut impl Write, node: &NodeBranch, node_id: NodeId,
+        dst: &mut impl Write,
+        node: &NodeBranch,
+        node_id: NodeId,
         counters: &mut Counters,
     ) -> Result<(), std::io::Error> {
         let nchildren = node.bytemask.count_bits();
@@ -607,7 +620,9 @@ impl<Storage> ArenaCompactTree<Storage> {
             counters.add_value(size);
         }
         if let Some(first_child) = node.first_child {
-            let offset = node_id.0.checked_sub(first_child.0)
+            let offset = node_id
+                .0
+                .checked_sub(first_child.0)
                 .expect("Children are expected to be written first");
             assert!(nchildren > 0, "child count == 0 and first_child is Some");
             let size = push_varint_u64(dst, offset as u64)?;
@@ -633,7 +648,8 @@ impl<Storage> ArenaCompactTree<Storage> {
 }
 
 impl<Storage> ArenaCompactTree<Storage>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     /// Get the reference to the serialized bytes
     ///
@@ -676,8 +692,8 @@ where Storage: AsRef<[u8]>
     /// Returns root [Node], together with root's [NodeId].
     fn get_root(&self) -> (Node, NodeId) {
         let root_slice = &self.storage.as_ref()[MAGIC_LENGTH..][..U64_SIZE];
-        let root_buf: &[u8; U64_SIZE] = root_slice.try_into()
-            .expect("buffer size must be U64_SIZE, we just made it this way");
+        let root_buf: &[u8; U64_SIZE] =
+            root_slice.try_into().expect("buffer size must be U64_SIZE, we just made it this way");
         let root_id = NodeId(u64::from_le_bytes(*root_buf));
         (self.get_node(root_id).0, root_id)
     }
@@ -752,11 +768,10 @@ where Storage: AsRef<[u8]>
 }
 
 impl<Storage> ArenaCompactTree<Storage>
-where Storage: Write
+where
+    Storage: Write,
 {
-    fn push_node(&mut self, node: &NodeBranch)
-        -> Result<NodeId, std::io::Error>
-    {
+    fn push_node(&mut self, node: &NodeBranch) -> Result<NodeId, std::io::Error> {
         let node_id = NodeId(self.position);
         let mut cursor = std::io::Cursor::new([0; MAX_BRANCH_NODE_SIZE]);
         Self::write_node(&mut cursor, node, node_id, &mut self.counters)?;
@@ -767,9 +782,7 @@ where Storage: Write
         Ok(node_id)
     }
 
-    fn push_line(&mut self, line: &NodeLine)
-        -> Result<NodeId, std::io::Error>
-    {
+    fn push_line(&mut self, line: &NodeLine) -> Result<NodeId, std::io::Error> {
         let node_id = NodeId(self.position);
         let mut cursor = std::io::Cursor::new([0; MAX_LINE_NODE_SIZE]);
         Self::write_line(&mut cursor, line, node_id, &mut self.counters)?;
@@ -785,7 +798,9 @@ where Storage: Write
             Node::Line(line) => (self.push_line(line), "line"),
             Node::Branch(branch) => (self.push_node(branch), "bra"),
         };
-        if DO_TRACE { eprintln!("push {node_id:?} node={node:?}"); }
+        if DO_TRACE {
+            eprintln!("push {node_id:?} node={node:?}");
+        }
         // debug_assert_eq!(self.position, self.storage.len() as u64, "failed push {_kind}");
         node_id
     }
@@ -933,7 +948,6 @@ impl ArenaCompactTree<Mmap> {
         })
     }
 
-
     /// ```ignore
     /// use petta::pathmap::{PathMap, arena_compact::ArenaCompactTree};
     /// use tempfile::NamedTempFile;
@@ -952,13 +966,15 @@ impl ArenaCompactTree<Mmap> {
     /// # }
     /// ```ignore
     pub fn dump_from_zipper<V, Z, F, P>(
-        zipper: Z, map_val: F, path: P
+        zipper: Z,
+        map_val: F,
+        path: P,
     ) -> Result<Self, std::io::Error>
-        where
-            V: Clone + Send + Sync + Unpin,
-            Z: Catamorphism<V>,
-            F: Fn(&V) -> u64,
-            P: AsRef<Path>
+    where
+        V: Clone + Send + Sync + Unpin,
+        Z: Catamorphism<V>,
+        F: Fn(&V) -> u64,
+        P: AsRef<Path>,
     {
         let arena = dump_arena_tree(zipper, map_val, path)?;
         let file = arena.storage.buf_writer.into_inner()?;
@@ -987,7 +1003,13 @@ pub enum Node {
 impl Node {
     pub fn child_count(&self) -> usize {
         match self {
-            Node::Line(line) => if line.child.is_some() { 1 } else { 0 },
+            Node::Line(line) => {
+                if line.child.is_some() {
+                    1
+                } else {
+                    0
+                }
+            }
             Node::Branch(node) => node.bytemask.count_bits(),
         }
     }
@@ -1034,10 +1056,10 @@ impl NodeBranch {
 // benchmark for morphisms (caching/side, jumping/plain)
 // val_count ?
 fn build_arena_tree<V, Z, F>(zipper: Z, map_val: F) -> ArenaCompactTree<Vec<u8>>
-    where
-        V: Clone + Send + Sync + Unpin,
-        Z: Catamorphism<V>,
-        F: Fn(&V) -> u64,
+where
+    V: Clone + Send + Sync + Unpin,
+    Z: Catamorphism<V>,
+    F: Fn(&V) -> u64,
 {
     let mut arena = ArenaCompactTree::new();
     let map_val = &map_val;
@@ -1047,11 +1069,7 @@ fn build_arena_tree<V, Z, F>(zipper: Z, map_val: F) -> ArenaCompactTree<Vec<u8>>
             let id = arena.push_v(child);
             first_child = first_child.or(Some(id));
         }
-        let node = NodeBranch {
-            bytemask: ByteMask::from(*bm),
-            first_child,
-            value: v.map(map_val),
-        };
+        let node = NodeBranch { bytemask: ByteMask::from(*bm), first_child, value: v.map(map_val) };
         if jump == 0 {
             return Node::Branch(node);
         }
@@ -1073,13 +1091,13 @@ fn build_arena_tree<V, Z, F>(zipper: Z, map_val: F) -> ArenaCompactTree<Vec<u8>>
     arena
 }
 
-use std::io::{BufWriter, Seek, SeekFrom};
 use std::fs::{File, OpenOptions};
+use std::io::{BufWriter, Seek, SeekFrom};
 
 pub struct FileDumper {
     buf_writer: BufWriter<File>,
     line_buf: Vec<u8>,
-    line_map: HashMap::<u64, (usize, usize, LineId)>,
+    line_map: HashMap<u64, (usize, usize, LineId)>,
 }
 
 impl Write for FileDumper {
@@ -1093,23 +1111,18 @@ impl Write for FileDumper {
 }
 
 /// BufWriter buffer size. The default of 8KiB is too small.
-const DUMPER_BUFFER_SIZE: usize = 4*1024*1024;
+const DUMPER_BUFFER_SIZE: usize = 4 * 1024 * 1024;
 impl ArenaCompactTree<FileDumper> {
     fn open(path: impl AsRef<Path>) -> Result<Self, std::io::Error> {
-        let mut file = OpenOptions::new()
-            .read(true).write(true)
-            .create(true).truncate(true)
-            .open(path)?;
+        let mut file =
+            OpenOptions::new().read(true).write(true).create(true).truncate(true).open(path)?;
         file.seek(SeekFrom::Start(0))?;
         file.write_all(&COMPACT_TREE_MAGIC)?;
         file.write_all(&[0; 8])?;
         let position = file.stream_position()?;
         let buf_writer = BufWriter::with_capacity(DUMPER_BUFFER_SIZE, file);
-        let storage = FileDumper {
-            buf_writer,
-            line_buf: Default::default(),
-            line_map: Default::default(),
-        };
+        let storage =
+            FileDumper { buf_writer, line_buf: Default::default(), line_map: Default::default() };
         let act = ArenaCompactTree {
             storage,
             position,
@@ -1130,15 +1143,13 @@ impl ArenaCompactTree<FileDumper> {
         Ok(node_id)
     }
 
-    fn add_path(
-        &mut self, path: impl AsRef<[u8]>
-    ) -> Result<LineId, std::io::Error> {
+    fn add_path(&mut self, path: impl AsRef<[u8]>) -> Result<LineId, std::io::Error> {
         let path = path.as_ref();
         let mut hasher = self.hasher.clone();
         hasher.write(path);
         let hash = hasher.finish();
         if let Some(&(start, len, prev)) = self.storage.line_map.get(&hash) {
-            let buf = &self.storage.line_buf[start..start+len];
+            let buf = &self.storage.line_buf[start..start + len];
             if buf == path {
                 self.counters.add_line_data_reuse(path.len());
                 return Ok(prev);
@@ -1147,9 +1158,7 @@ impl ArenaCompactTree<FileDumper> {
         let line_id = LineId(self.position);
         let line_start = self.storage.line_buf.len();
         self.storage.line_buf.extend_from_slice(path);
-        let lenlen = push_varint_u64(
-            &mut self.storage, path.len() as u64
-        )? as u64;
+        let lenlen = push_varint_u64(&mut self.storage, path.len() as u64)? as u64;
         self.position += lenlen;
         self.storage.write_all(path)?;
         self.position += path.len() as u64;
@@ -1160,44 +1169,45 @@ impl ArenaCompactTree<FileDumper> {
 }
 
 fn dump_arena_tree<V, Z, F, P>(
-    zipper: Z, map_val: F, path: P
+    zipper: Z,
+    map_val: F,
+    path: P,
 ) -> Result<ArenaCompactTree<FileDumper>, std::io::Error>
-    where
-        V: Clone + Send + Sync + Unpin,
-        Z: Catamorphism<V>,
-        F: Fn(&V) -> u64,
-        P: AsRef<Path>,
+where
+    V: Clone + Send + Sync + Unpin,
+    Z: Catamorphism<V>,
+    F: Fn(&V) -> u64,
+    P: AsRef<Path>,
 {
     // A bit of code duplication compared to build_arena_tree
     let mut arena = ArenaCompactTree::<FileDumper>::open(path)?;
     let map_val = &map_val;
-    let root = zipper.into_cata_jumping_side_effect_fallible::<Node, std::io::Error, _>(|bm, children, jump, v, path| {
-        let mut first_child: Option<NodeId> = None;
-        for child in children.iter() {
-            let id = arena.push(child)?;
-            first_child = first_child.or(Some(id));
-        }
-        let node = NodeBranch {
-            bytemask: ByteMask::from(*bm),
-            first_child,
-            value: v.map(map_val),
-        };
-        if jump == 0 {
-            return Ok(Node::Branch(node));
-        }
+    let root = zipper.into_cata_jumping_side_effect_fallible::<Node, std::io::Error, _>(
+        |bm, children, jump, v, path| {
+            let mut first_child: Option<NodeId> = None;
+            for child in children.iter() {
+                let id = arena.push(child)?;
+                first_child = first_child.or(Some(id));
+            }
+            let node =
+                NodeBranch { bytemask: ByteMask::from(*bm), first_child, value: v.map(map_val) };
+            if jump == 0 {
+                return Ok(Node::Branch(node));
+            }
 
-        let mut line = NodeLine::empty();
-        line.path = arena.add_path(&path[path.len() - jump..])?;
+            let mut line = NodeLine::empty();
+            line.path = arena.add_path(&path[path.len() - jump..])?;
 
-        if !children.is_empty() {
-            first_child = Some(arena.push(&Node::Branch(node))?);
-        } else {
-            line.value = v.map(map_val);
-        }
+            if !children.is_empty() {
+                first_child = Some(arena.push(&Node::Branch(node))?);
+            } else {
+                line.value = v.map(map_val);
+            }
 
-        line.child = first_child;
-        Ok(Node::Line(line))
-    })?;
+            line.child = first_child;
+            Ok(Node::Line(line))
+        },
+    )?;
 
     let _root_id = arena.set_root(&root)?;
     arena.finalize().unwrap();
@@ -1241,7 +1251,8 @@ impl StackFrame {
 }
 
 pub struct ACTZipper<'tree, Storage, Value>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     tree: &'tree ArenaCompactTree<Storage>,
     cur_node: Node,
@@ -1254,13 +1265,12 @@ where Storage: AsRef<[u8]>
 }
 
 impl<'tree, Storage, Value> Clone for ACTZipper<'tree, Storage, Value>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     fn clone(&self) -> Self {
-        let Self {
-            tree, cur_node, stack, path,
-            origin_depth, origin_node_depth, invalid, ..
-        } = self;
+        let Self { tree, cur_node, stack, path, origin_depth, origin_node_depth, invalid, .. } =
+            self;
         Self {
             tree,
             cur_node: cur_node.clone(),
@@ -1275,7 +1285,8 @@ where Storage: AsRef<[u8]>
 }
 
 impl<Storage> ArenaCompactTree<Storage>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     #[inline]
     pub fn read_zipper_u64<'tree>(&'tree self) -> ACTZipper<'tree, Storage, u64> {
@@ -1283,14 +1294,20 @@ where Storage: AsRef<[u8]>
     }
 
     #[inline]
-    pub fn read_zipper_at_path_u64<'tree>(&'tree self, path: &[u8]) -> ACTZipper<'tree, Storage, u64> {
+    pub fn read_zipper_at_path_u64<'tree>(
+        &'tree self,
+        path: &[u8],
+    ) -> ACTZipper<'tree, Storage, u64> {
         let mut rz = ACTZipper::from_tree(self);
         rz.descend_to(path);
         rz.with_root_here()
     }
 
     #[inline]
-    pub fn read_zipper_at_borrowed_path_u64<'tree>(&'tree self, path: &[u8]) -> ACTZipper<'tree, Storage, u64> {
+    pub fn read_zipper_at_borrowed_path_u64<'tree>(
+        &'tree self,
+        path: &[u8],
+    ) -> ACTZipper<'tree, Storage, u64> {
         self.read_zipper_at_path_u64(path)
     }
 
@@ -1307,19 +1324,24 @@ where Storage: AsRef<[u8]>
     }
 
     #[inline]
-    pub fn read_zipper_at_borrowed_path<'tree>(&'tree self, path: &[u8]) -> ACTZipper<'tree, Storage, ()> {
+    pub fn read_zipper_at_borrowed_path<'tree>(
+        &'tree self,
+        path: &[u8],
+    ) -> ACTZipper<'tree, Storage, ()> {
         self.read_zipper_at_path(path)
     }
 }
 
 impl<'tree, Storage, Value> ACTZipper<'tree, Storage, Value>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     fn from_tree(tree: &'tree ArenaCompactTree<Storage>) -> Self {
         let (cur_node, node_id) = tree.get_root();
         let stack_frame = StackFrame::from(&cur_node, node_id);
         ACTZipper {
-            tree, cur_node,
+            tree,
+            cur_node,
             path: Vec::new(),
             invalid: 0,
             origin_depth: 0,
@@ -1342,27 +1364,36 @@ where Storage: AsRef<[u8]>
 }
 
 impl<'tree, Storage> ZipperReadOnlyConditionalValues<'tree, ()> for ACTZipper<'tree, Storage, ()>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     type WitnessT = ();
     fn witness<'w>(&self) -> Self::WitnessT {}
-    fn get_val_with_witness<'w>(&self, _witness: &'w Self::WitnessT) -> Option<&'w ()> where 'tree: 'w {
+    fn get_val_with_witness<'w>(&self, _witness: &'w Self::WitnessT) -> Option<&'w ()>
+    where
+        'tree: 'w,
+    {
         self.get_val()
     }
 }
 
 impl<'tree, Storage> ZipperReadOnlyConditionalValues<'tree, u64> for ACTZipper<'tree, Storage, u64>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     type WitnessT = ();
     fn witness<'w>(&self) -> Self::WitnessT {}
-    fn get_val_with_witness<'w>(&self, _witness: &'w Self::WitnessT) -> Option<&'w u64> where 'tree: 'w {
+    fn get_val_with_witness<'w>(&self, _witness: &'w Self::WitnessT) -> Option<&'w u64>
+    where
+        'tree: 'w,
+    {
         self.get_val()
     }
 }
 
 impl<'tree, Storage, Value> Zipper for ACTZipper<'tree, Storage, Value>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     /// Returns `true` if the zipper's focus is on a path within the trie, otherwise `false`
     fn path_exists(&self) -> bool {
@@ -1375,9 +1406,7 @@ where Storage: AsRef<[u8]>
             return false;
         }
         match &self.cur_node {
-            Node::Branch(node) => {
-                node.value.is_some()
-            }
+            Node::Branch(node) => node.value.is_some(),
             Node::Line(line) => {
                 if line.value.is_none() {
                     false
@@ -1398,17 +1427,11 @@ where Storage: AsRef<[u8]>
             return 0;
         }
         match &self.cur_node {
-            Node::Branch(node) => {
-                node.bytemask.count_bits()
-            }
+            Node::Branch(node) => node.bytemask.count_bits(),
             Node::Line(path) => {
                 let last = self.stack.last().unwrap();
                 let path = self.tree.get_line(path.path);
-                if last.node_depth < path.len() {
-                    1
-                } else {
-                    0
-                }
+                if last.node_depth < path.len() { 1 } else { 0 }
             }
         }
     }
@@ -1421,9 +1444,7 @@ where Storage: AsRef<[u8]>
             return ByteMask::EMPTY;
         }
         match &self.cur_node {
-            Node::Branch(node) => {
-                node.bytemask
-            }
+            Node::Branch(node) => node.bytemask,
             Node::Line(path) => {
                 let top_frame = self.stack.last().unwrap();
                 let path = self.tree.get_line(path.path);
@@ -1438,7 +1459,8 @@ where Storage: AsRef<[u8]>
 }
 
 impl<'tree, Storage, Value> ZipperAbsolutePath for ACTZipper<'tree, Storage, Value>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     fn origin_path(&self) -> &[u8] {
         &self.path[..]
@@ -1450,12 +1472,13 @@ where Storage: AsRef<[u8]>
 }
 
 impl<'tree, Storage, Value> ZipperPathBuffer for ACTZipper<'tree, Storage, Value>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     unsafe fn origin_path_assert_len(&self, len: usize) -> &[u8] {
         // Safety: we're not creating a slice larger than capacity
         assert!(self.path.capacity() >= len);
-        unsafe{ core::slice::from_raw_parts(self.path.as_ptr(), len) }
+        unsafe { core::slice::from_raw_parts(self.path.as_ptr(), len) }
     }
 
     fn reserve_buffers(&mut self, path_len: usize, stack_depth: usize) {
@@ -1463,28 +1486,41 @@ where Storage: AsRef<[u8]>
         self.stack.reserve(stack_depth.saturating_sub(self.stack.len()));
     }
 
-    fn prepare_buffers(&mut self) {
-    }
+    fn prepare_buffers(&mut self) {}
 }
 
 impl<'tree, Storage> ZipperSubtries<(), GlobalAlloc> for ACTZipper<'tree, Storage, ()>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
-    fn native_subtries(&self) -> bool { false }
-    fn try_make_map(&self) -> Option<PathMap<(), GlobalAlloc>> { None }
-    fn trie_ref(&self) -> Option<TrieRef<'_, (), GlobalAlloc>> { None }
-    fn alloc(&self) -> GlobalAlloc { global_alloc() }
+    fn native_subtries(&self) -> bool {
+        false
+    }
+    fn try_make_map(&self) -> Option<PathMap<(), GlobalAlloc>> {
+        None
+    }
+    fn trie_ref(&self) -> Option<TrieRef<'_, (), GlobalAlloc>> {
+        None
+    }
+    fn alloc(&self) -> GlobalAlloc {
+        global_alloc()
+    }
 }
 
 const DO_TRACE: bool = false;
 impl<'tree, Storage, Value> ACTZipper<'tree, Storage, Value>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     fn trace_pos(&self) {
-        if !DO_TRACE { return; }
+        if !DO_TRACE {
+            return;
+        }
         let last_frame = self.stack.last().unwrap();
-        eprintln!("node={:?}, path={:?}, depth={}",
-            last_frame.node_id, self.path, last_frame.node_depth);
+        eprintln!(
+            "node={:?}, path={:?}, depth={}",
+            last_frame.node_id, self.path, last_frame.node_depth
+        );
     }
     fn get_value(&self) -> Option<u64> {
         if !self.is_val() {
@@ -1540,8 +1576,7 @@ where Storage: AsRef<[u8]>
         }
         while let Some(top_frame) = self.stack.last_mut() {
             let mut nchildren = top_frame.child_count;
-            let mut this_steps = top_frame.node_depth
-                .min(self.path.len() - self.origin_depth);
+            let mut this_steps = top_frame.node_depth.min(self.path.len() - self.origin_depth);
             top_frame.node_depth = 0;
             moved |= this_steps > 0;
             if self.stack.len() > 1 {
@@ -1555,9 +1590,7 @@ where Storage: AsRef<[u8]>
             self.path.truncate(self.path.len() - this_steps);
             // eprintln!("path={:?}", self.path);
             let brk = match &self.cur_node {
-                Node::Branch(node) => {
-                    (nchildren > 1) || (need_value && node.value.is_some())
-                }
+                Node::Branch(node) => (nchildren > 1) || (need_value && node.value.is_some()),
                 _ => false,
             };
             if brk || self.at_root() {
@@ -1608,14 +1641,15 @@ where Storage: AsRef<[u8]>
                     }
                     let idx = node.bytemask.index_of(path[0]) as usize;
                     let frame = self.stack.last_mut().unwrap();
-                    let ((node, next_id), node_id) = if frame.next_id.is_some() && frame.child_index + 1 == idx {
-                        // Optimization: if we know the exact next node, descend
-                        (self.tree.get_node(frame.next_id.unwrap()), frame.next_id.unwrap())
-                    } else {
-                        let (node, node_id, next_id) = self.tree
-                            .nth_node(node.first_child.unwrap(), idx);
-                        ((node, next_id), node_id)
-                    };
+                    let ((node, next_id), node_id) =
+                        if frame.next_id.is_some() && frame.child_index + 1 == idx {
+                            // Optimization: if we know the exact next node, descend
+                            (self.tree.get_node(frame.next_id.unwrap()), frame.next_id.unwrap())
+                        } else {
+                            let (node, node_id, next_id) =
+                                self.tree.nth_node(node.first_child.unwrap(), idx);
+                            ((node, next_id), node_id)
+                        };
                     frame.child_index = idx;
                     frame.next_id = Some(next_id);
                     self.stack.push(StackFrame::from(&node, node_id));
@@ -1653,7 +1687,8 @@ where Storage: AsRef<[u8]>
 }
 
 impl<'tree, Storage> ZipperValues<()> for ACTZipper<'tree, Storage, ()>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     fn val(&self) -> Option<&()> {
         self.get_value().map(|_x| &())
@@ -1661,12 +1696,13 @@ where Storage: AsRef<[u8]>
 }
 
 impl<'tree, Storage> ZipperValues<u64> for ACTZipper<'tree, Storage, u64>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     fn val(&self) -> Option<&u64> {
         let value = self.get_value()?;
         if self.tree.value.get() != value {
-            self.tree.value.set(value);            
+            self.tree.value.set(value);
         }
         let ptr = self.tree.value.as_ptr();
         // technically if someone borrows the value twice, they will hit UB
@@ -1679,25 +1715,34 @@ where Storage: AsRef<[u8]>
 }
 
 impl<'tree, Storage> ZipperForking<()> for ACTZipper<'tree, Storage, ()>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
-    type ReadZipperT<'t> = ACTZipper<'t, Storage, ()> where Self: 't;
+    type ReadZipperT<'t>
+        = ACTZipper<'t, Storage, ()>
+    where
+        Self: 't;
     fn fork_read_zipper<'a>(&'a self) -> Self::ReadZipperT<'a> {
         self.clone().with_root_here()
     }
 }
 
 impl<'tree, Storage> ZipperForking<u64> for ACTZipper<'tree, Storage, u64>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
-    type ReadZipperT<'t> = ACTZipper<'t, Storage, u64> where Self: 't;
+    type ReadZipperT<'t>
+        = ACTZipper<'t, Storage, u64>
+    where
+        Self: 't;
     fn fork_read_zipper<'a>(&'a self) -> Self::ReadZipperT<'a> {
         self.clone().with_root_here()
     }
 }
 
 impl<'tree, Storage> ZipperReadOnlyValues<'tree, ()> for ACTZipper<'tree, Storage, ()>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     fn get_val(&self) -> Option<&'tree ()> {
         self.get_value().map(|_x| &())
@@ -1705,7 +1750,8 @@ where Storage: AsRef<[u8]>
 }
 
 impl<'tree, Storage> ZipperReadOnlyValues<'tree, u64> for ACTZipper<'tree, Storage, u64>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     fn get_val(&self) -> Option<&'tree u64> {
         let value = self.get_value()?;
@@ -1718,7 +1764,8 @@ where Storage: AsRef<[u8]>
 }
 
 impl<'tree, Storage, Value> ZipperConcrete for ACTZipper<'tree, Storage, Value>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     fn shared_node_id(&self) -> Option<u64> {
         // TODO: no way to detect now
@@ -1732,10 +1779,13 @@ where Storage: AsRef<[u8]>
 
 /// An interface to enable moving a zipper around the trie and inspecting paths
 impl<'tree, Storage, Value> ZipperMoving for ACTZipper<'tree, Storage, Value>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     /// Returns `true` if the zipper cannot ascend further, otherwise returns `false`
-    fn at_root(&self) -> bool { self.path.len() <= self.origin_depth }
+    fn at_root(&self) -> bool {
+        self.path.len() <= self.origin_depth
+    }
 
     /// Resets the zipper's focus back to the root
     fn reset(&mut self) {
@@ -1749,7 +1799,9 @@ where Storage: AsRef<[u8]>
     }
 
     /// Returns the path from the zipper's root to the current focus
-    fn path(&self) -> &[u8] { &self.path[self.origin_depth..] }
+    fn path(&self) -> &[u8] {
+        &self.path[self.origin_depth..]
+    }
 
     /// Returns the total number of values contained at and below the zipper's focus, including the focus itself
     ///
@@ -1899,8 +1951,7 @@ where Storage: AsRef<[u8]>
                     }
                 }
                 Node::Branch(node) => {
-                    let Some(byte) = node.bytemask.iter().next()
-                        else { break 'descend };
+                    let Some(byte) = node.bytemask.iter().next() else { break 'descend };
                     self.path.push(byte);
                     child_id = node.first_child;
                 }
@@ -1987,14 +2038,15 @@ where Storage: AsRef<[u8]>
 }
 
 impl<Storage, Value> ZipperIteration for ACTZipper<'_, Storage, Value>
-where Storage: AsRef<[u8]>
+where
+    Storage: AsRef<[u8]>,
 {
     /// Systematically advances to the next value accessible from the zipper, traversing in a depth-first
     /// order
     ///
     /// Returns a reference to the value or `None` if the zipper has encountered the root.
     fn to_next_val(&mut self) -> bool {
-        while self.to_next_step()  {
+        while self.to_next_step() {
             if self.is_val() {
                 return true;
             }
@@ -2068,12 +2120,18 @@ where Storage: AsRef<[u8]>
 
 #[cfg(all(test, feature = "pathmap-internal-tests"))]
 mod tests {
-    use super::{ArenaCompactTree, ACTZipper};
+    use super::{ACTZipper, ArenaCompactTree};
     use super::{
-        morphisms::Catamorphism, PathMap, zipper::{zipper_iteration_tests, zipper_moving_tests, ZipperIteration, ZipperMoving, ZipperValues}
+        PathMap,
+        morphisms::Catamorphism,
+        zipper::{
+            ZipperIteration, ZipperMoving, ZipperValues, zipper_iteration_tests,
+            zipper_moving_tests,
+        },
     };
 
-    zipper_moving_tests::zipper_moving_tests!(arena_compact_zipper,
+    zipper_moving_tests::zipper_moving_tests!(
+        arena_compact_zipper,
         |keys: &[&[u8]]| {
             let btm = keys.into_iter().map(|k| (k, ())).collect::<PathMap<()>>();
             ArenaCompactTree::from_zipper(btm.read_zipper(), |&_v| 0)
@@ -2083,7 +2141,8 @@ mod tests {
         }
     );
 
-    zipper_iteration_tests::zipper_iteration_tests!(arena_compact_zipper,
+    zipper_iteration_tests::zipper_iteration_tests!(
+        arena_compact_zipper,
         |keys: &[&[u8]]| {
             let btm = keys.into_iter().map(|k| (k, ())).collect::<PathMap<()>>();
             ArenaCompactTree::from_zipper(btm.read_zipper(), |&_v| 0)
@@ -2094,8 +2153,18 @@ mod tests {
     );
 
     const PATHS: &[&str] = &[
-        "arrow", "bow", "cannon", "roman", "romane", "romanus", "romulus",
-        "rubens", "ruber", "rubicon", "rubicundus", "rom'i",
+        "arrow",
+        "bow",
+        "cannon",
+        "roman",
+        "romane",
+        "romanus",
+        "romulus",
+        "rubens",
+        "ruber",
+        "rubicon",
+        "rubicundus",
+        "rom'i",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaac",
         "bbbbbbbbbbbbbbbbbbbbbbbbbbaaaa",
@@ -2104,8 +2173,7 @@ mod tests {
 
     #[test]
     fn test_act_from_zipper() {
-        let path_vals = PATHS.iter().enumerate()
-            .map(|(idx, path)| (path, idx as u64));
+        let path_vals = PATHS.iter().enumerate().map(|(idx, path)| (path, idx as u64));
 
         let btm = PathMap::from_iter(path_vals);
         let act = ArenaCompactTree::from_zipper(btm.read_zipper(), |&v| v);
@@ -2131,8 +2199,7 @@ mod tests {
 
     #[test]
     fn test_act_get() {
-        let path_vals = PATHS.iter().enumerate()
-            .map(|(idx, path)| (path, idx as u64));
+        let path_vals = PATHS.iter().enumerate().map(|(idx, path)| (path, idx as u64));
         let btm = PathMap::from_iter(path_vals.clone());
         let act = ArenaCompactTree::from_zipper(btm.read_zipper(), |&v| v);
         for (path, idx) in path_vals {
@@ -2142,8 +2209,7 @@ mod tests {
 
     #[test]
     fn test_act_round_trip() {
-        let path_vals = PATHS.iter().enumerate()
-            .map(|(idx, path)| (path, idx as u64));
+        let path_vals = PATHS.iter().enumerate().map(|(idx, path)| (path, idx as u64));
 
         let btm = PathMap::from_iter(path_vals);
         let act1 = ArenaCompactTree::from_zipper(btm.read_zipper(), |&v| v);
@@ -2153,8 +2219,7 @@ mod tests {
 
     #[test]
     fn test_act_cata() {
-        let path_vals = PATHS.iter().enumerate()
-            .map(|(idx, path)| (path, idx as u64));
+        let path_vals = PATHS.iter().enumerate().map(|(idx, path)| (path, idx as u64));
 
         let btm = PathMap::from_iter(path_vals);
         let btm_value = btm.read_zipper().into_cata_side_effect(|bm, ch, val, path| {
@@ -2163,20 +2228,21 @@ mod tests {
             format!("('{path}' {val:?} {bm:?}\n{children})")
         });
         let act = ArenaCompactTree::from_zipper(btm.read_zipper(), |&v| v);
-        let act_value = act.read_zipper_u64().into_cata_side_effect(|bm, ch: &mut[String], val: Option<&u64>, path| {
-            let path = std::str::from_utf8(path).unwrap();
-            let children = ch.join(", ");
-            format!("('{path}' {val:?} {bm:?}\n{children})")
-        });
+        let act_value = act.read_zipper_u64().into_cata_side_effect(
+            |bm, ch: &mut [String], val: Option<&u64>, path| {
+                let path = std::str::from_utf8(path).unwrap();
+                let children = ch.join(", ");
+                format!("('{path}' {val:?} {bm:?}\n{children})")
+            },
+        );
         assert_eq!(btm_value, act_value);
     }
 
     #[test]
     fn test_act_mmap() -> Result<(), std::io::Error> {
-        use tempfile::NamedTempFile;
         use std::io::Write;
-        let path_vals = PATHS.iter().enumerate()
-            .map(|(idx, path)| (path, idx as u64));
+        use tempfile::NamedTempFile;
+        let path_vals = PATHS.iter().enumerate().map(|(idx, path)| (path, idx as u64));
 
         let btm = PathMap::from_iter(path_vals);
         let act = ArenaCompactTree::from_zipper(btm.read_zipper(), |&v| v);
@@ -2189,11 +2255,12 @@ mod tests {
             let children = ch.join(", ");
             format!("('{path}' {v:?} {bm:?}\n{children})")
         });
-        let act_value = act_mmap.read_zipper_u64().into_cata_side_effect(|bm, ch, val: Option<&u64>, path| {
-            let path = std::str::from_utf8(path).unwrap();
-            let children = ch.join(", ");
-            format!("('{path}' {val:?} {bm:?}\n{children})")
-        });
+        let act_value =
+            act_mmap.read_zipper_u64().into_cata_side_effect(|bm, ch, val: Option<&u64>, path| {
+                let path = std::str::from_utf8(path).unwrap();
+                let children = ch.join(", ");
+                format!("('{path}' {val:?} {bm:?}\n{children})")
+            });
         assert_eq!(btm_value, act_value);
         Ok(())
     }

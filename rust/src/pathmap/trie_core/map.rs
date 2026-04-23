@@ -1,11 +1,14 @@
-use core::cell::UnsafeCell;
 use super::super::alloc::{Allocator, GlobalAlloc, global_alloc};
-use super::super::morphisms::{new_map_from_ana_in, TrieBuilder};
+use super::super::merkleization::{MerkleizeResult, merkleize_impl};
+use super::super::morphisms::{TrieBuilder, new_map_from_ana_in};
+use super::super::ring::{
+    AlgebraicResult, AlgebraicStatus, COUNTER_IDENT, DistributiveLattice, DistributiveLatticeRef,
+    Lattice, LatticeRef, Quantale, SELF_IDENT,
+};
+use super::super::zipper::*;
 use super::node::*;
 use super::r#ref::*;
-use super::super::zipper::*;
-use super::super::merkleization::{MerkleizeResult, merkleize_impl};
-use super::super::ring::{AlgebraicResult, AlgebraicStatus, COUNTER_IDENT, SELF_IDENT, Lattice, LatticeRef, DistributiveLattice, DistributiveLatticeRef, Quantale};
+use core::cell::UnsafeCell;
 
 // The crate-level gxhash wrapper is available at `crate::gxhash` when needed.
 // Avoid an unused local import; reference `crate::gxhash` directly where required.
@@ -25,10 +28,7 @@ use super::super::ring::{AlgebraicResult, AlgebraicStatus, COUNTER_IDENT, SELF_I
 /// assert_eq!(map.get("two"), Some(&"2".to_string()));
 /// assert!(!map.contains("three"));
 /// ```ignore
-pub struct PathMap<
-    V: Clone + Send + Sync,
-    A: Allocator = GlobalAlloc,
-> {
+pub struct PathMap<V: Clone + Send + Sync, A: Allocator = GlobalAlloc> {
     pub(crate) root: UnsafeCell<Option<TrieNodeODRc<V, A>>>,
     pub(crate) root_val: UnsafeCell<Option<V>>,
     pub(crate) alloc: A,
@@ -39,13 +39,15 @@ unsafe impl<V: Clone + Send + Sync, A: Allocator> Sync for PathMap<V, A> {}
 
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> Clone for PathMap<V, A> {
     fn clone(&self) -> Self {
-        let root_ref = unsafe{ &*self.root.get() };
-        let root_val_ref = unsafe{ &*self.root_val.get() };
+        let root_ref = unsafe { &*self.root.get() };
+        let root_val_ref = unsafe { &*self.root_val.get() };
         Self::new_with_root_in(root_ref.clone(), root_val_ref.clone(), self.alloc.clone())
     }
 }
 
-impl<V: Clone + Send + Sync + Unpin + core::fmt::Debug, A: Allocator> core::fmt::Debug for PathMap<V, A> {
+impl<V: Clone + Send + Sync + Unpin + core::fmt::Debug, A: Allocator> core::fmt::Debug
+    for PathMap<V, A>
+{
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         const MAX_DEBUG_PATHS: usize = 100;
 
@@ -55,8 +57,11 @@ impl<V: Clone + Send + Sync + Unpin + core::fmt::Debug, A: Allocator> core::fmt:
         let mut contains_all_ascii = true;
         let mut dbg_map = f.debug_map();
         let mut path_cnt = 0;
-        while rz.to_next_val() && path_cnt < MAX_DEBUG_PATHS  {
-            if let Some(key) = super::super::utils::debug::render_debug_path(rz.path(), super::super::utils::debug::PathRenderMode::RequireAscii) {
+        while rz.to_next_val() && path_cnt < MAX_DEBUG_PATHS {
+            if let Some(key) = super::super::utils::debug::render_debug_path(
+                rz.path(),
+                super::super::utils::debug::PathRenderMode::RequireAscii,
+            ) {
                 dbg_map.entry(&key, rz.val().unwrap());
                 path_cnt += 1;
             } else {
@@ -65,15 +70,19 @@ impl<V: Clone + Send + Sync + Unpin + core::fmt::Debug, A: Allocator> core::fmt:
             }
         }
         if contains_all_ascii {
-            return dbg_map.finish()
+            return dbg_map.finish();
         }
 
         //If that failed, render them again with non-ascii paths
         rz.reset();
         let mut dbg_struct = f.debug_struct("PathMap");
         let mut path_cnt = 0;
-        while rz.to_next_val() && path_cnt < MAX_DEBUG_PATHS  {
-            let key = super::super::utils::debug::render_debug_path(rz.path(), super::super::utils::debug::PathRenderMode::ByteList).unwrap();
+        while rz.to_next_val() && path_cnt < MAX_DEBUG_PATHS {
+            let key = super::super::utils::debug::render_debug_path(
+                rz.path(),
+                super::super::utils::debug::PathRenderMode::ByteList,
+            )
+            .unwrap();
             dbg_struct.field(&key, rz.val().unwrap());
             path_cnt += 1;
         }
@@ -115,10 +124,10 @@ impl<V: Clone + Send + Sync + Unpin> PathMap<V, GlobalAlloc> {
     /// });
     /// ```ignore
     pub fn new_from_ana<W, AlgF>(w: W, alg_f: AlgF) -> Self
-        where
+    where
         V: 'static,
         W: Default,
-        AlgF: FnMut(W, &mut Option<V>, &mut TrieBuilder<V, W, GlobalAlloc>, &[u8])
+        AlgF: FnMut(W, &mut Option<V>, &mut TrieBuilder<V, W, GlobalAlloc>, &[u8]),
     {
         Self::new_from_ana_in(w, alg_f, global_alloc())
     }
@@ -127,15 +136,15 @@ impl<V: Clone + Send + Sync + Unpin> PathMap<V, GlobalAlloc> {
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     #[inline]
     pub(crate) fn root(&self) -> Option<&TrieNodeODRc<V, A>> {
-        unsafe{ &*self.root.get() }.as_ref()
+        unsafe { &*self.root.get() }.as_ref()
     }
     #[inline]
     pub(crate) fn root_val(&self) -> Option<&V> {
-        unsafe{ &*self.root_val.get() }.as_ref()
+        unsafe { &*self.root_val.get() }.as_ref()
     }
     #[inline]
     pub(crate) fn root_val_mut(&mut self) -> &mut Option<V> {
-        unsafe{ &mut *self.root_val.get() }
+        unsafe { &mut *self.root_val.get() }
     }
     #[inline]
     pub(crate) fn get_or_init_root_mut(&mut self) -> &mut TrieNodeODRc<V, A> {
@@ -145,22 +154,28 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     /// Internal method to ensure there is a valid node at the root of the map
     #[inline]
     pub(crate) fn ensure_root(&self) {
-        let root_ref = unsafe{ &*self.root.get() };
+        let root_ref = unsafe { &*self.root.get() };
         if root_ref.is_some() {
-            return
+            return;
         }
         self.do_init_root();
     }
     #[cold]
     fn do_init_root(&self) {
         #[cfg(feature = "all_dense_nodes")]
-        let root = TrieNodeODRc::new_in(super::dense_byte::DenseByteNode::<V, A>::new_in(self.alloc.clone()), self.alloc.clone());
+        let root = TrieNodeODRc::new_in(
+            super::dense_byte::DenseByteNode::<V, A>::new_in(self.alloc.clone()),
+            self.alloc.clone(),
+        );
         #[cfg(feature = "bridge_nodes")]
         let root = TrieNodeODRc::new_in(super::bridge::BridgeNode::new_empty(), self.alloc.clone());
         #[cfg(not(any(feature = "all_dense_nodes", feature = "bridge_nodes")))]
-        let root = TrieNodeODRc::new_in(super::line_list::LineListNode::new_in(self.alloc.clone()), self.alloc.clone());
+        let root = TrieNodeODRc::new_in(
+            super::line_list::LineListNode::new_in(self.alloc.clone()),
+            self.alloc.clone(),
+        );
 
-        let root_ref = unsafe{ &mut *self.root.get() };
+        let root_ref = unsafe { &mut *self.root.get() };
         *root_ref = Some(root);
     }
 
@@ -180,10 +195,10 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
 
     /// See [`new_from_ana`](Self::new_from_ana) for description of behavior
     pub fn new_from_ana_in<W, AlgF>(w: W, alg_f: AlgF, alloc: A) -> Self
-        where
+    where
         V: 'static,
         W: Default,
-        AlgF: FnMut(W, &mut Option<V>, &mut TrieBuilder<V, W, A>, &[u8])
+        AlgF: FnMut(W, &mut Option<V>, &mut TrieBuilder<V, W, A>, &[u8]),
     {
         new_map_from_ana_in(w, alg_f, alloc)
     }
@@ -193,25 +208,23 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     pub(crate) const fn new_with_root_in(
         root_node: Option<TrieNodeODRc<V, A>>,
         root_val: Option<V>,
-        alloc: A
+        alloc: A,
     ) -> Self {
-        Self {
-            root: UnsafeCell::new(root_node),
-            root_val: UnsafeCell::new(root_val),
-            alloc
-        }
+        Self { root: UnsafeCell::new(root_node), root_val: UnsafeCell::new(root_val), alloc }
     }
 
     /// Internal Method.  Removes and returns the root node and root_val from a `PathMap`
     #[inline]
     pub(crate) fn into_root(self) -> (Option<TrieNodeODRc<V, A>>, Option<V>) {
         let root_node = match self.root() {
-            Some(root) => if !root.as_tagged().node_is_empty() {
-                self.root.into_inner()
-            } else {
-                None
-            },
-            None => None
+            Some(root) => {
+                if !root.as_tagged().node_is_empty() {
+                    self.root.into_inner()
+                } else {
+                    None
+                }
+            }
+            None => None,
         };
         let root_val = self.root_val.into_inner();
         (root_node, root_val)
@@ -221,37 +234,69 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     pub fn trie_ref_at_path<K: AsRef<[u8]>>(&self, path: K) -> TrieRefBorrowed<'_, V, A> {
         self.ensure_root();
         let path = path.as_ref();
-        TrieRefBorrowed::new_with_key_and_path_in(self.root().unwrap(), self.root_val(), &[], path, self.alloc.clone())
+        TrieRefBorrowed::new_with_key_and_path_in(
+            self.root().unwrap(),
+            self.root_val(),
+            &[],
+            path,
+            self.alloc.clone(),
+        )
     }
 
     /// Creates a new read-only [Zipper], starting at the root of a `PathMap`
     pub fn read_zipper<'a>(&'a self) -> ReadZipperUntracked<'a, 'static, V, A> {
         self.ensure_root();
-        let root_val = unsafe{ &*self.root_val.get() }.as_ref();
-        ReadZipperUntracked::new_with_node_and_path_internal_in(self.root().unwrap(), &[], 0, root_val, self.alloc.clone())
+        let root_val = unsafe { &*self.root_val.get() }.as_ref();
+        ReadZipperUntracked::new_with_node_and_path_internal_in(
+            self.root().unwrap(),
+            &[],
+            0,
+            root_val,
+            self.alloc.clone(),
+        )
     }
 
     /// Creates a new read-only [Zipper], with the specified path from the root of the map; This method is much more
     /// efficient than [read_zipper_at_path](Self::read_zipper_at_path), but means the resulting zipper is bound by
     /// the `'path` lifetime
-    pub fn read_zipper_at_borrowed_path<'path>(&self, path: &'path[u8]) -> ReadZipperUntracked<'_, 'path, V, A> {
+    pub fn read_zipper_at_borrowed_path<'path>(
+        &self,
+        path: &'path [u8],
+    ) -> ReadZipperUntracked<'_, 'path, V, A> {
         self.ensure_root();
         let root_val = match path.len() == 0 {
-            true => unsafe{ &*self.root_val.get() }.as_ref(),
-            false => None
+            true => unsafe { &*self.root_val.get() }.as_ref(),
+            false => None,
         };
-        ReadZipperUntracked::new_with_node_and_path_in(self.root().unwrap(), path.as_ref(), path.len(), 0, root_val, self.alloc.clone())
+        ReadZipperUntracked::new_with_node_and_path_in(
+            self.root().unwrap(),
+            path.as_ref(),
+            path.len(),
+            0,
+            root_val,
+            self.alloc.clone(),
+        )
     }
 
     /// Creates a new read-only [Zipper], with the `path` specified from the root of the map
-    pub fn read_zipper_at_path<K: AsRef<[u8]>>(&self, path: K) -> ReadZipperUntracked<'_, 'static, V, A> {
+    pub fn read_zipper_at_path<K: AsRef<[u8]>>(
+        &self,
+        path: K,
+    ) -> ReadZipperUntracked<'_, 'static, V, A> {
         self.ensure_root();
         let path = path.as_ref();
         let root_val = match path.len() == 0 {
-            true => unsafe{ &*self.root_val.get() }.as_ref(),
-            false => None
+            true => unsafe { &*self.root_val.get() }.as_ref(),
+            false => None,
         };
-        ReadZipperUntracked::new_with_node_and_cloned_path_in(self.root().unwrap(), path, path.len(), 0, root_val, self.alloc.clone())
+        ReadZipperUntracked::new_with_node_and_cloned_path_in(
+            self.root().unwrap(),
+            path,
+            path.len(),
+            0,
+            root_val,
+            self.alloc.clone(),
+        )
     }
 
     /// Creates a new [write zipper](ZipperWriting) starting at the root of the `PathMap`
@@ -259,18 +304,34 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
         self.ensure_root();
         let root_node = self.root.get_mut().as_mut().unwrap();
         let root_val = self.root_val.get_mut();
-        WriteZipperUntracked::new_with_node_and_path_internal_in(root_node, Some(root_val), &[], 0, self.alloc.clone())
+        WriteZipperUntracked::new_with_node_and_path_internal_in(
+            root_node,
+            Some(root_val),
+            &[],
+            0,
+            self.alloc.clone(),
+        )
     }
 
     /// Creates a new [write zipper](ZipperWriting) with the specified path from the root of the map
-    pub fn write_zipper_at_path<'a, 'path>(&'a mut self, path: &'path[u8]) -> WriteZipperUntracked<'a, 'path, V, A> {
+    pub fn write_zipper_at_path<'a, 'path>(
+        &'a mut self,
+        path: &'path [u8],
+    ) -> WriteZipperUntracked<'a, 'path, V, A> {
         self.ensure_root();
         let root_node = self.root.get_mut().as_mut().unwrap();
         let root_val = match path.len() == 0 {
             true => Some(self.root_val.get_mut()),
-            false => None
+            false => None,
         };
-        WriteZipperUntracked::new_with_node_and_path_in(root_node, root_val, path, path.len(), 0, self.alloc.clone())
+        WriteZipperUntracked::new_with_node_and_path_in(
+            root_node,
+            root_val,
+            path,
+            path.len(),
+            0,
+            self.alloc.clone(),
+        )
     }
 
     /// Creates a [ZipperHead] at the root of the map
@@ -278,7 +339,13 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
         self.ensure_root();
         let root_node = self.root.get_mut().as_mut().unwrap();
         let root_val = self.root_val.get_mut();
-        let z = WriteZipperCore::new_with_node_and_path_internal_in(root_node, Some(root_val), &[], 0, self.alloc.clone());
+        let z = WriteZipperCore::new_with_node_and_path_internal_in(
+            root_node,
+            Some(root_val),
+            &[],
+            0,
+            self.alloc.clone(),
+        );
         z.into_zipper_head()
     }
 
@@ -308,7 +375,7 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     /// Returns an iterator over all key-value pairs within the map
     ///
     /// NOTE: This is much less efficient than using the [read_zipper](Self::read_zipper) method
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item=(Vec<u8>, &'a V)> + 'a {
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = (Vec<u8>, &'a V)> + 'a {
         self.read_zipper().into_iter()
     }
 
@@ -347,7 +414,7 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
         let path = path.as_ref();
 
         //NOTE: Here is the old impl traversing without the zipper.  Kept here for benchmarking purposes
-        // However, the zipper version is basically identical performance, within the margin of error 
+        // However, the zipper version is basically identical performance, within the margin of error
         // traverse_to_leaf_static_result(&mut self.root, k,
         // |node, remaining_key| node.node_set_val(remaining_key, v),
         // |_new_leaf_node, _remaining_key| None)
@@ -405,7 +472,7 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     pub fn get_val_mut_at<K: AsRef<[u8]>>(&mut self, path: K) -> Option<&mut V> {
         let path = path.as_ref();
         if path.len() == 0 {
-            return self.root_val_mut().as_mut()
+            return self.root_val_mut().as_mut();
         }
 
         self.ensure_root();
@@ -423,23 +490,30 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     /// of `func` if no value exists
     pub fn get_val_or_set_mut_with_at<F, K>(&mut self, path: K, func: F) -> &mut V
     where
-    F: FnOnce() -> V,
-    K: AsRef<[u8]>,
+        F: FnOnce() -> V,
+        K: AsRef<[u8]>,
     {
         let path = path.as_ref();
         if path.len() == 0 {
             if self.root_val().is_some() {
-                return self.root_val_mut().as_mut().unwrap()
+                return self.root_val_mut().as_mut().unwrap();
             }
             *self.root_val_mut() = Some(func());
-            return self.root_val_mut().as_mut().unwrap()
+            return self.root_val_mut().as_mut().unwrap();
         }
 
         //For setting, it's worth it for us to go through the zipper API, so we don't need
         // to worry about node upgrading, etc.
         self.ensure_root();
         let root_node = self.root.get_mut().as_mut().unwrap();
-        let mut temp_z = WriteZipperCore::<'_, '_, V, A>::new_with_node_and_path_in(root_node, None, path, path.len(), 0, self.alloc.clone());
+        let mut temp_z = WriteZipperCore::<'_, '_, V, A>::new_with_node_and_path_in(
+            root_node,
+            None,
+            path,
+            path.len(),
+            0,
+            self.alloc.clone(),
+        );
 
         if !temp_z.is_val() {
             temp_z.set_val(func());
@@ -472,11 +546,11 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     pub fn is_empty(&self) -> bool {
         (match self.root() {
             Some(root) => root.as_tagged().node_is_empty(),
-            None => true
+            None => true,
         } && self.root_val().is_none())
     }
 
-    /// Prunes the dangling `path` specified up to the first upstream value or fork in the path, and 
+    /// Prunes the dangling `path` specified up to the first upstream value or fork in the path, and
     /// returns the number of path bytes removed
     pub fn prune_path<K: AsRef<[u8]>>(&mut self, path: K) -> usize {
         let path = path.as_ref();
@@ -500,38 +574,45 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     ///
     /// WARNING: This is not a cheap method. It may have an order-N cost
     pub fn val_count(&self) -> usize {
-        let root_val = unsafe{ &*self.root_val.get() }.is_some() as usize;
+        let root_val = unsafe { &*self.root_val.get() }.is_some() as usize;
         match self.root() {
             Some(root) => val_count_below_root(root.as_tagged()) + root_val,
-            None => root_val
+            None => root_val,
         }
     }
 
     /// GOAT, temporary method to do side-by-side comparison between abstracted val_count and bespoke version
     pub fn goat_val_count(&self) -> usize {
-        let root_val = unsafe{ &*self.root_val.get() }.is_some() as usize;
+        let root_val = unsafe { &*self.root_val.get() }.is_some() as usize;
         match self.root() {
             Some(root) => {
-                traverse_physical(root,
-                    |node, ctx: usize| { ctx + node.node_goat_val_count() },
-                    |ctx, child_ctx| { ctx + child_ctx },
+                traverse_physical(
+                    root,
+                    |node, ctx: usize| ctx + node.node_goat_val_count(),
+                    |ctx, child_ctx| ctx + child_ctx,
                 ) + root_val
-            },
-            None => root_val
+            }
+            None => root_val,
         }
     }
 
     /// Returns a new `PathMap` containing the union of the paths in `self` and the paths in `other`
-    pub fn join(&self, other: &Self) -> Self where V: Lattice {
+    pub fn join(&self, other: &Self) -> Self
+    where
+        V: Lattice,
+    {
         result_into_map(self.pjoin(other), self, other, self.alloc.clone())
     }
 
     /// Returns a new `PathMap` containing the intersection of the paths in `self` and the paths in `other`
-    pub fn meet(&self, other: &Self) -> Self where V: Lattice {
+    pub fn meet(&self, other: &Self) -> Self
+    where
+        V: Lattice,
+    {
         result_into_map(self.pmeet(other), self, other, self.alloc.clone())
     }
 
-    /// Returns a new `PathMap` where the paths in `self` are restricted by the paths leading to 
+    /// Returns a new `PathMap` where the paths in `self` are restricted by the paths leading to
     /// values in `other`
     ///
     /// NOTE: if `other` has a root value, this function returns a clone of `self` because other's root
@@ -539,7 +620,7 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     /// one either.
     pub fn restrict(&self, other: &Self) -> Self {
         if other.root_val().is_some() {
-            return self.clone()
+            return self.clone();
         }
         let self_root = self.root();
         let other_root = other.root();
@@ -547,11 +628,17 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
             Self::new_in(self.alloc.clone())
         } else {
             match self_root.unwrap().as_tagged().prestrict_dyn(other_root.unwrap().as_tagged()) {
-                AlgebraicResult::Element(new_root) => Self::new_with_root_in(Some(new_root), None, self.alloc.clone()),
+                AlgebraicResult::Element(new_root) => {
+                    Self::new_with_root_in(Some(new_root), None, self.alloc.clone())
+                }
                 AlgebraicResult::None => Self::new_in(self.alloc.clone()),
                 AlgebraicResult::Identity(mask) => {
                     debug_assert_eq!(mask, SELF_IDENT);
-                    Self::new_with_root_in(Some(self.root().cloned().unwrap()), None, self.alloc.clone())
+                    Self::new_with_root_in(
+                        Some(self.root().cloned().unwrap()),
+                        None,
+                        self.alloc.clone(),
+                    )
                 }
             }
         }
@@ -559,14 +646,15 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
 
     /// Returns a new `PathMap` containing the contents from `self` minus the contents of `other`
     pub fn subtract(&self, other: &Self) -> Self
-        where V: DistributiveLattice
+    where
+        V: DistributiveLattice,
     {
         let subtracted_root_val = match self.root_val().psubtract(&other.root_val()) {
             AlgebraicResult::Element(new_val) => new_val,
             AlgebraicResult::Identity(mask) => {
                 debug_assert_eq!(mask, SELF_IDENT);
                 self.root_val().cloned()
-            },
+            }
             AlgebraicResult::None => None,
         };
 
@@ -575,7 +663,7 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
             AlgebraicResult::Identity(mask) => {
                 debug_assert_eq!(mask, SELF_IDENT);
                 self.root().cloned()
-            },
+            }
             AlgebraicResult::None => None,
         };
 
@@ -584,7 +672,8 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
 
     /// Optimize the `PathMap` by factoring shared subtries using a temporary [Merkle Tree](https://en.wikipedia.org/wiki/Merkle_tree)
     pub fn merkleize(&mut self) -> MerkleizeResult
-        where V: core::hash::Hash
+    where
+        V: core::hash::Hash,
     {
         let Some(root) = self.root() else {
             return MerkleizeResult::default();
@@ -599,7 +688,6 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
         result
     }
 }
-
 
 #[cfg(feature = "old_cursor")]
 impl<V: Clone + Send + Sync + Unpin> PathMap<V> {
@@ -621,7 +709,7 @@ impl<V: Clone + Send + Sync + Unpin> PathMap<V> {
 }
 
 impl<V: Clone + Send + Sync + Unpin, K: AsRef<[u8]>> FromIterator<(K, V)> for PathMap<V> {
-    fn from_iter<I: IntoIterator<Item=(K, V)>>(iter: I) -> Self {
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
         let mut map = Self::new();
         for (key, val) in iter {
             map.set_val_at(key, val);
@@ -631,7 +719,7 @@ impl<V: Clone + Send + Sync + Unpin, K: AsRef<[u8]>> FromIterator<(K, V)> for Pa
 }
 
 impl<'a, V: Clone + Send + Sync + Unpin, K: AsRef<[u8]>> FromIterator<&'a (K, V)> for PathMap<V> {
-    fn from_iter<I: IntoIterator<Item=&'a (K, V)>>(iter: I) -> Self {
+    fn from_iter<I: IntoIterator<Item = &'a (K, V)>>(iter: I) -> Self {
         let mut map = Self::new();
         for (key, val) in iter {
             map.set_val_at(key, val.clone());
@@ -641,7 +729,7 @@ impl<'a, V: Clone + Send + Sync + Unpin, K: AsRef<[u8]>> FromIterator<&'a (K, V)
 }
 
 impl<'a> FromIterator<&'a [u8]> for PathMap<()> {
-    fn from_iter<I: IntoIterator<Item=&'a [u8]>>(iter: I) -> Self {
+    fn from_iter<I: IntoIterator<Item = &'a [u8]>>(iter: I) -> Self {
         let mut map = Self::new();
         for key in iter {
             map.set_val_at(key, ());
@@ -658,7 +746,9 @@ impl<V: Clone + Send + Sync + Unpin, K: AsRef<[u8]>> From<(K, V)> for PathMap<V>
     }
 }
 
-impl<V: Clone + Send + Sync + Unpin + 'static, A: Allocator + 'static> std::iter::IntoIterator for PathMap<V, A> {
+impl<V: Clone + Send + Sync + Unpin + 'static, A: Allocator + 'static> std::iter::IntoIterator
+    for PathMap<V, A>
+{
     type Item = (Vec<u8>, V);
     type IntoIter = OwnedZipperIter<V, A>;
 
@@ -668,7 +758,12 @@ impl<V: Clone + Send + Sync + Unpin + 'static, A: Allocator + 'static> std::iter
 }
 
 /// Internal function to convert an [AlgebraicResult] (partial lattice result) into a `PathMap`
-fn result_into_map<V: Clone + Send + Sync + Unpin, A: Allocator>(result: AlgebraicResult<PathMap<V, A>>, self_map: &PathMap<V, A>, other_map: &PathMap<V, A>, result_region: A) -> PathMap<V, A> {
+fn result_into_map<V: Clone + Send + Sync + Unpin, A: Allocator>(
+    result: AlgebraicResult<PathMap<V, A>>,
+    self_map: &PathMap<V, A>,
+    other_map: &PathMap<V, A>,
+    result_region: A,
+) -> PathMap<V, A> {
     match result {
         AlgebraicResult::Element(new_map) => new_map,
         AlgebraicResult::None => PathMap::new_in(result_region),
@@ -679,7 +774,7 @@ fn result_into_map<V: Clone + Send + Sync + Unpin, A: Allocator>(result: Algebra
                 debug_assert_eq!(mask, COUNTER_IDENT);
                 other_map.clone()
             }
-        },
+        }
     }
 }
 
@@ -687,21 +782,26 @@ impl<V: Clone + Lattice + Send + Sync + Unpin, A: Allocator> Lattice for PathMap
     fn pjoin(&self, other: &Self) -> AlgebraicResult<Self> {
         let joined_node = self.root().pjoin(&other.root());
         let joined_root_val = self.root_val().pjoin(&other.root_val());
-        joined_node.merge(joined_root_val, |which_arg| {
-            match which_arg {
+        joined_node.merge(
+            joined_root_val,
+            |which_arg| match which_arg {
                 0 => Some(self.root().cloned()),
                 1 => Some(other.root().cloned()),
-                _ => unreachable!()
-            }
-        }, |which_arg| {
-            match which_arg {
+                _ => unreachable!(),
+            },
+            |which_arg| match which_arg {
                 0 => Some(self.root_val().cloned()),
                 1 => Some(other.root_val().cloned()),
-                _ => unreachable!()
-            }
-        }, |root_node, root_val| {
-            AlgebraicResult::Element(Self::new_with_root_in(root_node.flatten(), root_val.flatten(), self.alloc.clone()))
-        })
+                _ => unreachable!(),
+            },
+            |root_node, root_val| {
+                AlgebraicResult::Element(Self::new_with_root_in(
+                    root_node.flatten(),
+                    root_val.flatten(),
+                    self.alloc.clone(),
+                ))
+            },
+        )
     }
     fn join_into(&mut self, other: Self) -> AlgebraicStatus {
         let (other_root_node, other_root_val) = other.into_root();
@@ -709,16 +809,14 @@ impl<V: Clone + Lattice + Send + Sync + Unpin, A: Allocator> Lattice for PathMap
         let root_node_status = if let Some(other_root) = other_root_node {
             let (status, result) = self.get_or_init_root_mut().make_mut().join_into_dyn(other_root);
             match result {
-                Ok(()) => {},
-                Err(replacement) => { *self.get_or_init_root_mut() = replacement; }
+                Ok(()) => {}
+                Err(replacement) => {
+                    *self.get_or_init_root_mut() = replacement;
+                }
             }
             status
         } else {
-            if self.is_empty() {
-                AlgebraicStatus::None
-            } else {
-                AlgebraicStatus::Identity
-            }
+            if self.is_empty() { AlgebraicStatus::None } else { AlgebraicStatus::Identity }
         };
 
         let root_val_status = self.root_val_mut().join_into(other_root_val);
@@ -727,65 +825,81 @@ impl<V: Clone + Lattice + Send + Sync + Unpin, A: Allocator> Lattice for PathMap
     fn pmeet(&self, other: &Self) -> AlgebraicResult<Self> {
         let meet_node = self.root().pmeet(&other.root());
         let meet_root_val = self.root_val().pmeet(&other.root_val());
-        meet_node.merge(meet_root_val, |which_arg| {
-            match which_arg {
+        meet_node.merge(
+            meet_root_val,
+            |which_arg| match which_arg {
                 0 => Some(self.root().cloned()),
                 1 => Some(other.root().cloned()),
-                _ => unreachable!()
-            }
-        }, |which_arg| {
-            match which_arg {
+                _ => unreachable!(),
+            },
+            |which_arg| match which_arg {
                 0 => Some(self.root_val().cloned()),
                 1 => Some(other.root_val().cloned()),
-                _ => unreachable!()
-            }
-        }, |root_node, root_val| {
-            AlgebraicResult::Element(Self::new_with_root_in(root_node.flatten(), root_val.flatten(), self.alloc.clone()))
-        })
+                _ => unreachable!(),
+            },
+            |root_node, root_val| {
+                AlgebraicResult::Element(Self::new_with_root_in(
+                    root_node.flatten(),
+                    root_val.flatten(),
+                    self.alloc.clone(),
+                ))
+            },
+        )
     }
 }
 
-impl<V: Clone + Send + Sync + Unpin + DistributiveLattice, A: Allocator> DistributiveLattice for PathMap<V, A> {
+impl<V: Clone + Send + Sync + Unpin + DistributiveLattice, A: Allocator> DistributiveLattice
+    for PathMap<V, A>
+{
     fn psubtract(&self, other: &Self) -> AlgebraicResult<Self> {
         let subtract_node = self.root().psubtract(&other.root());
         let subtract_root_val = self.root_val().psubtract(&other.root_val());
-        subtract_node.merge(subtract_root_val, |which_arg| {
-            match which_arg {
+        subtract_node.merge(
+            subtract_root_val,
+            |which_arg| match which_arg {
                 0 => Some(self.root().cloned()),
                 1 => Some(other.root().cloned()),
-                _ => unreachable!()
-            }
-        }, |which_arg| {
-            match which_arg {
+                _ => unreachable!(),
+            },
+            |which_arg| match which_arg {
                 0 => Some(self.root_val().cloned()),
                 1 => Some(other.root_val().cloned()),
-                _ => unreachable!()
-            }
-        }, |root_node, root_val| {
-            AlgebraicResult::Element(Self::new_with_root_in(root_node.flatten(), root_val.flatten(), self.alloc.clone()))
-        })
+                _ => unreachable!(),
+            },
+            |root_node, root_val| {
+                AlgebraicResult::Element(Self::new_with_root_in(
+                    root_node.flatten(),
+                    root_val.flatten(),
+                    self.alloc.clone(),
+                ))
+            },
+        )
     }
 }
 
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> Quantale for PathMap<V, A> {
     fn prestrict(&self, other: &Self) -> AlgebraicResult<Self> {
         if other.root_val().is_some() {
-            return AlgebraicResult::Identity(SELF_IDENT)
+            return AlgebraicResult::Identity(SELF_IDENT);
         }
         match (self.root(), other.root()) {
-            (Some(self_root), Some(other_root)) => {
-                match self_root.prestrict(other_root) {
-                    AlgebraicResult::Element(new_root) => AlgebraicResult::Element(Self::new_with_root_in(Some(new_root), None, self.alloc.clone())),
-                    AlgebraicResult::Identity(mask) => {
-                        debug_assert_eq!(mask, SELF_IDENT);
-                        if self.root_val().is_some() {
-                            AlgebraicResult::Element(Self::new_with_root_in(Some(self_root.clone()), None, self.alloc.clone()))
-                        } else {
-                            AlgebraicResult::Identity(SELF_IDENT)
-                        }
-                    },
-                    AlgebraicResult::None => AlgebraicResult::None,
+            (Some(self_root), Some(other_root)) => match self_root.prestrict(other_root) {
+                AlgebraicResult::Element(new_root) => AlgebraicResult::Element(
+                    Self::new_with_root_in(Some(new_root), None, self.alloc.clone()),
+                ),
+                AlgebraicResult::Identity(mask) => {
+                    debug_assert_eq!(mask, SELF_IDENT);
+                    if self.root_val().is_some() {
+                        AlgebraicResult::Element(Self::new_with_root_in(
+                            Some(self_root.clone()),
+                            None,
+                            self.alloc.clone(),
+                        ))
+                    } else {
+                        AlgebraicResult::Identity(SELF_IDENT)
+                    }
                 }
+                AlgebraicResult::None => AlgebraicResult::None,
             },
             _ => AlgebraicResult::None,
         }
@@ -800,8 +914,8 @@ impl<V: Clone + Send + Sync + Unpin> Default for PathMap<V> {
 
 #[cfg(all(test, feature = "pathmap-internal-tests"))]
 mod tests {
-    use super::trie_map::*;
     use super::ring::Lattice;
+    use super::trie_map::*;
 
     #[test]
     fn get_from_map_test() {
@@ -872,7 +986,10 @@ mod tests {
             vec![75, 104, 119, 196, 129, 106, 97, 104, 32, 68, 197, 141, 32, 75, 197, 141, 104],
             vec![75, 104, 119, 196, 129, 106, 196, 129, 32, 68, 117, 32, 75, 111, 104],
             vec![107, 104, 119, 97, 106, 104, 32, 100, 119, 32, 107, 119, 104],
-            vec![216, 174, 217, 136, 216, 167, 216, 172, 217, 135, 32, 216, 175, 217, 136, 32, 218, 169, 217, 136, 217, 135],
+            vec![
+                216, 174, 217, 136, 216, 167, 216, 172, 217, 135, 32, 216, 175, 217, 136, 32, 218,
+                169, 217, 136, 217, 135,
+            ],
             vec![73, 109, 196, 129, 109, 32, 197, 158, 196, 129, 225, 184, 169, 105, 98],
             vec![69, 109, 97, 109, 32, 83, 97, 104, 101, 98],
             vec![69, 109, 196, 129, 109, 32, 197, 158, 196, 129, 225, 184, 169, 101, 98],
@@ -882,7 +999,7 @@ mod tests {
             vec![73, 109, 97, 109, 115, 97, 107, 104, 105, 98],
             vec![73, 109, 196, 129, 109, 32, 83, 196, 129, 225, 186, 150, 101, 98],
             vec![75, 104, 119, 97, 106, 97],
-            vec![75, 104, 119, 97, 106, 97, 32, 73, 109, 97, 109, 32, 83, 97, 105, 121, 105, 100]
+            vec![75, 104, 119, 97, 106, 97, 32, 73, 109, 97, 109, 32, 83, 97, 105, 121, 105, 100],
         ];
         let mut map = PathMap::new();
         for (i, key) in keys.iter().enumerate() {
@@ -916,8 +1033,23 @@ mod tests {
     #[test]
     fn map_contains_path_test() {
         let mut btm = PathMap::new();
-        let rs = ["arrow", "bow", "cannon", "roman", "romane", "romanus", "romulus", "rubens", "ruber", "rubicon", "rubicundus", "rom'i"];
-        rs.iter().enumerate().for_each(|(i, r)| { btm.set_val_at(r.as_bytes(), i); });
+        let rs = [
+            "arrow",
+            "bow",
+            "cannon",
+            "roman",
+            "romane",
+            "romanus",
+            "romulus",
+            "rubens",
+            "ruber",
+            "rubicon",
+            "rubicundus",
+            "rom'i",
+        ];
+        rs.iter().enumerate().for_each(|(i, r)| {
+            btm.set_val_at(r.as_bytes(), i);
+        });
 
         assert_eq!(btm.path_exists_at(b"can"), true);
         assert_eq!(btm.path_exists_at(b"cannon"), true);
@@ -1002,15 +1134,31 @@ mod tests {
 
     #[test]
     fn map_remove_test2() {
-        let mut btm = PathMap::from_iter([("abbb", ()), ("b", ()), ("bba", ())].iter().map(|(p, v)| (p.as_bytes(), v)));
+        let mut btm = PathMap::from_iter(
+            [("abbb", ()), ("b", ()), ("bba", ())].iter().map(|(p, v)| (p.as_bytes(), v)),
+        );
         btm.remove_val_at("abbb".as_bytes(), true);
         btm.remove_val_at("a".as_bytes(), true);
     }
 
     #[test]
     fn map_update_test() {
-        let rs = ["arrow", "bow", "cannon", "roman", "romane", "romanus", "romulus", "rubens", "ruber", "rubicon", "rubicundus", "rom'i"];
-        let mut btm: PathMap<u64> = rs.into_iter().enumerate().map(|(i, k)| (k, i as u64)).collect();
+        let rs = [
+            "arrow",
+            "bow",
+            "cannon",
+            "roman",
+            "romane",
+            "romanus",
+            "romulus",
+            "rubens",
+            "ruber",
+            "rubicon",
+            "rubicundus",
+            "rom'i",
+        ];
+        let mut btm: PathMap<u64> =
+            rs.into_iter().enumerate().map(|(i, k)| (k, i as u64)).collect();
 
         let mut zipper = btm.write_zipper_at_path(b"cannon");
         assert_eq!(zipper.get_val_or_set_mut(42), &2);
@@ -1024,7 +1172,17 @@ mod tests {
     fn map_join_test() {
         let mut a = PathMap::<usize>::new();
         let mut b = PathMap::<usize>::new();
-        let rs = ["Abbotsford", "Abbottabad", "Abcoude", "Abdul Hakim", "Abdulino", "Abdullahnagar", "Abdurahmoni Jomi", "Abejorral", "Abelardo Luz"];
+        let rs = [
+            "Abbotsford",
+            "Abbottabad",
+            "Abcoude",
+            "Abdul Hakim",
+            "Abdulino",
+            "Abdullahnagar",
+            "Abdurahmoni Jomi",
+            "Abejorral",
+            "Abelardo Luz",
+        ];
         for (i, path) in rs.into_iter().enumerate() {
             if i % 2 == 0 {
                 a.set_val_at(path, i);
@@ -1045,7 +1203,17 @@ mod tests {
     fn map_join_into_test() {
         let mut a = PathMap::<usize>::new();
         let mut b = PathMap::<usize>::new();
-        let rs = ["Abbotsford", "Abbottabad", "Abcoude", "Abdul Hakim", "Abdulino", "Abdullahnagar", "Abdurahmoni Jomi", "Abejorral", "Abelardo Luz"];
+        let rs = [
+            "Abbotsford",
+            "Abbottabad",
+            "Abcoude",
+            "Abdul Hakim",
+            "Abdulino",
+            "Abdullahnagar",
+            "Abdurahmoni Jomi",
+            "Abejorral",
+            "Abelardo Luz",
+        ];
         for (i, path) in rs.into_iter().enumerate() {
             if i % 2 == 0 {
                 a.set_val_at(path, i);

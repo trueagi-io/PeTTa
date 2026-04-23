@@ -24,9 +24,7 @@ fn test_protocol_string_simple() {
 fn test_protocol_string_multiple_results() {
     let mut e = make_engine();
     // superpose produces multiple results
-    let results = e
-        .process_metta_string("!(superpose (1 2 3))")
-        .unwrap();
+    let results = e.process_metta_string("!(superpose (1 2 3))").unwrap();
     assert!(!results.is_empty());
     let values: Vec<&str> = results.iter().map(|r| r.value.as_str()).collect();
     assert!(values.contains(&"1"));
@@ -46,9 +44,7 @@ fn test_protocol_string_empty_input() {
 fn test_protocol_string_with_comments() {
     let mut e = make_engine();
     // Comments are handled by MeTTa parser, this should still produce a result
-    let results = e
-        .process_metta_string("% this is a comment\n!(+ 1 2)")
-        .unwrap();
+    let results = e.process_metta_string("% this is a comment\n!(+ 1 2)").unwrap();
     // The comment might affect parsing, so we accept either result
     let _ = results;
 }
@@ -68,9 +64,7 @@ fn test_protocol_string_multiline() {
 #[test]
 fn test_protocol_string_lambda() {
     let mut e = make_engine();
-    let results = e
-        .process_metta_string("!(|-> $x $x 42)")
-        .unwrap();
+    let results = e.process_metta_string("!(|-> $x $x 42)").unwrap();
     assert!(!results.is_empty());
 }
 
@@ -94,18 +88,14 @@ fn test_protocol_string_case() {
 #[test]
 fn test_protocol_file_identity() {
     let mut e = make_engine();
-    let results = e
-        .load_metta_file(&project_root().join("examples/identity.metta"))
-        .unwrap();
+    let results = e.load_metta_file(&project_root().join("examples/identity.metta")).unwrap();
     assert!(!results.is_empty());
 }
 
 #[test]
 fn test_protocol_file_arithmetic() {
     let mut e = make_engine();
-    let results = e
-        .load_metta_file(&project_root().join("examples/math.metta"))
-        .unwrap();
+    let results = e.load_metta_file(&project_root().join("examples/math.metta")).unwrap();
     assert!(!results.is_empty());
 }
 
@@ -129,18 +119,14 @@ fn test_protocol_file_not_found() {
 #[test]
 fn test_protocol_file_boolean_solver() {
     let mut e = make_engine();
-    let results = e
-        .load_metta_file(&project_root().join("examples/booleansolver.metta"))
-        .unwrap();
+    let results = e.load_metta_file(&project_root().join("examples/booleansolver.metta")).unwrap();
     assert!(!results.is_empty());
 }
 
 #[test]
 fn test_protocol_file_fibonacci() {
     let mut e = make_engine();
-    let results = e
-        .load_metta_file(&project_root().join("examples/fib.metta"))
-        .unwrap();
+    let results = e.load_metta_file(&project_root().join("examples/fib.metta")).unwrap();
     assert!(!results.is_empty());
 }
 
@@ -158,7 +144,9 @@ fn test_protocol_error_undefined_function() {
             // Empty result list is also valid for undefined functions
             let _ = results;
         }
-        Err(PeTTaError::BackendError(BackendErrorKind::UndefinedFunction { name, arity, .. })) => {
+        Err(PeTTaError::BackendError(BackendErrorKind::UndefinedFunction {
+            name, arity, ..
+        })) => {
             assert_eq!(name, "undefined_function");
             assert_eq!(arity, 2);
         }
@@ -174,7 +162,7 @@ fn test_protocol_error_type_mismatch() {
     // This may succeed in MeTTa (returning false) or produce a type error
     // Either way, the protocol should handle it gracefully
     match results {
-        Ok(_) => {} // Valid: returns false
+        Ok(_) => {}                            // Valid: returns false
         Err(PeTTaError::BackendError(_)) => {} // Also valid: type error
         Err(e) => panic!("Unexpected error: {:?}", e),
     }
@@ -277,12 +265,8 @@ fn test_engine_multiple_queries() {
 #[test]
 fn test_engine_sequential_file_loads() {
     let mut e = make_engine();
-    let r1 = e
-        .load_metta_file(&project_root().join("examples/identity.metta"))
-        .unwrap();
-    let r2 = e
-        .load_metta_file(&project_root().join("examples/if.metta"))
-        .unwrap();
+    let r1 = e.load_metta_file(&project_root().join("examples/identity.metta")).unwrap();
+    let r2 = e.load_metta_file(&project_root().join("examples/if.metta")).unwrap();
     assert!(!r1.is_empty());
     assert!(!r2.is_empty());
 }
@@ -339,9 +323,7 @@ fn test_protocol_string_large_payload() {
 fn test_protocol_string_unicode() {
     let mut e = make_engine();
     // MeTTa should handle unicode in atoms
-    let results = e
-        .process_metta_string("(= (テスト $x) $x) !(テスト 42)")
-        .unwrap();
+    let results = e.process_metta_string("(= (テスト $x) $x) !(テスト 42)").unwrap();
     assert!(!results.is_empty());
 }
 
@@ -349,9 +331,7 @@ fn test_protocol_string_unicode() {
 fn test_protocol_string_special_characters() {
     let mut e = make_engine();
     // Test special characters in strings
-    let results = e
-        .process_metta_string(r#"(= (test-str) "hello\tworld\n")"#)
-        .unwrap();
+    let results = e.process_metta_string(r#"(= (test-str) "hello\tworld\n")"#).unwrap();
     // Should not crash
     assert!(results.is_empty() || true);
 }

@@ -12,13 +12,13 @@
 //! combinators instead of DCG rules. It produces `MettaValue` AST nodes.
 
 use nom::{
+    IResult, Parser,
     branch::alt,
     bytes::complete::{tag, take_while1},
     character::complete::{char, multispace0},
     combinator::{map, opt, value},
     multi::many0,
     sequence::{delimited, preceded, terminated},
-    IResult, Parser,
 };
 
 use crate::MettaValue;
@@ -52,14 +52,7 @@ pub fn parse_metta(input: &str) -> Result<MettaValue, String> {
 fn sexpr(input: &str) -> IResult<&str, MettaValue> {
     preceded(
         multispace0,
-        alt((
-            string_literal,
-            parenthesized_list,
-            variable,
-            number,
-            boolean_literal,
-            atom,
-        )),
+        alt((string_literal, parenthesized_list, variable, number, boolean_literal, atom)),
     )
     .parse(input)
 }
@@ -81,18 +74,41 @@ fn parenthesized_list(input: &str) -> IResult<&str, MettaValue> {
         // Otherwise treat as List.
         if items.len() > 1 {
             if let MettaValue::Atom(ref head) = items[0] {
-                let is_operator = matches!(head.as_str(),
-                    "+" | "-" | "*" | "/" | "%" | "<" | ">" | "=" | "!" | "?" | ":" |
-                    "if" | "case" | "let" | "lambda" | "->" | "|->" | "superpose" |
-                    "collapse" | "match" | "bind!" | "add-atom" | "remove-atom"
+                let is_operator = matches!(
+                    head.as_str(),
+                    "+" | "-"
+                        | "*"
+                        | "/"
+                        | "%"
+                        | "<"
+                        | ">"
+                        | "="
+                        | "!"
+                        | "?"
+                        | ":"
+                        | "if"
+                        | "case"
+                        | "let"
+                        | "lambda"
+                        | "->"
+                        | "|->"
+                        | "superpose"
+                        | "collapse"
+                        | "match"
+                        | "bind!"
+                        | "add-atom"
+                        | "remove-atom"
                 );
                 if is_operator {
                     let head = items[0].clone();
                     let args = items.into_iter().skip(1).collect();
-                    return Ok((rest, MettaValue::Expression(
-                        if let MettaValue::Atom(h) = head { h } else { unreachable!() },
-                        args,
-                    )));
+                    return Ok((
+                        rest,
+                        MettaValue::Expression(
+                            if let MettaValue::Atom(h) = head { h } else { unreachable!() },
+                            args,
+                        ),
+                    ));
                 }
             }
         }
@@ -102,9 +118,7 @@ fn parenthesized_list(input: &str) -> IResult<&str, MettaValue> {
 
 /// Parse a string literal: `"hello"`
 fn string_literal(input: &str) -> IResult<&str, MettaValue> {
-    delimited(char('"'), parse_string_content, char('"'))
-        .map(MettaValue::Atom)
-        .parse(input)
+    delimited(char('"'), parse_string_content, char('"')).map(MettaValue::Atom).parse(input)
 }
 
 fn parse_string_content(input: &str) -> IResult<&str, String> {
@@ -168,9 +182,7 @@ fn parse_string_content(input: &str) -> IResult<&str, String> {
 fn variable(input: &str) -> IResult<&str, MettaValue> {
     preceded(
         char('$'),
-        map(take_while1(is_token_char), |name: &str| {
-            MettaValue::Atom(format!("${}", name))
-        }),
+        map(take_while1(is_token_char), |name: &str| MettaValue::Atom(format!("${}", name))),
     )
     .parse(input)
 }
@@ -203,19 +215,13 @@ fn number(input: &str) -> IResult<&str, MettaValue> {
     }
 
     // Not a valid number
-    Err(nom::Err::Error(nom::error::Error::new(
-        input,
-        nom::error::ErrorKind::Verify,
-    )))
+    Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Verify)))
 }
 
 /// Parse boolean literals: `true` or `false`
 fn boolean_literal(input: &str) -> IResult<&str, MettaValue> {
-    alt((
-        value(MettaValue::Bool(true), tag("true")),
-        value(MettaValue::Bool(false), tag("false")),
-    ))
-    .parse(input)
+    alt((value(MettaValue::Bool(true), tag("true")), value(MettaValue::Bool(false), tag("false"))))
+        .parse(input)
 }
 
 /// Parse a MeTTa atom (identifier).

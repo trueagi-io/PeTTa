@@ -4,7 +4,10 @@
 #[allow(dead_code)]
 /// Simple XOR hasher used when gxhash is unavailable (miri, riscv64).
 #[derive(Clone, Default)]
-pub struct GxHasher { state_lo: u64, state_hi: u64 }
+pub struct GxHasher {
+    state_lo: u64,
+    state_hi: u64,
+}
 impl GxHasher {
     #[allow(dead_code)]
     pub fn with_seed(seed: i64) -> Self {
@@ -16,7 +19,11 @@ impl GxHasher {
     }
 }
 impl core::hash::Hasher for GxHasher {
-    fn write(&mut self, buf: &[u8]) { for &c in buf { self.write_u8(c); } }
+    fn write(&mut self, buf: &[u8]) {
+        for &c in buf {
+            self.write_u8(c);
+        }
+    }
     fn write_u8(&mut self, i: u8) {
         self.state_lo = self.state_lo.wrapping_add(i as u64);
         self.state_hi ^= (i as u64).rotate_left(11);
@@ -29,12 +36,16 @@ impl core::hash::Hasher for GxHasher {
         self.state_hi ^= high.rotate_left(17);
         self.state_lo ^= high.rotate_left(9);
     }
-    fn finish(&self) -> u64 { self.finish_u128() as u64 }
+    fn finish(&self) -> u64 {
+        self.finish_u128() as u64
+    }
 }
 
 pub use std::collections::{HashMap, HashSet};
 #[allow(dead_code)]
-pub fn gxhash128(data: &[u8], _seed: i64) -> u128 { xxhash_rust::const_xxh3::xxh3_128(data) }
+pub fn gxhash128(data: &[u8], _seed: i64) -> u128 {
+    xxhash_rust::const_xxh3::xxh3_128(data)
+}
 
 /// Marker trait for gxhash-compatible HashMaps (fallback), providing `new()` and `with_capacity()`.
 #[allow(dead_code)]
@@ -51,13 +62,21 @@ pub trait HashSetExt: Sized {
 }
 
 impl<K, V> HashMapExt for HashMap<K, V, GxBuildHasher> {
-    fn new() -> Self { HashMap::with_hasher(GxBuildHasher) }
-    fn with_capacity(capacity: usize) -> Self { HashMap::with_capacity_and_hasher(capacity, GxBuildHasher) }
+    fn new() -> Self {
+        HashMap::with_hasher(GxBuildHasher)
+    }
+    fn with_capacity(capacity: usize) -> Self {
+        HashMap::with_capacity_and_hasher(capacity, GxBuildHasher)
+    }
 }
 
 impl<T> HashSetExt for HashSet<T, GxBuildHasher> {
-    fn new() -> Self { HashSet::with_hasher(GxBuildHasher) }
-    fn with_capacity(capacity: usize) -> Self { HashSet::with_capacity_and_hasher(capacity, GxBuildHasher) }
+    fn new() -> Self {
+        HashSet::with_hasher(GxBuildHasher)
+    }
+    fn with_capacity(capacity: usize) -> Self {
+        HashSet::with_capacity_and_hasher(capacity, GxBuildHasher)
+    }
 }
 
 /// Build hasher for HashMap/HashSet.
@@ -66,5 +85,7 @@ impl<T> HashSetExt for HashSet<T, GxBuildHasher> {
 pub struct GxBuildHasher;
 impl std::hash::BuildHasher for GxBuildHasher {
     type Hasher = GxHasher;
-    fn build_hasher(&self) -> GxHasher { GxHasher::default() }
+    fn build_hasher(&self) -> GxHasher {
+        GxHasher::default()
+    }
 }

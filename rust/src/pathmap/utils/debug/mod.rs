@@ -10,7 +10,11 @@ extern crate alloc;
 use alloc::borrow::Cow;
 
 #[derive(PartialEq, Eq)]
-pub(crate) enum PathRenderMode { RequireAscii, TryAscii, ByteList }
+pub(crate) enum PathRenderMode {
+    RequireAscii,
+    TryAscii,
+    ByteList,
+}
 
 /// Internal method to render a path for the purposes of debug output
 ///
@@ -28,14 +32,14 @@ pub(crate) fn render_debug_path(path: &[u8], mode: PathRenderMode) -> Option<Cow
         match str::from_utf8(short_path) {
             Ok(key) => {
                 if path.len() > MAX_DEBUG_ASCII_PATH_LEN {
-                    return Some(Cow::Owned(format!("{key}...")))
+                    return Some(Cow::Owned(format!("{key}...")));
                 } else {
-                    return Some(Cow::Borrowed(key))
+                    return Some(Cow::Borrowed(key));
                 }
-            },
+            }
             Err(_) => {
                 if mode == PathRenderMode::RequireAscii {
-                    return None
+                    return None;
                 }
             }
         }

@@ -8,25 +8,17 @@ use super::errors::PeTTaError;
 /// Minimum supported SWI-Prolog version (major, minor).
 pub const MIN_SWIPL_VERSION: (u32, u32) = (9, 3);
 
-pub fn check_swipl_version(
-    swipl_path: &Path,
-    min_version: (u32, u32),
-) -> Result<(), PeTTaError> {
-    let output = Command::new(swipl_path)
-        .arg("--version")
-        .output()
-        .map_err(|_| {
-            PeTTaError::SwiplVersionError(format!(
-                "swipl not found at {}. Install SWI-Prolog >= {}.{}.",
-                swipl_path.display(),
-                min_version.0,
-                min_version.1
-            ))
-        })?;
+pub fn check_swipl_version(swipl_path: &Path, min_version: (u32, u32)) -> Result<(), PeTTaError> {
+    let output = Command::new(swipl_path).arg("--version").output().map_err(|_| {
+        PeTTaError::SwiplVersionError(format!(
+            "swipl not found at {}. Install SWI-Prolog >= {}.{}.",
+            swipl_path.display(),
+            min_version.0,
+            min_version.1
+        ))
+    })?;
     if !output.status.success() {
-        return Err(PeTTaError::SwiplVersionError(
-            "swipl --version failed".into(),
-        ));
+        return Err(PeTTaError::SwiplVersionError("swipl --version failed".into()));
     }
     let vs = String::from_utf8_lossy(&output.stdout);
     for part in vs.split_whitespace() {

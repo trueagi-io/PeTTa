@@ -1,6 +1,5 @@
-
-use super::super::super::zipper::*;
 use super::super::super::utils::ByteMask;
+use super::super::super::zipper::*;
 
 /// A [Zipper] type that wraps two other zippers that are expected to behave identically,
 /// and panics when they don't.  Useful to debug a Zipper implementation.
@@ -12,12 +11,11 @@ pub struct DiffZipper<A: Zipper, B: Zipper> {
 
 impl<A: Zipper, B: Zipper> DiffZipper<A, B> {
     pub fn new(a: A, b: B, log_moves: bool) -> Self {
-        Self{a, b, log_moves}
+        Self { a, b, log_moves }
     }
 }
 
-impl<A: Zipper, B: Zipper> Zipper for DiffZipper<A, B>
-{
+impl<A: Zipper, B: Zipper> Zipper for DiffZipper<A, B> {
     fn path_exists(&self) -> bool {
         let a = self.a.path_exists();
         let b = self.b.path_exists();
@@ -44,8 +42,7 @@ impl<A: Zipper, B: Zipper> Zipper for DiffZipper<A, B>
     }
 }
 
-impl<A: Zipper + ZipperMoving, B: Zipper + ZipperMoving> ZipperMoving for DiffZipper<A, B>
-{
+impl<A: Zipper + ZipperMoving, B: Zipper + ZipperMoving> ZipperMoving for DiffZipper<A, B> {
     fn at_root(&self) -> bool {
         let a = self.a.at_root();
         let b = self.b.at_root();
@@ -191,7 +188,8 @@ impl<A: Zipper + ZipperMoving, B: Zipper + ZipperMoving> ZipperMoving for DiffZi
     }
 }
 
-impl<A: Zipper + ZipperAbsolutePath, B: Zipper + ZipperAbsolutePath> ZipperAbsolutePath for DiffZipper<A, B>
+impl<A: Zipper + ZipperAbsolutePath, B: Zipper + ZipperAbsolutePath> ZipperAbsolutePath
+    for DiffZipper<A, B>
 {
     fn origin_path(&self) -> &[u8] {
         let a = self.a.origin_path();
@@ -207,11 +205,12 @@ impl<A: Zipper + ZipperAbsolutePath, B: Zipper + ZipperAbsolutePath> ZipperAbsol
     }
 }
 
-impl<A: Zipper + ZipperPathBuffer, B: Zipper + ZipperPathBuffer> ZipperPathBuffer for DiffZipper<A, B>
+impl<A: Zipper + ZipperPathBuffer, B: Zipper + ZipperPathBuffer> ZipperPathBuffer
+    for DiffZipper<A, B>
 {
     unsafe fn origin_path_assert_len(&self, len: usize) -> &[u8] {
-        let a = unsafe{ self.a.origin_path_assert_len(len) };
-        let b = unsafe{ self.b.origin_path_assert_len(len) };
+        let a = unsafe { self.a.origin_path_assert_len(len) };
+        let b = unsafe { self.b.origin_path_assert_len(len) };
         assert_eq!(a, b);
         a
     }
@@ -226,7 +225,8 @@ impl<A: Zipper + ZipperPathBuffer, B: Zipper + ZipperPathBuffer> ZipperPathBuffe
     }
 }
 
-impl<A: Zipper + ZipperIteration, B: Zipper + ZipperIteration> ZipperIteration for DiffZipper<A, B>
+impl<A: Zipper + ZipperIteration, B: Zipper + ZipperIteration> ZipperIteration
+    for DiffZipper<A, B>
 {
     fn to_next_val(&mut self) -> bool {
         let a = self.a.to_next_val();
@@ -257,7 +257,7 @@ impl<A: Zipper + ZipperIteration, B: Zipper + ZipperIteration> ZipperIteration f
     }
 }
 
-impl <PZL : ZipperProduct, PZR : ZipperProduct> ZipperProduct for DiffZipper<PZL, PZR> {
+impl<PZL: ZipperProduct, PZR: ZipperProduct> ZipperProduct for DiffZipper<PZL, PZR> {
     fn focus_factor(&self) -> usize {
         let a = self.a.focus_factor();
         let b = self.b.focus_factor();

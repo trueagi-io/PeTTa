@@ -1,14 +1,13 @@
-
-use core::slice;
 use core::mem::MaybeUninit;
+use core::slice;
 
-use super::super::alloc::{global_alloc, Allocator, GlobalAlloc};
-use super::super::utils::ByteMask;
 use super::super::PathMap;
-use super::node::*;
-use super::super::zipper::*;
+use super::super::alloc::{Allocator, GlobalAlloc, global_alloc};
+use super::super::utils::ByteMask;
 use super::super::zipper::read_zipper_core::*;
 use super::super::zipper::zipper_priv::*;
+use super::super::zipper::*;
+use super::node::*;
 
 /// A borrowed read-only reference to a location in a trie
 ///
@@ -51,7 +50,7 @@ use super::super::zipper::zipper_priv::*;
 pub struct TrieRefBorrowed<'a, V: Clone + Send + Sync, A: Allocator = GlobalAlloc> {
     focus_node: Option<&'a TrieNodeODRc<V, A>>,
     val_or_key: ValRefOrKey<'a, V>,
-    alloc: A
+    alloc: A,
 }
 
 impl<V: Clone + Send + Sync> Default for TrieRefBorrowed<'_, V> {
@@ -66,7 +65,7 @@ union ValRefOrKey<'a, V> {
     /// A length byte, followed by the key bytes themselves
     node_key: (u8, [MaybeUninit<u8>; MAX_NODE_KEY_BYTES]),
     /// [`VAL_SENTINEL`], followed by the reference to the value
-    val_ref: (u64, Option<&'a V>)
+    val_ref: (u64, Option<&'a V>),
 }
 
 /// Marks the first part of the `val_ref` variant of the [ValRefOrKey] enum.  This will never occur
@@ -87,11 +86,7 @@ impl<V> Copy for ValRefOrKey<'_, V> {}
 impl<V: Clone + Send + Sync, A: Allocator> Clone for TrieRefBorrowed<'_, V, A> {
     #[inline]
     fn clone(&self) -> Self {
-        Self{
-            focus_node: self.focus_node,
-            val_or_key: self.val_or_key,
-            alloc: self.alloc.clone(),
-        }
+        Self { focus_node: self.focus_node, val_or_key: self.val_or_key, alloc: self.alloc.clone() }
     }
 }
 impl<V: Clone + Send + Sync, A: Allocator + Copy> Copy for TrieRefBorrowed<'_, V, A> {}
@@ -102,7 +97,12 @@ impl<'a, V: Clone + Send + Sync + 'a, A: Allocator + 'a> TrieRefBorrowed<'a, V, 
         Self { focus_node: None, val_or_key: ValRefOrKey { val_ref: (BAD_SENTINEL, None) }, alloc }
     }
     /// Internal constructor
-    pub(crate) fn new_with_node_and_path_in(root_node: &'a TrieNodeODRc<V, A>, root_val: Option<&'a V>, path: &[u8], alloc: A) -> Self {
+    pub(crate) fn new_with_node_and_path_in(
+        root_node: &'a TrieNodeODRc<V, A>,
+        root_val: Option<&'a V>,
+        path: &[u8],
+        alloc: A,
+    ) -> Self {
         let (node, key, val) = node_along_path(root_node, path, root_val, false);
         let node_key_len = key.len();
         let val_or_key = if node_key_len > 0 && node_key_len <= MAX_NODE_KEY_BYTES {
@@ -125,10 +125,16 @@ impl<'a, V: Clone + Send + Sync + 'a, A: Allocator + 'a> TrieRefBorrowed<'a, V, 
     }
 
     /// Internal function to implement [ZipperReadOnlySubtries::trie_ref_at_path] for all the types that need it
-    pub(crate) fn new_with_key_and_path_in<'paths>(mut node: &'a TrieNodeODRc<V, A>, root_val: Option<&'a V>, node_key: &'paths [u8], mut path: &'paths [u8], alloc: A) -> Self {
-
+    pub(crate) fn new_with_key_and_path_in<'paths>(
+        mut node: &'a TrieNodeODRc<V, A>,
+        root_val: Option<&'a V>,
+        node_key: &'paths [u8],
+        mut path: &'paths [u8],
+        alloc: A,
+    ) -> Self {
         // A temporary buffer on the stack, if we need to assemble a combined key from both the `node_key` and `path`
-        let mut temp_key_buf: [MaybeUninit<u8>; MAX_NODE_KEY_BYTES] = [MaybeUninit::uninit(); MAX_NODE_KEY_BYTES];
+        let mut temp_key_buf: [MaybeUninit<u8>; MAX_NODE_KEY_BYTES] =
+            [MaybeUninit::uninit(); MAX_NODE_KEY_BYTES];
 
         let node_key_len = node_key.len();
         let path_len = path.len();
@@ -150,10 +156,12 @@ impl<'a, V: Clone + Send + Sync + 'a, A: Allocator + 'a> TrieRefBorrowed<'a, V, 
                 core::slice::from_raw_parts(temp_key_buf.as_mut_ptr().cast::<u8>(), total_buf_len)
             };
 
-            if let Some((consumed_byte_cnt, next_node)) = node.as_tagged().node_get_child(next_node_path) {
+            if let Some((consumed_byte_cnt, next_node)) =
+                node.as_tagged().node_get_child(next_node_path)
+            {
                 debug_assert!(consumed_byte_cnt >= node_key_len);
                 node = next_node;
-                path = &path[consumed_byte_cnt-node_key_len..];
+                path = &path[consumed_byte_cnt - node_key_len..];
             } else {
                 path = next_node_path;
             }
@@ -173,16 +181,16 @@ impl<'a, V: Clone + Send + Sync + 'a, A: Allocator + 'a> TrieRefBorrowed<'a, V, 
     /// at an existing path
     #[inline]
     fn is_valid(&self) -> bool {
-        (unsafe{ self.val_or_key.node_key.0 } != 0xFE)
+        (unsafe { self.val_or_key.node_key.0 } != 0xFE)
     }
     /// Internal.  Gets the node key from the `TrieRef`
     #[inline]
     fn node_key(&self) -> &[u8] {
-        let key_len = unsafe{ self.val_or_key.node_key.0 } as usize;
+        let key_len = unsafe { self.val_or_key.node_key.0 } as usize;
         if key_len > MAX_NODE_KEY_BYTES {
             &[]
         } else {
-            unsafe{ slice::from_raw_parts(self.val_or_key.node_key.1.as_ptr().cast(), key_len) }
+            unsafe { slice::from_raw_parts(self.val_or_key.node_key.1.as_ptr().cast(), key_len) }
         }
     }
     // /// Internal.  Gets the root val from the `TrieRef`, which is `None` if the `TrieRef` has a [Self::node_key]
@@ -235,21 +243,42 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperValues<V> for TrieRefBo
 }
 
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperForking<V> for TrieRefBorrowed<'_, V, A> {
-    type ReadZipperT<'a> = ReadZipperUntracked<'a, 'a, V, A> where Self: 'a;
+    type ReadZipperT<'a>
+        = ReadZipperUntracked<'a, 'a, V, A>
+    where
+        Self: 'a;
     fn fork_read_zipper<'a>(&'a self) -> Self::ReadZipperT<'a> {
-        let core_z = read_zipper_core::ReadZipperCore::new_with_node_and_path_internal_in(OwnedOrBorrowed::Borrowed(self.focus_node.unwrap()), self.node_key(), 0, self.val(), self.alloc.clone());
+        let core_z = read_zipper_core::ReadZipperCore::new_with_node_and_path_internal_in(
+            OwnedOrBorrowed::Borrowed(self.focus_node.unwrap()),
+            self.node_key(),
+            0,
+            self.val(),
+            self.alloc.clone(),
+        );
         Self::ReadZipperT::new_forked_with_inner_zipper(core_z)
     }
 }
 
-impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperSubtries<V, A> for TrieRefBorrowed<'_, V, A> {
-    fn native_subtries(&self) -> bool { true }
-    fn try_make_map(&self) -> Option<PathMap<V, A>> { Some(self.make_map()) }
-    fn trie_ref(&self) -> Option<TrieRef<'_, V, A>> { Some(self.get_trie_ref()) }
-    fn alloc(&self) -> A { self.alloc.clone() }
+impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperSubtries<V, A>
+    for TrieRefBorrowed<'_, V, A>
+{
+    fn native_subtries(&self) -> bool {
+        true
+    }
+    fn try_make_map(&self) -> Option<PathMap<V, A>> {
+        Some(self.make_map())
+    }
+    fn trie_ref(&self) -> Option<TrieRef<'_, V, A>> {
+        Some(self.get_trie_ref())
+    }
+    fn alloc(&self) -> A {
+        self.alloc.clone()
+    }
 }
 
-impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperInfallibleSubtries<V, A> for TrieRefBorrowed<'_, V, A> {
+impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperInfallibleSubtries<V, A>
+    for TrieRefBorrowed<'_, V, A>
+{
     fn make_map(&self) -> PathMap<Self::V, A> {
         #[cfg(not(feature = "graft_root_vals"))]
         let root_val = None;
@@ -289,8 +318,8 @@ impl<V: Clone + Send + Sync, A: Allocator> zipper_priv::ZipperPriv for TrieRefBo
                     Some((consumed_bytes, child_node)) => {
                         debug_assert_eq!(consumed_bytes, node_key.len());
                         Some(child_node)
-                    },
-                    None => None
+                    }
+                    None => None,
                 }
             }
         } else {
@@ -299,7 +328,9 @@ impl<V: Clone + Send + Sync, A: Allocator> zipper_priv::ZipperPriv for TrieRefBo
     }
 }
 
-impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlyValues<'a, V> for TrieRefBorrowed<'a, V, A> {
+impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlyValues<'a, V>
+    for TrieRefBorrowed<'a, V, A>
+{
     #[inline]
     fn get_val(&self) -> Option<&'a V> {
         if self.is_valid() {
@@ -307,7 +338,7 @@ impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlyV
             if key.len() > 0 {
                 self.focus_node.unwrap().as_tagged().node_get_val(key)
             } else {
-                unsafe{
+                unsafe {
                     debug_assert_eq!(self.val_or_key.val_ref.0, VAL_SENTINEL);
                     self.val_or_key.val_ref.1
                 }
@@ -318,16 +349,30 @@ impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlyV
     }
 }
 
-impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlySubtries<'a, V, A> for TrieRefBorrowed<'a, V, A> {
+impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlySubtries<'a, V, A>
+    for TrieRefBorrowed<'a, V, A>
+{
     type TrieRefT = TrieRefBorrowed<'a, V, A>;
     fn trie_ref_at_path<K: AsRef<[u8]>>(&self, path: K) -> TrieRefBorrowed<'a, V, A> {
         if self.is_valid() {
             let path = path.as_ref();
             let node_key = self.node_key();
             if node_key.len() > 0 {
-                Self::new_with_key_and_path_in(self.focus_node.unwrap(), None, node_key, path, self.alloc.clone())
+                Self::new_with_key_and_path_in(
+                    self.focus_node.unwrap(),
+                    None,
+                    node_key,
+                    path,
+                    self.alloc.clone(),
+                )
             } else {
-                Self::new_with_key_and_path_in(self.focus_node.unwrap(), self.get_val(), &[], path, self.alloc.clone())
+                Self::new_with_key_and_path_in(
+                    self.focus_node.unwrap(),
+                    self.get_val(),
+                    &[],
+                    path,
+                    self.alloc.clone(),
+                )
             }
         } else {
             Self::new_invalid_in(self.alloc.clone())
@@ -344,7 +389,9 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperConcrete for TrieRefBor
     }
 }
 
-impl<'a, V: Clone + Send + Sync + Unpin, A: Allocator + 'a> ZipperReadOnlyPriv<'a, V, A> for TrieRefBorrowed<'a, V, A> {
+impl<'a, V: Clone + Send + Sync + Unpin, A: Allocator + 'a> ZipperReadOnlyPriv<'a, V, A>
+    for TrieRefBorrowed<'a, V, A>
+{
     fn borrow_raw_parts<'z>(&'z self) -> (TaggedNodeRef<'a, V, A>, &'z [u8], Option<&'a V>) {
         (self.focus_node.unwrap().as_tagged(), self.node_key(), self.get_val())
     }
@@ -368,13 +415,13 @@ union ValOrKey<V> {
     /// A length byte, followed by the key bytes themselves
     node_key: (u8, [MaybeUninit<u8>; MAX_NODE_KEY_BYTES]),
     /// [`VAL_SENTINEL`], followed by the reference to the value
-    val: (u64, core::mem::ManuallyDrop<Option<V>>)
+    val: (u64, core::mem::ManuallyDrop<Option<V>>),
 }
 
 impl<V> Drop for ValOrKey<V> {
     fn drop(&mut self) {
         if self.is_val() {
-            unsafe{ core::mem::ManuallyDrop::drop(&mut self.val.1) }
+            unsafe { core::mem::ManuallyDrop::drop(&mut self.val.1) }
         }
     }
 }
@@ -382,10 +429,10 @@ impl<V> Drop for ValOrKey<V> {
 impl<V: Clone> Clone for ValOrKey<V> {
     fn clone(&self) -> Self {
         if self.is_val() {
-            let val_ref = unsafe{ &self.val.1 } as &Option<V>;
+            let val_ref = unsafe { &self.val.1 } as &Option<V>;
             ValOrKey { val: (VAL_SENTINEL, core::mem::ManuallyDrop::new(val_ref.clone())) }
         } else {
-            ValOrKey { node_key: unsafe{ self.node_key } }
+            ValOrKey { node_key: unsafe { self.node_key } }
         }
     }
 }
@@ -394,8 +441,8 @@ impl<V> ValOrKey<V> {
     /// Returns `true` if the union contains a val, otherwise `false`
     #[inline]
     fn is_val(&self) -> bool {
-        if unsafe{ self.node_key.0 } == 0xFF {
-            debug_assert_eq!(VAL_SENTINEL, unsafe{ self.val.0 });
+        if unsafe { self.node_key.0 } == 0xFF {
+            debug_assert_eq!(VAL_SENTINEL, unsafe { self.val.0 });
             true
         } else {
             false
@@ -413,18 +460,35 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> From<PathMap<V, A>> for TrieR
 
 impl<V: Clone + Send + Sync, A: Allocator> TrieRefOwned<V, A> {
     /// Makes a `TrieRefOwned` from a node and a val
-    pub(crate) fn new_with_node_and_val_in(focus_node: Option<TrieNodeODRc<V, A>>, val: Option<V>, alloc: A) -> Self {
+    pub(crate) fn new_with_node_and_val_in(
+        focus_node: Option<TrieNodeODRc<V, A>>,
+        val: Option<V>,
+        alloc: A,
+    ) -> Self {
         match focus_node {
-            Some(_) => Self { focus_node: focus_node, val_or_key: ValOrKey { val: (VAL_SENTINEL, core::mem::ManuallyDrop::new(val)) }, alloc },
-            None => Self::new_invalid_in(alloc)
+            Some(_) => Self {
+                focus_node: focus_node,
+                val_or_key: ValOrKey { val: (VAL_SENTINEL, core::mem::ManuallyDrop::new(val)) },
+                alloc,
+            },
+            None => Self::new_invalid_in(alloc),
         }
     }
     /// Makes a new sentinel that points to nothing.  THe allocator is just to keep the type system happy
     pub(crate) fn new_invalid_in(alloc: A) -> Self {
-        Self { focus_node: None, val_or_key: ValOrKey { val: (BAD_SENTINEL, core::mem::ManuallyDrop::new(None)) }, alloc }
+        Self {
+            focus_node: None,
+            val_or_key: ValOrKey { val: (BAD_SENTINEL, core::mem::ManuallyDrop::new(None)) },
+            alloc,
+        }
     }
     /// Internal constructor
-    pub(crate) fn new_with_node_and_path_in(parent_node: &TrieNodeODRc<V, A>, root_val: Option<&V>, path: &[u8], alloc: A) -> Self {
+    pub(crate) fn new_with_node_and_path_in(
+        parent_node: &TrieNodeODRc<V, A>,
+        root_val: Option<&V>,
+        path: &[u8],
+        alloc: A,
+    ) -> Self {
         let (node, key, val) = node_along_path(parent_node, path, root_val, false);
         let node_key_len = key.len();
         let val_or_key = if node_key_len > 0 && node_key_len <= MAX_NODE_KEY_BYTES {
@@ -448,10 +512,16 @@ impl<V: Clone + Send + Sync, A: Allocator> TrieRefOwned<V, A> {
     }
 
     /// Internal function to implement [ZipperReadOnlySubtries::trie_ref_at_path] for all the types that need it
-    pub(crate) fn new_with_key_and_path_in<'a, 'paths>(mut node: &TrieNodeODRc<V, A>, root_val: Option<&'a V>, node_key: &'paths [u8], mut path: &'paths [u8], alloc: A) -> Self {
-
+    pub(crate) fn new_with_key_and_path_in<'a, 'paths>(
+        mut node: &TrieNodeODRc<V, A>,
+        root_val: Option<&'a V>,
+        node_key: &'paths [u8],
+        mut path: &'paths [u8],
+        alloc: A,
+    ) -> Self {
         // A temporary buffer on the stack, if we need to assemble a combined key from both the `node_key` and `path`
-        let mut temp_key_buf: [MaybeUninit<u8>; MAX_NODE_KEY_BYTES] = [MaybeUninit::uninit(); MAX_NODE_KEY_BYTES];
+        let mut temp_key_buf: [MaybeUninit<u8>; MAX_NODE_KEY_BYTES] =
+            [MaybeUninit::uninit(); MAX_NODE_KEY_BYTES];
 
         let node_key_len = node_key.len();
         let path_len = path.len();
@@ -473,10 +543,12 @@ impl<V: Clone + Send + Sync, A: Allocator> TrieRefOwned<V, A> {
                 core::slice::from_raw_parts(temp_key_buf.as_mut_ptr().cast::<u8>(), total_buf_len)
             };
 
-            if let Some((consumed_byte_cnt, next_node)) = node.as_tagged().node_get_child(next_node_path) {
+            if let Some((consumed_byte_cnt, next_node)) =
+                node.as_tagged().node_get_child(next_node_path)
+            {
                 debug_assert!(consumed_byte_cnt >= node_key_len);
                 node = next_node;
-                path = &path[consumed_byte_cnt-node_key_len..];
+                path = &path[consumed_byte_cnt - node_key_len..];
             } else {
                 path = next_node_path;
             }
@@ -496,7 +568,7 @@ impl<V: Clone + Send + Sync, A: Allocator> TrieRefOwned<V, A> {
     /// at an existing path
     #[inline]
     fn is_valid(&self) -> bool {
-        (unsafe{ self.val_or_key.node_key.0 } != 0xFE)
+        (unsafe { self.val_or_key.node_key.0 } != 0xFE)
     }
     //GOAT, maybe trash
     // /// Internal.  Resolves the focus_node from an "unregularized" node_ptr (see the discussion about)
@@ -527,8 +599,8 @@ impl<V: Clone + Send + Sync, A: Allocator> TrieRefOwned<V, A> {
         if self.val_or_key.is_val() {
             &[]
         } else {
-            let key_len = unsafe{ self.val_or_key.node_key.0 } as usize;
-            unsafe{ slice::from_raw_parts(self.val_or_key.node_key.1.as_ptr().cast(), key_len) }
+            let key_len = unsafe { self.val_or_key.node_key.0 } as usize;
+            unsafe { slice::from_raw_parts(self.val_or_key.node_key.1.as_ptr().cast(), key_len) }
         }
     }
 }
@@ -572,7 +644,7 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperValues<V> for TrieRefOw
             if key.len() > 0 {
                 self.focus_node.as_ref().unwrap().as_tagged().node_get_val(key)
             } else {
-                unsafe{
+                unsafe {
                     debug_assert_eq!(self.val_or_key.val.0, VAL_SENTINEL);
                     let option_ref: &Option<V> = &self.val_or_key.val.1;
                     option_ref.as_ref()
@@ -585,21 +657,40 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperValues<V> for TrieRefOw
 }
 
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperForking<V> for TrieRefOwned<V, A> {
-    type ReadZipperT<'a> = ReadZipperUntracked<'a, 'a, V, A> where Self: 'a;
+    type ReadZipperT<'a>
+        = ReadZipperUntracked<'a, 'a, V, A>
+    where
+        Self: 'a;
     fn fork_read_zipper<'a>(&'a self) -> Self::ReadZipperT<'a> {
-        let core_z = read_zipper_core::ReadZipperCore::new_with_node_and_path_internal_in(OwnedOrBorrowed::Borrowed(self.focus_node.as_ref().unwrap()), self.node_key(), 0, self.val(), self.alloc.clone());
+        let core_z = read_zipper_core::ReadZipperCore::new_with_node_and_path_internal_in(
+            OwnedOrBorrowed::Borrowed(self.focus_node.as_ref().unwrap()),
+            self.node_key(),
+            0,
+            self.val(),
+            self.alloc.clone(),
+        );
         Self::ReadZipperT::new_forked_with_inner_zipper(core_z)
     }
 }
 
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperSubtries<V, A> for TrieRefOwned<V, A> {
-    fn native_subtries(&self) -> bool { true }
-    fn try_make_map(&self) -> Option<PathMap<V, A>> { Some(self.make_map()) }
-    fn trie_ref(&self) -> Option<TrieRef<'_, V, A>> { Some(self.get_trie_ref()) }
-    fn alloc(&self) -> A { self.alloc.clone() }
+    fn native_subtries(&self) -> bool {
+        true
+    }
+    fn try_make_map(&self) -> Option<PathMap<V, A>> {
+        Some(self.make_map())
+    }
+    fn trie_ref(&self) -> Option<TrieRef<'_, V, A>> {
+        Some(self.get_trie_ref())
+    }
+    fn alloc(&self) -> A {
+        self.alloc.clone()
+    }
 }
 
-impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperInfallibleSubtries<V, A> for TrieRefOwned<V, A> {
+impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperInfallibleSubtries<V, A>
+    for TrieRefOwned<V, A>
+{
     fn make_map(&self) -> PathMap<Self::V, A> {
         #[cfg(not(feature = "graft_root_vals"))]
         let root_val = None;
@@ -639,8 +730,8 @@ impl<V: Clone + Send + Sync, A: Allocator> zipper_priv::ZipperPriv for TrieRefOw
                     Some((consumed_bytes, child_node)) => {
                         debug_assert_eq!(consumed_bytes, node_key.len());
                         Some(child_node)
-                    },
-                    None => None
+                    }
+                    None => None,
                 }
             }
         } else {
@@ -652,13 +743,18 @@ impl<V: Clone + Send + Sync, A: Allocator> zipper_priv::ZipperPriv for TrieRefOw
 /// A [`witness`](ZipperReadOnlyConditionalValues::witness) type used by [`TrieRefOwned`]
 pub struct TrieRefWitness<V: Clone + Send + Sync, A: Allocator>(TrieRefOwned<V, A>);
 
-impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlyConditionalValues<'a, V> for TrieRefOwned<V, A> {
+impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a>
+    ZipperReadOnlyConditionalValues<'a, V> for TrieRefOwned<V, A>
+{
     type WitnessT = TrieRefWitness<V, A>;
     fn witness<'w>(&self) -> Self::WitnessT {
         TrieRefWitness(self.clone())
     }
     #[inline]
-    fn get_val_with_witness<'w>(&self, witness: &'w TrieRefWitness<V, A>) -> Option<&'w V> where 'a: 'w {
+    fn get_val_with_witness<'w>(&self, witness: &'w TrieRefWitness<V, A>) -> Option<&'w V>
+    where
+        'a: 'w,
+    {
         if self.is_valid() {
             debug_assert_eq!(witness.0.focus_node, self.focus_node);
             witness.0.val()
@@ -668,13 +764,21 @@ impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlyC
     }
 }
 
-impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlySubtries<'a, V, A> for TrieRefOwned<V, A> {
+impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlySubtries<'a, V, A>
+    for TrieRefOwned<V, A>
+{
     type TrieRefT = TrieRefOwned<V, A>;
     fn trie_ref_at_path<K: AsRef<[u8]>>(&self, path: K) -> TrieRefOwned<V, A> {
         if self.is_valid() {
             let path = path.as_ref();
             let node_key = self.node_key();
-            Self::new_with_key_and_path_in(self.focus_node.as_ref().unwrap(), self.val(), node_key, path, self.alloc.clone())
+            Self::new_with_key_and_path_in(
+                self.focus_node.as_ref().unwrap(),
+                self.val(),
+                node_key,
+                path,
+                self.alloc.clone(),
+            )
         } else {
             Self::new_invalid_in(self.alloc.clone())
         }
@@ -690,7 +794,9 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperConcrete for TrieRefOwn
     }
 }
 
-impl<'a, V: Clone + Send + Sync + Unpin, A: Allocator + 'a> ZipperReadOnlyPriv<'a, V, A> for TrieRefOwned<V, A> {
+impl<'a, V: Clone + Send + Sync + Unpin, A: Allocator + 'a> ZipperReadOnlyPriv<'a, V, A>
+    for TrieRefOwned<V, A>
+{
     fn borrow_raw_parts<'z>(&'z self) -> (TaggedNodeRef<'z, V, A>, &'z [u8], Option<&'z V>) {
         let node = self.focus_node.as_ref().unwrap().as_tagged();
         (node, self.node_key(), self.val())
@@ -705,9 +811,11 @@ impl<'a, V: Clone + Send + Sync + Unpin, A: Allocator + 'a> ZipperReadOnlyPriv<'
 #[derive(Clone)]
 pub enum TrieRef<'a, V: Clone + Send + Sync, A: Allocator = GlobalAlloc> {
     Borrowed(TrieRefBorrowed<'a, V, A>),
-    Owned(TrieRefOwned<V, A>)
+    Owned(TrieRefOwned<V, A>),
 }
-impl<'a, V: Clone + Send + Sync, A: Allocator> From<TrieRefBorrowed<'a, V, A>> for TrieRef<'a, V, A> {
+impl<'a, V: Clone + Send + Sync, A: Allocator> From<TrieRefBorrowed<'a, V, A>>
+    for TrieRef<'a, V, A>
+{
     fn from(src: TrieRefBorrowed<'a, V, A>) -> Self {
         TrieRef::Borrowed(src)
     }
@@ -762,7 +870,10 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperValues<V> for TrieRef<'
 }
 
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperForking<V> for TrieRef<'_, V, A> {
-    type ReadZipperT<'a> = ReadZipperUntracked<'a, 'a, V, A> where Self: 'a;
+    type ReadZipperT<'a>
+        = ReadZipperUntracked<'a, 'a, V, A>
+    where
+        Self: 'a;
     fn fork_read_zipper<'a>(&'a self) -> Self::ReadZipperT<'a> {
         match self {
             TrieRef::Borrowed(trie_ref) => trie_ref.fork_read_zipper(),
@@ -772,9 +883,15 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperForking<V> for TrieRef<
 }
 
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperSubtries<V, A> for TrieRef<'_, V, A> {
-    fn native_subtries(&self) -> bool { true }
-    fn try_make_map(&self) -> Option<PathMap<V, A>> { Some(self.make_map()) }
-    fn trie_ref(&self) -> Option<TrieRef<'_, V, A>> { Some(self.get_trie_ref()) }
+    fn native_subtries(&self) -> bool {
+        true
+    }
+    fn try_make_map(&self) -> Option<PathMap<V, A>> {
+        Some(self.make_map())
+    }
+    fn trie_ref(&self) -> Option<TrieRef<'_, V, A>> {
+        Some(self.get_trie_ref())
+    }
     fn alloc(&self) -> A {
         match self {
             TrieRef::Borrowed(trie_ref) => trie_ref.alloc(),
@@ -783,7 +900,9 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperSubtries<V, A> for Trie
     }
 }
 
-impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperInfallibleSubtries<V, A> for TrieRef<'_, V, A> {
+impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperInfallibleSubtries<V, A>
+    for TrieRef<'_, V, A>
+{
     fn make_map(&self) -> PathMap<Self::V, A> {
         match self {
             TrieRef::Borrowed(trie_ref) => trie_ref.make_map(),
@@ -812,16 +931,23 @@ impl<V: Clone + Send + Sync, A: Allocator> zipper_priv::ZipperPriv for TrieRef<'
     }
 }
 
-impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlyConditionalValues<'a, V> for TrieRef<'a, V, A> {
+impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a>
+    ZipperReadOnlyConditionalValues<'a, V> for TrieRef<'a, V, A>
+{
     type WitnessT = TrieRefWitness<V, A>;
     fn witness<'w>(&self) -> Self::WitnessT {
         match self {
-            TrieRef::Borrowed(trie_ref) => TrieRefWitness(TrieRefOwned::new_invalid_in(trie_ref.alloc.clone())),
+            TrieRef::Borrowed(trie_ref) => {
+                TrieRefWitness(TrieRefOwned::new_invalid_in(trie_ref.alloc.clone()))
+            }
             TrieRef::Owned(trie_ref) => trie_ref.witness(),
         }
     }
     #[inline]
-    fn get_val_with_witness<'w>(&self, witness: &'w TrieRefWitness<V, A>) -> Option<&'w V> where 'a: 'w {
+    fn get_val_with_witness<'w>(&self, witness: &'w TrieRefWitness<V, A>) -> Option<&'w V>
+    where
+        'a: 'w,
+    {
         match self {
             TrieRef::Borrowed(trie_ref) => trie_ref.get_val(),
             TrieRef::Owned(trie_ref) => trie_ref.get_val_with_witness(witness),
@@ -829,7 +955,9 @@ impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlyC
     }
 }
 
-impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlySubtries<'a, V, A> for TrieRef<'a, V, A> {
+impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlySubtries<'a, V, A>
+    for TrieRef<'a, V, A>
+{
     type TrieRefT = TrieRef<'a, V, A>;
     fn trie_ref_at_path<K: AsRef<[u8]>>(&self, path: K) -> TrieRef<'a, V, A> {
         match self {
@@ -854,7 +982,9 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperConcrete for TrieRef<'_
     }
 }
 
-impl<'a, V: Clone + Send + Sync + Unpin, A: Allocator + 'a> ZipperReadOnlyPriv<'a, V, A> for TrieRef<'a, V, A> {
+impl<'a, V: Clone + Send + Sync + Unpin, A: Allocator + 'a> ZipperReadOnlyPriv<'a, V, A>
+    for TrieRef<'a, V, A>
+{
     fn borrow_raw_parts<'z>(&'z self) -> (TaggedNodeRef<'z, V, A>, &'z [u8], Option<&'z V>) {
         match self {
             TrieRef::Borrowed(trie_ref) => trie_ref.borrow_raw_parts(),
@@ -865,7 +995,6 @@ impl<'a, V: Clone + Send + Sync + Unpin, A: Allocator + 'a> ZipperReadOnlyPriv<'
         None
     }
 }
-
 
 /// Internal macro to implement Debug on TrieRef types
 macro_rules! impl_trie_ref_debug {
@@ -895,11 +1024,15 @@ impl_trie_ref_debug!(
 
 #[cfg(all(test, feature = "pathmap-internal-tests"))]
 mod tests {
-    use super::{trie_node::AbstractNodeRef, utils::ByteMask, zipper::{zipper_priv::ZipperPriv, *}, PathMap};
+    use super::{
+        PathMap,
+        trie_node::AbstractNodeRef,
+        utils::ByteMask,
+        zipper::{zipper_priv::ZipperPriv, *},
+    };
 
     #[test]
     fn trie_ref_test1() {
-
         let keys = ["Hello", "Hell", "Help", "Helsinki"];
         let map: PathMap<()> = keys.iter().map(|k| (k, ())).collect();
 
@@ -977,8 +1110,22 @@ mod tests {
 
     #[test]
     fn trie_ref_test2() {
-        let rs = ["arrow", "bow", "cannon", "roman", "romane", "romanus^", "romulus", "rubens", "ruber", "rubicon", "rubicundus", "rom'i"];
-        let btm: PathMap<usize> = rs.into_iter().enumerate().map(|(i, r)| (r.as_bytes(), i) ).collect();
+        let rs = [
+            "arrow",
+            "bow",
+            "cannon",
+            "roman",
+            "romane",
+            "romanus^",
+            "romulus",
+            "rubens",
+            "ruber",
+            "rubicon",
+            "rubicundus",
+            "rom'i",
+        ];
+        let btm: PathMap<usize> =
+            rs.into_iter().enumerate().map(|(i, r)| (r.as_bytes(), i)).collect();
 
         let trie_ref = btm.trie_ref_at_path([]);
         assert_eq!(trie_ref.val(), None);

@@ -35,10 +35,7 @@ pub fn build_server_source(src_dir: &Path, verbose: bool) -> Result<String, PeTT
     }
 
     // filereader.pl asserts silent(false) at startup; re-assert our setting after all consults
-    src.push_str(&format!(
-        ":- retractall(silent(_)), assertz(silent({})).\n",
-        silent
-    ));
+    src.push_str(&format!(":- retractall(silent(_)), assertz(silent({})).\n", silent));
 
     // Initialize type lookup cache
     src.push_str(":- nb_setval(fun_types, []).\n");

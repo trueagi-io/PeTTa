@@ -1,14 +1,13 @@
 use super::trie_core::r#ref::TrieRef;
 
-use super::alloc::{GlobalAlloc, global_alloc};
 use super::PathMap;
+use super::alloc::{GlobalAlloc, global_alloc};
 
 // note, this is almost identical in implementation to ProductZipperG
 // It's very likely, for maintainability, we'll want to implement ProductZipperG as a simple policy over DependentProductZipperG
 // However, all my attempts at this failed so far because of the enroll enter/exit closure types in the struct
 use super::utils::ByteMask;
 use super::zipper::*;
-
 
 /// A [Zipper] type that moves through a Cartesian product trie created by extending each path in a primary
 /// trie with the computed virtual trie, doing it recursively for all returned tries
@@ -19,27 +18,34 @@ use super::zipper::*;
 /// there is probably a design that allows mutable references to be returned from an object with an appropriate lifetime.
 #[derive(Clone)]
 pub struct DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
+where
+    V: Clone + Send + Sync,
 {
     factor_paths: Vec<usize>,
     primary: PrimaryZ,
     secondary: Vec<SecondaryZ>,
     enroll_payload: Option<C>,
     enroll: F,
-    _marker: core::marker::PhantomData<(&'trie V, F)>
+    _marker: core::marker::PhantomData<(&'trie V, F)>,
 }
 
-impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>)> DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
-        PrimaryZ: ZipperMoving,
-        SecondaryZ: ZipperMoving,
+impl<
+    'trie,
+    PrimaryZ,
+    SecondaryZ,
+    V,
+    C,
+    F: Clone + for<'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>),
+> DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
+where
+    V: Clone + Send + Sync,
+    PrimaryZ: ZipperMoving,
+    SecondaryZ: ZipperMoving,
 {
     /// Creates a new `DependentProductZipperG` from the provided enroll function
     pub fn new_enroll(primary: PrimaryZ, enroll_payload: C, enroll: F) -> Self
-        where
-            PrimaryZ: ZipperValues<V>
+    where
+        PrimaryZ: ZipperValues<V>,
     {
         Self {
             factor_paths: Vec::new(),
@@ -119,7 +125,11 @@ impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8],
         let mut entered = false;
         if self.is_path_end() {
             // this clone is hideous, but I don't remember how to get rid of it
-            let (payload, ret) = self.enroll.clone()(self.enroll_payload.take().unwrap(), self.path() as _, self.secondary.len());
+            let (payload, ret) = self.enroll.clone()(
+                self.enroll_payload.take().unwrap(),
+                self.path() as _,
+                self.secondary.len(),
+            );
             let _ = self.enroll_payload.insert(payload);
             if let Some(nz) = ret {
                 self.factor_paths.push(len);
@@ -169,11 +179,9 @@ impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8],
         };
         assert!(self.ascend(1), "must ascend");
         let child_mask = self.child_mask();
-        let Some(sibling_byte) = (if next {
-            child_mask.next_bit(byte)
-        } else {
-            child_mask.prev_bit(byte)
-        }) else {
+        let Some(sibling_byte) =
+            (if next { child_mask.next_bit(byte) } else { child_mask.prev_bit(byte) })
+        else {
             self.descend_to_byte(byte);
             return false;
         };
@@ -182,23 +190,39 @@ impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8],
     }
 }
 
-impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>)> ZipperAbsolutePath
-    for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
-        PrimaryZ: ZipperAbsolutePath,
-        SecondaryZ: ZipperMoving,
+impl<
+    'trie,
+    PrimaryZ,
+    SecondaryZ,
+    V,
+    C,
+    F: Clone + for<'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>),
+> ZipperAbsolutePath for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
+where
+    V: Clone + Send + Sync,
+    PrimaryZ: ZipperAbsolutePath,
+    SecondaryZ: ZipperMoving,
 {
-    fn origin_path(&self) -> &[u8] { self.primary.origin_path() }
-    fn root_prefix_path(&self) -> &[u8] { self.primary.root_prefix_path() }
+    fn origin_path(&self) -> &[u8] {
+        self.primary.origin_path()
+    }
+    fn root_prefix_path(&self) -> &[u8] {
+        self.primary.root_prefix_path()
+    }
 }
 
-impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>)> ZipperConcrete
-    for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
-        PrimaryZ: ZipperMoving + ZipperConcrete,
-        SecondaryZ: ZipperMoving + ZipperConcrete,
+impl<
+    'trie,
+    PrimaryZ,
+    SecondaryZ,
+    V,
+    C,
+    F: Clone + for<'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>),
+> ZipperConcrete for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
+where
+    V: Clone + Send + Sync,
+    PrimaryZ: ZipperMoving + ZipperConcrete,
+    SecondaryZ: ZipperMoving + ZipperConcrete,
 {
     fn shared_node_id(&self) -> Option<u64> {
         if let Some(idx) = self.factor_idx(true) {
@@ -216,24 +240,42 @@ impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8],
     }
 }
 
-impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>)> ZipperPathBuffer
-    for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
-        PrimaryZ: ZipperMoving + ZipperPathBuffer,
-        SecondaryZ: ZipperMoving + ZipperPathBuffer,
+impl<
+    'trie,
+    PrimaryZ,
+    SecondaryZ,
+    V,
+    C,
+    F: Clone + for<'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>),
+> ZipperPathBuffer for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
+where
+    V: Clone + Send + Sync,
+    PrimaryZ: ZipperMoving + ZipperPathBuffer,
+    SecondaryZ: ZipperMoving + ZipperPathBuffer,
 {
-    unsafe fn origin_path_assert_len(&self, len: usize) -> &[u8] { unsafe{ self.primary.origin_path_assert_len(len) } }
-    fn prepare_buffers(&mut self) { self.primary.prepare_buffers() }
-    fn reserve_buffers(&mut self, path_len: usize, stack_depth: usize) { self.primary.reserve_buffers(path_len, stack_depth) }
+    unsafe fn origin_path_assert_len(&self, len: usize) -> &[u8] {
+        unsafe { self.primary.origin_path_assert_len(len) }
+    }
+    fn prepare_buffers(&mut self) {
+        self.primary.prepare_buffers()
+    }
+    fn reserve_buffers(&mut self, path_len: usize, stack_depth: usize) {
+        self.primary.reserve_buffers(path_len, stack_depth)
+    }
 }
 
-impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>)> ZipperValues<V>
-    for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
-        PrimaryZ: ZipperMoving + ZipperValues<V>,
-        SecondaryZ: ZipperMoving + ZipperValues<V>,
+impl<
+    'trie,
+    PrimaryZ,
+    SecondaryZ,
+    V,
+    C,
+    F: Clone + for<'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>),
+> ZipperValues<V> for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
+where
+    V: Clone + Send + Sync,
+    PrimaryZ: ZipperMoving + ZipperValues<V>,
+    SecondaryZ: ZipperMoving + ZipperValues<V>,
 {
     fn val(&self) -> Option<&V> {
         if let Some(idx) = self.factor_idx(true) {
@@ -244,12 +286,18 @@ impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8],
     }
 }
 
-impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>)> ZipperReadOnlyValues<'trie, V>
-    for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
-        PrimaryZ: ZipperMoving + ZipperReadOnlyValues<'trie, V>,
-        SecondaryZ: ZipperMoving + ZipperReadOnlyValues<'trie, V>,
+impl<
+    'trie,
+    PrimaryZ,
+    SecondaryZ,
+    V,
+    C,
+    F: Clone + for<'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>),
+> ZipperReadOnlyValues<'trie, V> for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
+where
+    V: Clone + Send + Sync,
+    PrimaryZ: ZipperMoving + ZipperReadOnlyValues<'trie, V>,
+    SecondaryZ: ZipperMoving + ZipperReadOnlyValues<'trie, V>,
 {
     fn get_val(&self) -> Option<&'trie V> {
         if let Some(idx) = self.factor_idx(true) {
@@ -260,20 +308,31 @@ impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8],
     }
 }
 
-impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>)> ZipperReadOnlyConditionalValues<'trie, V>
+impl<
+    'trie,
+    PrimaryZ,
+    SecondaryZ,
+    V,
+    C,
+    F: Clone + for<'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>),
+> ZipperReadOnlyConditionalValues<'trie, V>
     for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
-        PrimaryZ: ZipperMoving + ZipperReadOnlyConditionalValues<'trie, V>,
-        SecondaryZ: ZipperMoving + ZipperReadOnlyConditionalValues<'trie, V>,
+where
+    V: Clone + Send + Sync,
+    PrimaryZ: ZipperMoving + ZipperReadOnlyConditionalValues<'trie, V>,
+    SecondaryZ: ZipperMoving + ZipperReadOnlyConditionalValues<'trie, V>,
 {
     type WitnessT = (PrimaryZ::WitnessT, Vec<SecondaryZ::WitnessT>);
     fn witness<'w>(&self) -> Self::WitnessT {
         let primary_witness = self.primary.witness();
-        let secondary_witnesses = self.secondary.iter().map(|secondary| secondary.witness()).collect();
+        let secondary_witnesses =
+            self.secondary.iter().map(|secondary| secondary.witness()).collect();
         (primary_witness, secondary_witnesses)
     }
-    fn get_val_with_witness<'w>(&self, witness: &'w Self::WitnessT) -> Option<&'w V> where 'trie: 'w {
+    fn get_val_with_witness<'w>(&self, witness: &'w Self::WitnessT) -> Option<&'w V>
+    where
+        'trie: 'w,
+    {
         if let Some(idx) = self.factor_idx(true) {
             self.secondary[idx].get_val_with_witness(&witness.1[idx])
         } else {
@@ -282,11 +341,18 @@ impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8],
     }
 }
 
-impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>)> Zipper for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
-        PrimaryZ: ZipperMoving + Zipper,
-        SecondaryZ: ZipperMoving + Zipper,
+impl<
+    'trie,
+    PrimaryZ,
+    SecondaryZ,
+    V,
+    C,
+    F: Clone + for<'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>),
+> Zipper for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
+where
+    V: Clone + Send + Sync,
+    PrimaryZ: ZipperMoving + Zipper,
+    SecondaryZ: ZipperMoving + Zipper,
 {
     fn path_exists(&self) -> bool {
         if let Some(idx) = self.factor_idx(true) {
@@ -318,11 +384,18 @@ impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8],
     }
 }
 
-impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>)> ZipperMoving for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
-        PrimaryZ: ZipperMoving,
-        SecondaryZ: ZipperMoving,
+impl<
+    'trie,
+    PrimaryZ,
+    SecondaryZ,
+    V,
+    C,
+    F: Clone + for<'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>),
+> ZipperMoving for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
+where
+    V: Clone + Send + Sync,
+    PrimaryZ: ZipperMoving,
+    SecondaryZ: ZipperMoving,
 {
     fn at_root(&self) -> bool {
         self.path().is_empty()
@@ -366,7 +439,7 @@ impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8],
         let path = path.as_ref();
         let good = self.descend_to_existing(path);
         if good == path.len() {
-            return
+            return;
         }
         let rest = &path[good..];
         if let Some(idx) = self.factor_idx(false) {
@@ -409,7 +482,7 @@ impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8],
             };
             self.enter_factors();
             if self.is_val() {
-                break
+                break;
             }
         }
         moved
@@ -451,40 +524,82 @@ impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8],
     }
 }
 
-impl<'trie, PrimaryZ, SecondaryZ, V, C, F : Clone + for <'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>)> ZipperIteration
-for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
-        PrimaryZ: ZipperIteration,
-        SecondaryZ: ZipperIteration,
-{ } //Use the default impl for all methods
-
-impl<'trie, PrimaryZ, SecondaryZ, V: Clone + Send + Sync + Unpin, C, F : Clone + for <'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>)> ZipperSubtries<V, GlobalAlloc> for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
-    where
-        V: Clone + Send + Sync,
-        PrimaryZ: ZipperMoving + ZipperValues<V>,
-        SecondaryZ: ZipperMoving + ZipperValues<V>,
+impl<
+    'trie,
+    PrimaryZ,
+    SecondaryZ,
+    V,
+    C,
+    F: Clone + for<'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>),
+> ZipperIteration for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
+where
+    V: Clone + Send + Sync,
+    PrimaryZ: ZipperIteration,
+    SecondaryZ: ZipperIteration,
 {
-    fn native_subtries(&self) -> bool { false }
-    fn try_make_map(&self) -> Option<PathMap<V, GlobalAlloc>> { None }
-    fn trie_ref(&self) -> Option<TrieRef<'_, V, GlobalAlloc>> { None }
-    fn alloc(&self) -> GlobalAlloc { global_alloc() }
+} //Use the default impl for all methods
+
+impl<
+    'trie,
+    PrimaryZ,
+    SecondaryZ,
+    V: Clone + Send + Sync + Unpin,
+    C,
+    F: Clone + for<'a> FnOnce(C, &'a [u8], usize) -> (C, Option<SecondaryZ>),
+> ZipperSubtries<V, GlobalAlloc> for DependentProductZipperG<'trie, PrimaryZ, SecondaryZ, V, C, F>
+where
+    V: Clone + Send + Sync,
+    PrimaryZ: ZipperMoving + ZipperValues<V>,
+    SecondaryZ: ZipperMoving + ZipperValues<V>,
+{
+    fn native_subtries(&self) -> bool {
+        false
+    }
+    fn try_make_map(&self) -> Option<PathMap<V, GlobalAlloc>> {
+        None
+    }
+    fn trie_ref(&self) -> Option<TrieRef<'_, V, GlobalAlloc>> {
+        None
+    }
+    fn alloc(&self) -> GlobalAlloc {
+        global_alloc()
+    }
 }
 
 #[cfg(all(test, feature = "pathmap-internal-tests"))]
 mod tests {
-    use super::zipper::*;
     use super::PathMap;
+    use super::zipper::*;
 
     #[test]
     fn dep_test_1() {
         let mut btm = PathMap::new();
-        let rs = ["arrow", "bow", "cannon", "roman", "romane", "romanus", "romulus", "rubens", "ruber", "rubicon", "rubicundus", "rom'i"];
-        rs.iter().enumerate().for_each(|(i, r)| { btm.set_val_at(r.as_bytes(), i); });
-
-        let mut dpz = DependentProductZipperG::new_enroll(btm.into_read_zipper(&[]), (), |_, _, c| {
-            if c == 0 { ((), Some(PathMap::single(".postfix", 0).into_read_zipper(&[]))) } else { ((), None) }
+        let rs = [
+            "arrow",
+            "bow",
+            "cannon",
+            "roman",
+            "romane",
+            "romanus",
+            "romulus",
+            "rubens",
+            "ruber",
+            "rubicon",
+            "rubicundus",
+            "rom'i",
+        ];
+        rs.iter().enumerate().for_each(|(i, r)| {
+            btm.set_val_at(r.as_bytes(), i);
         });
+
+        let mut dpz =
+            DependentProductZipperG::new_enroll(btm.into_read_zipper(&[]), (), |_, _, c| {
+                if c == 0 {
+                    ((), Some(PathMap::single(".postfix", 0).into_read_zipper(&[])))
+                } else {
+                    ((), None)
+                }
+            });
 
         let mut full = String::new();
         while dpz.to_next_val() {
@@ -493,7 +608,9 @@ mod tests {
                 full.push('\n');
             }
         }
-        assert_eq!(full, "arrow.postfix
+        assert_eq!(
+            full,
+            "arrow.postfix
 bow.postfix
 cannon.postfix
 rom'i.postfix
@@ -504,18 +621,39 @@ rubens.postfix
 ruber.postfix
 rubicon.postfix
 rubicundus.postfix
-")
+"
+        )
     }
 
     #[test]
     fn dep_test_2() {
         let mut btm = PathMap::new();
-        let rs = ["arrow", "bow", "cannon", "roman", "romane", "romanus", "romulus", "rubens", "ruber", "rubicon", "rubicundus", "rom'i"];
-        rs.iter().enumerate().for_each(|(i, r)| { btm.set_val_at(r.as_bytes(), i); });
-
-        let mut dpz = DependentProductZipperG::new_enroll(btm.into_read_zipper(&[]), (),  |_, p, c| {
-            if c == 0 { ((), Some(PathMap::single(p, 0).into_read_zipper(&[]))) } else { ((), None) }
+        let rs = [
+            "arrow",
+            "bow",
+            "cannon",
+            "roman",
+            "romane",
+            "romanus",
+            "romulus",
+            "rubens",
+            "ruber",
+            "rubicon",
+            "rubicundus",
+            "rom'i",
+        ];
+        rs.iter().enumerate().for_each(|(i, r)| {
+            btm.set_val_at(r.as_bytes(), i);
         });
+
+        let mut dpz =
+            DependentProductZipperG::new_enroll(btm.into_read_zipper(&[]), (), |_, p, c| {
+                if c == 0 {
+                    ((), Some(PathMap::single(p, 0).into_read_zipper(&[])))
+                } else {
+                    ((), None)
+                }
+            });
 
         let mut full = String::new();
         while dpz.to_next_val() {
@@ -524,7 +662,9 @@ rubicundus.postfix
                 full.push('\n');
             }
         }
-        assert_eq!(full, "arrowarrow
+        assert_eq!(
+            full,
+            "arrowarrow
 bowbow
 cannoncannon
 rom'irom'i
@@ -535,6 +675,7 @@ rubensrubens
 ruberruber
 rubiconrubicon
 rubicundusrubicundus
-")
+"
+        )
     }
 }

@@ -1,11 +1,11 @@
-use std::borrow::Cow;
-use fast_slice_utils::{find_prefix_overlap, starts_with};
-use super::alloc::Allocator;
-use super::utils::ByteMask;
 use super::PathMap;
-use super::trie_core::node::{AbstractNodeRef, TrieNodeODRc, TaggedNodeRef};
+use super::alloc::Allocator;
+use super::trie_core::node::{AbstractNodeRef, TaggedNodeRef, TrieNodeODRc};
 use super::trie_core::r#ref::TrieRef;
+use super::utils::ByteMask;
 use super::zipper::*;
+use fast_slice_utils::{find_prefix_overlap, starts_with};
+use std::borrow::Cow;
 
 #[derive(Clone)]
 enum PrefixPos {
@@ -21,7 +21,7 @@ impl PrefixPos {
     // }
     #[inline]
     fn is_invalid(&self) -> bool {
-        matches!(self, PrefixPos::PrefixOff {..})
+        matches!(self, PrefixPos::PrefixOff { .. })
     }
     #[inline]
     fn is_source(&self) -> bool {
@@ -62,29 +62,21 @@ pub struct PrefixZipper<'prefix, Z> {
     position: PrefixPos,
 }
 
-impl<'prefix, Z>  PrefixZipper<'prefix, Z>
-    where
-        Z: ZipperMoving
+impl<'prefix, Z> PrefixZipper<'prefix, Z>
+where
+    Z: ZipperMoving,
 {
     /// Creates a new `PrefixZipper` wrapping the supplied `source` zipper and prepending the
     /// supplied `prefix`
     pub fn new<P>(prefix: P, mut source: Z) -> Self
-        where P: Into<Cow<'prefix, [u8]>>
+    where
+        P: Into<Cow<'prefix, [u8]>>,
     {
         let prefix = prefix.into();
         source.reset();
-        let position = if prefix.is_empty() {
-            PrefixPos::Source
-        } else {
-            PrefixPos::Prefix { valid: 0 }
-        };
-        Self {
-            path: Vec::new(),
-            source,
-            prefix,
-            origin_depth: 0,
-            position,
-        }
+        let position =
+            if prefix.is_empty() { PrefixPos::Source } else { PrefixPos::Prefix { valid: 0 } };
+        Self { path: Vec::new(), source, prefix, origin_depth: 0, position }
     }
 
     pub fn with_origin(mut self, origin: &[u8]) -> Result<Self, &'static str> {
@@ -139,7 +131,7 @@ impl<'prefix, Z>  PrefixZipper<'prefix, Z>
             // };
             let len_before = self.source.path().len();
             if self.source.ascend(steps) {
-                return Ok(())
+                return Ok(());
             }
             let len_after = self.source.path().len();
             steps -= len_before - len_after;
@@ -166,11 +158,8 @@ impl<'prefix, Z>  PrefixZipper<'prefix, Z>
             //     return Some(moved);
             // }
             let len_before = self.source.path().len();
-            let was_good = if VAL {
-                self.source.ascend_until()
-            } else {
-                self.source.ascend_until_branch()
-            };
+            let was_good =
+                if VAL { self.source.ascend_until() } else { self.source.ascend_until_branch() };
             if was_good && ((VAL && self.source.is_val()) || self.source.child_count() > 1) {
                 let len_after = self.source.path().len();
                 return Some(len_before - len_after);
@@ -179,20 +168,22 @@ impl<'prefix, Z>  PrefixZipper<'prefix, Z>
             let valid = self.prefix.len() - self.origin_depth;
             self.position = PrefixPos::Prefix { valid };
         }
-        ascended += self.position.prefixed_depth()
+        ascended += self
+            .position
+            .prefixed_depth()
             .expect("we should no longer pointe at source at this point");
         self.set_valid(0);
         Some(ascended)
     }
 }
 
-impl<'prefix, Z>  PrefixZipper<'prefix, Z> {
+impl<'prefix, Z> PrefixZipper<'prefix, Z> {
     /// Returns the path that must be descended before the PrefixZipper's focus is at the root of the inner zipper, or
     /// `None` if the focus is no longer along the prefix path
     #[inline]
     pub fn prefix_path_below_focus(&self) -> Option<&[u8]> {
         match self.position {
-            PrefixPos::Prefix { valid } => Some( &self.prefix[self.origin_depth + valid..] ),
+            PrefixPos::Prefix { valid } => Some(&self.prefix[self.origin_depth + valid..]),
             PrefixPos::PrefixOff { valid: _, invalid: _ } => None,
             PrefixPos::Source => Some(&[]),
         }
@@ -200,8 +191,8 @@ impl<'prefix, Z>  PrefixZipper<'prefix, Z> {
 }
 
 impl<'prefix, Z> ZipperConcrete for PrefixZipper<'prefix, Z>
-    where
-        Z: ZipperConcrete
+where
+    Z: ZipperConcrete,
 {
     fn shared_node_id(&self) -> Option<u64> {
         match self.position {
@@ -218,8 +209,8 @@ impl<'prefix, Z> ZipperConcrete for PrefixZipper<'prefix, Z>
 }
 
 impl<'prefix, Z, V> ZipperValues<V> for PrefixZipper<'prefix, Z>
-    where
-        Z: ZipperValues<V>
+where
+    Z: ZipperValues<V>,
 {
     fn val(&self) -> Option<&V> {
         if !self.position.is_source() {
@@ -229,10 +220,9 @@ impl<'prefix, Z, V> ZipperValues<V> for PrefixZipper<'prefix, Z>
     }
 }
 
-impl<'prefix, 'source, Z, V> ZipperReadOnlyValues<'source, V>
-    for PrefixZipper<'prefix, Z>
-    where
-        Z: ZipperReadOnlyValues<'source, V>
+impl<'prefix, 'source, Z, V> ZipperReadOnlyValues<'source, V> for PrefixZipper<'prefix, Z>
+where
+    Z: ZipperReadOnlyValues<'source, V>,
 {
     fn get_val(&self) -> Option<&'source V> {
         if !self.position.is_source() {
@@ -244,12 +234,17 @@ impl<'prefix, 'source, Z, V> ZipperReadOnlyValues<'source, V>
 
 impl<'prefix, 'source, Z, V> ZipperReadOnlyConditionalValues<'source, V>
     for PrefixZipper<'prefix, Z>
-    where
-        Z: ZipperReadOnlyConditionalValues<'source, V>
+where
+    Z: ZipperReadOnlyConditionalValues<'source, V>,
 {
     type WitnessT = Z::WitnessT;
-    fn witness<'w>(&self) -> Self::WitnessT { self.source.witness() }
-    fn get_val_with_witness<'w>(&self, witness: &'w Self::WitnessT) -> Option<&'w V> where 'source: 'w {
+    fn witness<'w>(&self) -> Self::WitnessT {
+        self.source.witness()
+    }
+    fn get_val_with_witness<'w>(&self, witness: &'w Self::WitnessT) -> Option<&'w V>
+    where
+        'source: 'w,
+    {
         if !self.position.is_source() {
             return None;
         }
@@ -258,11 +253,12 @@ impl<'prefix, 'source, Z, V> ZipperReadOnlyConditionalValues<'source, V>
 }
 
 impl<'prefix, Z> ZipperPathBuffer for PrefixZipper<'prefix, Z>
-    where Z: ZipperMoving
+where
+    Z: ZipperMoving,
 {
     unsafe fn origin_path_assert_len(&self, len: usize) -> &[u8] {
         assert!(self.path.capacity() >= len);
-        unsafe{ core::slice::from_raw_parts(self.path.as_ptr(), len) }
+        unsafe { core::slice::from_raw_parts(self.path.as_ptr(), len) }
     }
     fn prepare_buffers(&mut self) {
         if self.path.len() < self.origin_depth {
@@ -284,13 +280,13 @@ impl<'prefix, Z> PrefixZipper<'prefix, Z> {
 }
 
 impl<'prefix, Z> Zipper for PrefixZipper<'prefix, Z>
-    where
-        Z: Zipper
+where
+    Z: Zipper,
 {
     fn path_exists(&self) -> bool {
         match self.position {
-            PrefixPos::Prefix {..} => true,
-            PrefixPos::PrefixOff {..} => false,
+            PrefixPos::Prefix { .. } => true,
+            PrefixPos::PrefixOff { .. } => false,
             PrefixPos::Source => self.source.path_exists(),
         }
     }
@@ -302,8 +298,8 @@ impl<'prefix, Z> Zipper for PrefixZipper<'prefix, Z>
     }
     fn child_count(&self) -> usize {
         match self.position {
-            PrefixPos::Prefix {..} => 1,
-            PrefixPos::PrefixOff {..} => 0,
+            PrefixPos::Prefix { .. } => 1,
+            PrefixPos::PrefixOff { .. } => 0,
             PrefixPos::Source => self.source.child_count(),
         }
     }
@@ -312,21 +308,21 @@ impl<'prefix, Z> Zipper for PrefixZipper<'prefix, Z>
             PrefixPos::Prefix { valid } => {
                 let byte = self.prefix[self.origin_depth + valid];
                 ByteMask::from(byte)
-            },
-            PrefixPos::PrefixOff {..} => ByteMask::EMPTY,
+            }
+            PrefixPos::PrefixOff { .. } => ByteMask::EMPTY,
             PrefixPos::Source => self.source.child_mask(),
         }
     }
 }
 
 impl<'prefix, Z> ZipperMoving for PrefixZipper<'prefix, Z>
-    where
-        Z: ZipperMoving
+where
+    Z: ZipperMoving,
 {
     fn at_root(&self) -> bool {
         match self.position {
             PrefixPos::Prefix { valid } => valid == 0,
-            PrefixPos::PrefixOff {..} => false,
+            PrefixPos::PrefixOff { .. } => false,
             PrefixPos::Source => self.prefix.len() <= self.origin_depth && self.source.at_root(),
         }
     }
@@ -378,14 +374,14 @@ impl<'prefix, Z> ZipperMoving for PrefixZipper<'prefix, Z>
         }
         self.path.extend_from_slice(&path);
         self.position = match self.position {
-            PrefixPos::Prefix { valid } =>
-                PrefixPos::PrefixOff { valid, invalid: path.len() },
-            PrefixPos::PrefixOff { valid, invalid } =>
-                PrefixPos::PrefixOff { valid, invalid: invalid + path.len() },
+            PrefixPos::Prefix { valid } => PrefixPos::PrefixOff { valid, invalid: path.len() },
+            PrefixPos::PrefixOff { valid, invalid } => {
+                PrefixPos::PrefixOff { valid, invalid: invalid + path.len() }
+            }
             PrefixPos::Source => {
                 self.source.descend_to(path);
                 PrefixPos::Source
-            },
+            }
         };
     }
 
@@ -483,7 +479,8 @@ impl<'prefix, Z> ZipperMoving for PrefixZipper<'prefix, Z>
 
 /// An interface for a [Zipper] to support accessing the full path buffer used to create the zipper
 impl<'prefix, Z> ZipperAbsolutePath for PrefixZipper<'prefix, Z>
-    where Z: ZipperAbsolutePath
+where
+    Z: ZipperAbsolutePath,
 {
     fn origin_path(&self) -> &[u8] {
         &self.path
@@ -494,7 +491,8 @@ impl<'prefix, Z> ZipperAbsolutePath for PrefixZipper<'prefix, Z>
 }
 
 impl<'prefix, Z> ZipperIteration for PrefixZipper<'prefix, Z>
-    where Z: ZipperIteration
+where
+    Z: ZipperIteration,
 {
     //TODO: The default impls are highly sub-optimal.  However we need "blind" versions of `ZipperIteration` to make this do the right thing
     // fn to_next_val(&mut self) -> bool { todo!() }
@@ -502,21 +500,32 @@ impl<'prefix, Z> ZipperIteration for PrefixZipper<'prefix, Z>
     // fn to_next_k_path(&mut self, k: usize) -> bool { todo!() }
 }
 
-impl<'prefix, 'a, V, Z> ZipperReadOnlyIteration<'a, V> for PrefixZipper<'prefix, Z> where Z: ZipperReadOnlyIteration<'a, V>, Self: ZipperReadOnlyValues<'a, V> + ZipperIteration {
+impl<'prefix, 'a, V, Z> ZipperReadOnlyIteration<'a, V> for PrefixZipper<'prefix, Z>
+where
+    Z: ZipperReadOnlyIteration<'a, V>,
+    Self: ZipperReadOnlyValues<'a, V> + ZipperIteration,
+{
     //TODO: same as above.  Default impls are highly sub-optimal
     // fn to_next_get_val(&mut self) -> Option<&'a V> { todo!() }
 }
 
-impl<'prefix, 'a, V, Z> ZipperReadOnlyConditionalIteration<'a, V> for PrefixZipper<'prefix, Z> where Z: ZipperReadOnlyConditionalIteration<'a, V>, Self: ZipperReadOnlyConditionalValues<'a, V, WitnessT = Z::WitnessT> + ZipperIteration {
+impl<'prefix, 'a, V, Z> ZipperReadOnlyConditionalIteration<'a, V> for PrefixZipper<'prefix, Z>
+where
+    Z: ZipperReadOnlyConditionalIteration<'a, V>,
+    Self: ZipperReadOnlyConditionalValues<'a, V, WitnessT = Z::WitnessT> + ZipperIteration,
+{
     //TODO: same as above.  Default impls are highly sub-optimal
     // fn to_next_get_val_with_witness<'w>(&mut self, witness: &'w Self::WitnessT) -> Option<&'w V> where 'a: 'w { todo!() }
 }
 
 impl<'prefix, Z, V> ZipperForking<V> for PrefixZipper<'prefix, Z>
-    where
-        Z: ZipperIteration + ZipperForking<V>
+where
+    Z: ZipperIteration + ZipperForking<V>,
 {
-    type ReadZipperT<'a> = PrefixZipper<'prefix, Z::ReadZipperT<'a>> where Self: 'a;
+    type ReadZipperT<'a>
+        = PrefixZipper<'prefix, Z::ReadZipperT<'a>>
+    where
+        Self: 'a;
     fn fork_read_zipper<'a>(&'a self) -> <Self as ZipperForking<V>>::ReadZipperT<'a> {
         PrefixZipper {
             path: Vec::new(),
@@ -530,12 +539,15 @@ impl<'prefix, Z, V> ZipperForking<V> for PrefixZipper<'prefix, Z>
 
 //GOAT, Remove the 'static bound on V and A, as soon as we redo the interior of ReadZipperOwned.
 // See GOAT comment above ReadZipperOwned struct definition
-impl<'prefix, 'a, V: Clone + Send + Sync + Unpin + 'static, Z, A: Allocator + 'static> zipper_priv::ZipperReadOnlyPriv<'a, V, A> for PrefixZipper<'prefix, Z>
-    where
-        Z: zipper_priv::ZipperReadOnlyPriv<'a, V, A>,
-        Self: ZipperSubtries<V, A>
+impl<'prefix, 'a, V: Clone + Send + Sync + Unpin + 'static, Z, A: Allocator + 'static>
+    zipper_priv::ZipperReadOnlyPriv<'a, V, A> for PrefixZipper<'prefix, Z>
+where
+    Z: zipper_priv::ZipperReadOnlyPriv<'a, V, A>,
+    Self: ZipperSubtries<V, A>,
 {
-    fn borrow_raw_parts<'z>(&'z self) -> (TaggedNodeRef<'z, V, A>, &'z [u8], Option<&'z V>) { panic!() } //Not sure how we'd implement borrow_raw_parts for a PrefixZipper, in the general case
+    fn borrow_raw_parts<'z>(&'z self) -> (TaggedNodeRef<'z, V, A>, &'z [u8], Option<&'z V>) {
+        panic!()
+    } //Not sure how we'd implement borrow_raw_parts for a PrefixZipper, in the general case
     fn take_core(&mut self) -> Option<read_zipper_core::ReadZipperCore<'a, 'static, V, A>> {
         if let Some(prefix_path) = self.prefix_path_below_focus() {
             if prefix_path.len() > 0 {
@@ -543,7 +555,7 @@ impl<'prefix, 'a, V: Clone + Send + Sync + Unpin + 'static, Z, A: Allocator + 's
                 return temp_map.and_then(|map| {
                     let mut owned_z: ReadZipperOwned<V, A> = map.into_read_zipper(b"");
                     owned_z.take_core()
-                })
+                });
             } else {
                 self.source.take_core()
             }
@@ -553,14 +565,17 @@ impl<'prefix, 'a, V: Clone + Send + Sync + Unpin + 'static, Z, A: Allocator + 's
     }
 }
 
-impl<'prefix, V: Clone + Send + Sync + Unpin, Z, A: Allocator> ZipperSubtries<V, A> for PrefixZipper<'prefix, Z>
-    where
-        Z: ZipperSubtries<V, A>
+impl<'prefix, V: Clone + Send + Sync + Unpin, Z, A: Allocator> ZipperSubtries<V, A>
+    for PrefixZipper<'prefix, Z>
+where
+    Z: ZipperSubtries<V, A>,
 {
-    fn native_subtries(&self) -> bool { self.source.native_subtries() }
+    fn native_subtries(&self) -> bool {
+        self.source.native_subtries()
+    }
     fn try_make_map(&self) -> Option<PathMap<V, A>> {
         if !self.native_subtries() {
-            return None
+            return None;
         }
         let leaf_map = self.source.try_make_map();
         match self.prefix_path_below_focus() {
@@ -570,39 +585,40 @@ impl<'prefix, V: Clone + Send + Sync + Unpin, Z, A: Allocator> ZipperSubtries<V,
                     let mut wz = new_map.write_zipper_at_path(prefix_path);
                     let leaf_map = match leaf_map {
                         Some(map) => map,
-                        None => PathMap::new_in(self.source.alloc())
+                        None => PathMap::new_in(self.source.alloc()),
                     };
                     wz.graft_map(leaf_map);
                     Some(new_map)
                 } else {
                     leaf_map
                 }
-            },
-            None => {
-                leaf_map
             }
+            None => leaf_map,
         }
     }
     fn trie_ref(&self) -> Option<TrieRef<'_, V, A>> {
         if !self.native_subtries() {
-            return None
+            return None;
         }
         if let Some(prefix_path) = self.prefix_path_below_focus() {
             if prefix_path.len() > 0 {
-                return self.try_make_map().map(|temp_map| TrieRef::from(temp_map))
+                return self.try_make_map().map(|temp_map| TrieRef::from(temp_map));
             } else {
-                return self.source.trie_ref()
+                return self.source.trie_ref();
             }
         } else {
             Some(TrieRefOwned::new_invalid_in(self.source.alloc()).into())
         }
     }
-    fn alloc(&self) -> A { self.source.alloc() }
+    fn alloc(&self) -> A {
+        self.source.alloc()
+    }
 }
 
-impl<'prefix, V: Clone + Send + Sync + Unpin, Z, A: Allocator> ZipperInfallibleSubtries<V, A> for PrefixZipper<'prefix, Z>
-    where
-        Z: ZipperInfallibleSubtries<V, A> + ZipperSubtries<V, A>
+impl<'prefix, V: Clone + Send + Sync + Unpin, Z, A: Allocator> ZipperInfallibleSubtries<V, A>
+    for PrefixZipper<'prefix, Z>
+where
+    Z: ZipperInfallibleSubtries<V, A> + ZipperSubtries<V, A>,
 {
     fn make_map(&self) -> PathMap<Self::V, A> {
         let leaf_map = self.source.make_map();
@@ -616,19 +632,17 @@ impl<'prefix, V: Clone + Send + Sync + Unpin, Z, A: Allocator> ZipperInfallibleS
                 } else {
                     leaf_map
                 }
-            },
-            None => {
-                leaf_map
             }
+            None => leaf_map,
         }
     }
     fn get_trie_ref(&self) -> TrieRef<'_, V, A> {
         if let Some(prefix_path) = self.prefix_path_below_focus() {
             if prefix_path.len() > 0 {
                 let temp_map = self.make_map();
-                return TrieRef::from(temp_map)
+                return TrieRef::from(temp_map);
             } else {
-                return self.source.get_trie_ref()
+                return self.source.get_trie_ref();
             }
         } else {
             TrieRefOwned::new_invalid_in(self.source.alloc()).into()
@@ -636,16 +650,31 @@ impl<'prefix, V: Clone + Send + Sync + Unpin, Z, A: Allocator> ZipperInfallibleS
     }
 }
 
-impl<'prefix, 'a, V: Clone + Send + Sync + 'a, Z, A: Allocator + 'a> ZipperReadOnlySubtries<'a, V, A> for PrefixZipper<'prefix, Z> where Z: ZipperReadOnlySubtries<'a, V, A>, Self: zipper_priv::ZipperReadOnlyPriv<'a, V, A> + ZipperSubtries<V, A> {
+impl<'prefix, 'a, V: Clone + Send + Sync + 'a, Z, A: Allocator + 'a>
+    ZipperReadOnlySubtries<'a, V, A> for PrefixZipper<'prefix, Z>
+where
+    Z: ZipperReadOnlySubtries<'a, V, A>,
+    Self: zipper_priv::ZipperReadOnlyPriv<'a, V, A> + ZipperSubtries<V, A>,
+{
     type TrieRefT = <Z as ZipperReadOnlySubtries<'a, V, A>>::TrieRefT;
-    fn trie_ref_at_path<K: AsRef<[u8]>>(&self, path: K) -> Self::TrieRefT { self.source.trie_ref_at_path(path) }
+    fn trie_ref_at_path<K: AsRef<[u8]>>(&self, path: K) -> Self::TrieRefT {
+        self.source.trie_ref_at_path(path)
+    }
 }
 
-impl<'prefix, V: Clone + Send + Sync, Z, A: Allocator> zipper_priv::ZipperPriv for PrefixZipper<'prefix, Z> where Z: zipper_priv::ZipperPriv<V=V, A=A> {
+impl<'prefix, V: Clone + Send + Sync, Z, A: Allocator> zipper_priv::ZipperPriv
+    for PrefixZipper<'prefix, Z>
+where
+    Z: zipper_priv::ZipperPriv<V = V, A = A>,
+{
     type V = V;
     type A = A;
-    fn get_focus(&self) -> AbstractNodeRef<'_, Self::V, Self::A> { self.source.get_focus() }
-    fn try_borrow_focus(&self) -> Option<&TrieNodeODRc<Self::V, Self::A>> { self.source.try_borrow_focus() }
+    fn get_focus(&self) -> AbstractNodeRef<'_, Self::V, Self::A> {
+        self.source.get_focus()
+    }
+    fn try_borrow_focus(&self) -> Option<&TrieNodeODRc<Self::V, Self::A>> {
+        self.source.try_borrow_focus()
+    }
 }
 
 super::zipper::impl_zipper_debug!(
@@ -657,20 +686,11 @@ super::zipper::impl_zipper_debug!(
 mod tests {
     use super::PrefixZipper;
     use super::trie_map::PathMap;
-    use super::zipper::ZipperMoving;
     use super::zipper::ZipperAbsolutePath;
-    const PATHS1: &[(&[u8], u64)] = &[
-        (b"0000", 0),
-        (b"00000", 1),
-        (b"00011", 2),
-        (b"11111", 3),
-        (b"11222", 4),
-    ];
-    const PATHS2: &[(&[u8], u64)] = &[
-        (b"000", 0),
-        (b"00000", 0),
-        (b"00111", 1),
-    ];
+    use super::zipper::ZipperMoving;
+    const PATHS1: &[(&[u8], u64)] =
+        &[(b"0000", 0), (b"00000", 1), (b"00011", 2), (b"11111", 3), (b"11222", 4)];
+    const PATHS2: &[(&[u8], u64)] = &[(b"000", 0), (b"00000", 0), (b"00111", 1)];
 
     #[test]
     fn test_prefix_zipper1() {

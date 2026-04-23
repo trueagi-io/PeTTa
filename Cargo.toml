@@ -71,6 +71,7 @@ libz-ng-sys = { version = "1.1", optional = true }
 # Optional features
 rayon = { version = "1.10", optional = true }
 rustyline = { version = "14", optional = true }
+clap = { version = "4.5", features = ["derive"], optional = true }
 
 # Make MORK opt-in. Default build uses the SWI-Prolog subprocess backend
 # (stable, works on stable Rust). Enable the MORK backend explicitly with
@@ -78,7 +79,7 @@ rustyline = { version = "14", optional = true }
 [features]
 # Default: keep REPL enabled, but do NOT enable the MORK backend by default.
 # MORK requires nightly Rust and should be opted-in explicitly by developers.
-default = ["repl"]
+default = ["repl", "clap"]
 # Optional high-performance hasher: re-exports the optional `gxhash` dependency.
 fast-hasher = ["dep:gxhash"]
 mork = [
@@ -94,6 +95,7 @@ mork = [
     "dep:subprocess",
 ]
 repl = ["dep:rustyline"]
+clap = ["dep:clap"]
 swipl = []
 pure-rust = ["dep:nom"]
 pathmap-internal-tests = []

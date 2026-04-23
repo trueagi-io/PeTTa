@@ -16,7 +16,7 @@ const SKIP_LIST: &[&str] = &[
     "greedy_chess.metta",
     "git_import2.metta",
     "matespacefast.metta",
-    "fibadd.metta",    // fib(30) without memoization: O(2^30) calls
+    "fibadd.metta", // fib(30) without memoization: O(2^30) calls
 ];
 
 fn project_root() -> PathBuf {
@@ -120,11 +120,7 @@ fn test_full_suite() {
         }
     }
 
-    assert!(
-        errors.is_empty(),
-        "{} example(s) failed",
-        errors.len()
-    );
+    assert!(errors.is_empty(), "{} example(s) failed", errors.len());
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,3 @@
-
 //GOAT: Internal Discussion: What do we ultimately want this API to look like?
 //
 // * Firstly, we probably ought to make a writable trait, in the vein of `ZipperSubtries` that allows
@@ -23,7 +22,7 @@
 // the same as an Rc `weak`, but a similar idea)
 
 use super::alloc::Allocator;
-use super::trie_core::node::{TrieNodeODRc, NODE_ITER_FINISHED};
+use super::trie_core::node::{NODE_ITER_FINISHED, TrieNodeODRc};
 // Use crate-level gxhash wrapper via crate::gxhash when needed. Direct `use` is unnecessary here.
 
 /// Statistics created after merkleization
@@ -45,13 +44,13 @@ pub(crate) fn merkleize_impl<V, A>(
     node: &TrieNodeODRc<V, A>,
     value: Option<&V>,
 ) -> (u128, Option<TrieNodeODRc<V, A>>)
-    where
-        V: Clone + Send + Sync + std::hash::Hash,
-        A: Allocator,
+where
+    V: Clone + Send + Sync + std::hash::Hash,
+    A: Allocator,
 {
     // hash = (value, [(path, child_hash)])
-    use std::hash::{Hash};
     use std::collections::hash_map::Entry;
+    use std::hash::Hash;
     const INITIAL_SEED: i64 = 0;
     let mut hasher = crate::gxhash::GxHasher::with_seed(INITIAL_SEED);
     value.hash(&mut hasher);
@@ -106,30 +105,22 @@ mod tests {
 
     #[test]
     fn test_btm_merkleize() {
-        let paths: &[&[u8]] = &[
-            b"axx",
-            b"ayy",
-            b"bxx",
-            b"byy",
-            b"cxx",
-            b"cyy",
-            b"ddxx",
-            b"ddyy",
-        ];
-        let paths = paths.iter()
-            .map(|&path| (path, ()));
+        let paths: &[&[u8]] = &[b"axx", b"ayy", b"bxx", b"byy", b"cxx", b"cyy", b"ddxx", b"ddyy"];
+        let paths = paths.iter().map(|&path| (path, ()));
         let mut btm = super::PathMap::from_iter(paths);
-        #[cfg(feature="viz")] {
+        #[cfg(feature = "viz")]
+        {
             let mut before = Vec::new();
-            use super::viz::{viz_maps, DrawConfig};
+            use super::viz::{DrawConfig, viz_maps};
             viz_maps(&[btm.clone()], &DrawConfig::default(), &mut before).unwrap();
             eprintln!("before:");
             eprintln!("```ignoremermaid\n{}```ignore", std::str::from_utf8(&before).unwrap());
         }
         let result = btm.merkleize();
         eprintln!("merkleize result: {result:?}\n");
-        #[cfg(feature="viz")] {
-            use super::viz::{viz_maps, DrawConfig};
+        #[cfg(feature = "viz")]
+        {
+            use super::viz::{DrawConfig, viz_maps};
             let mut after = Vec::new();
             viz_maps(&[btm], &DrawConfig::default(), &mut after).unwrap();
             eprintln!("after:");

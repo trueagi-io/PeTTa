@@ -32,7 +32,7 @@ impl std::fmt::Display for Backend {
 ///     .query_timeout(Duration::from_secs(30))
 ///     .max_restarts(3);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EngineConfig {
     /// Backend implementation to use (default: Mork).
     pub backend: Backend,
@@ -72,10 +72,7 @@ impl EngineConfig {
     /// Create a new config with the given project root.
     /// The Prolog source files are expected to be in `<project_root>/prolog/`.
     pub fn new(project_root: &Path) -> Self {
-        Self {
-            src_dir: Some(project_root.join("prolog")),
-            ..Default::default()
-        }
+        Self { src_dir: Some(project_root.join("prolog")), ..Default::default() }
     }
 
     /// Set the SWI-Prolog binary path.

@@ -1,6 +1,3 @@
-
-
-
 // Use the crate-level gxhash wrapper as the single canonical entrypoint.
 // The wrapper re-exports the external `gxhash` crate when the feature is
 // enabled and the platform supports it; otherwise it re-exports the
@@ -9,7 +6,6 @@
 // failures.
 // Note: avoid duplicative re-export to silence unused-import warnings. Use
 // `crate::gxhash` directly where necessary.
-
 
 /// Traits to implement [ring](https://en.wikipedia.org/wiki/Ring_(mathematics)) and other algebraic
 /// operations on tries, such as union, intersection, and subtraction
@@ -75,12 +71,12 @@ pub mod paths_serialization;
 // TrieRef moved to core/ref.rs
 
 // Zipper implementations (still flat files)
-mod write_zipper;
-mod product_zipper;
-mod empty_zipper;
-mod prefix_zipper;
-mod overlay_zipper;
 mod dependent_zipper;
+mod empty_zipper;
+mod overlay_zipper;
+mod prefix_zipper;
+mod product_zipper;
+mod write_zipper;
 
 #[cfg(feature = "old_cursor")]
 mod old_cursor;
@@ -88,7 +84,7 @@ mod old_cursor;
 /// A supertrait that encapsulates the bounds for a value that can be put in a [PathMap]
 pub trait TrieValue: Clone + Send + Sync + Unpin {}
 
-impl<T> TrieValue for T where T : Clone + Send + Sync + Unpin {}
+impl<T> TrieValue for T where T: Clone + Send + Sync + Unpin {}
 
 /// Internal macro to implement Debug on a type that just outputs the type name
 macro_rules! impl_name_only_debug {
@@ -104,21 +100,23 @@ pub(crate) use impl_name_only_debug;
 
 #[cfg(all(test, feature = "pathmap-internal-tests"))]
 mod tests {
-    use rand::{Rng, SeedableRng, rngs::StdRng};
-    use petta::pathmap::ring::*;
     use petta::pathmap::PathMap;
+    use petta::pathmap::ring::*;
     use petta::pathmap::zipper::*;
+    use rand::{Rng, SeedableRng, rngs::StdRng};
 
     pub(crate) fn prefix_key(k: &u64) -> &[u8] {
-        let bs = (8 - k.leading_zeros()/8) as u8;
+        let bs = (8 - k.leading_zeros() / 8) as u8;
         let kp: *const u64 = k;
         unsafe { std::slice::from_raw_parts(kp as *const _, (bs as usize).max(1)) }
     }
 
     pub(crate) fn from_prefix_key(k: Vec<u8>) -> u64 {
         let mut buf = [0u8; 8];
-        unsafe { core::ptr::copy_nonoverlapping(k.as_ptr(), buf.as_mut_ptr(), k.len()); }
-        let shift = 64usize.saturating_sub(k.len()*8);
+        unsafe {
+            core::ptr::copy_nonoverlapping(k.as_ptr(), buf.as_mut_ptr(), k.len());
+        }
+        let shift = 64usize.saturating_sub(k.len() * 8);
         u64::from_le_bytes(buf) & (!0u64 >> shift)
     }
 
@@ -184,8 +182,12 @@ mod tests {
 
         let mut vnl = PathMap::new();
         let mut vnr = PathMap::new();
-        for i in 0..N { vnl.set_val_at(prefix_key(&i), i); }
-        for i in o..(N+o) { vnr.set_val_at(prefix_key(&i), i); }
+        for i in 0..N {
+            vnl.set_val_at(prefix_key(&i), i);
+        }
+        for i in o..(N + o) {
+            vnr.set_val_at(prefix_key(&i), i);
+        }
         let l_no_r = vnl.subtract(&vnr);
 
         //Validate the ByteTrieMap::subtract against HashSet::difference
@@ -200,7 +202,6 @@ mod tests {
 
     #[test]
     fn btm_subtract_after_join() {
-
         //This entire operation works with only ListNodes
         let r: Vec<Vec<u8>> = vec![
             vec![61, 85, 161, 68, 245, 90, 129],
@@ -208,9 +209,7 @@ mod tests {
         ];
         let r: PathMap<u64> = r.into_iter().map(|v| (v, 0)).collect();
 
-        let l: Vec<Vec<u8>> = vec![
-            vec![70, 116, 109, 134, 122, 15, 78, 126, 240, 158, 42, 221],
-        ];
+        let l: Vec<Vec<u8>> = vec![vec![70, 116, 109, 134, 122, 15, 78, 126, 240, 158, 42, 221]];
         let l: PathMap<u64> = l.into_iter().map(|v| (v, 0)).collect();
 
         let joined = l.join(&r);
@@ -231,9 +230,7 @@ mod tests {
         ];
         let r: PathMap<u64> = r.into_iter().map(|v| (v, 0)).collect();
 
-        let l: Vec<Vec<u8>> = vec![
-            vec![70, 116, 109, 134, 122, 15, 78, 126, 240, 158, 42, 221],
-        ];
+        let l: Vec<Vec<u8>> = vec![vec![70, 116, 109, 134, 122, 15, 78, 126, 240, 158, 42, 221]];
         let l: PathMap<u64> = l.into_iter().map(|v| (v, 0)).collect();
 
         let joined = l.join(&r);
@@ -255,15 +252,22 @@ mod tests {
         const N: u64 = 500;
 
         let mut rng = StdRng::seed_from_u64(1);
-        let keys: Vec<Vec<u8>> = (0..N).into_iter().map(|_| {
-            let len = (rng.random::<u8>() % 18) + 3; //length between 3 and 20 chars
-            (0..len).into_iter().map(|_| rng.random::<u8>()).collect()
-        }).collect();
+        let keys: Vec<Vec<u8>> = (0..N)
+            .into_iter()
+            .map(|_| {
+                let len = (rng.random::<u8>() % 18) + 3; //length between 3 and 20 chars
+                (0..len).into_iter().map(|_| rng.random::<u8>()).collect()
+            })
+            .collect();
 
         let mut l: PathMap<u64> = PathMap::new();
-        for i in 0..(N/2) { l.set_val_at(&keys[i as usize], i); }
+        for i in 0..(N / 2) {
+            l.set_val_at(&keys[i as usize], i);
+        }
         let mut r: PathMap<u64> = PathMap::new();
-        for i in (N/2)..N { r.set_val_at(&keys[i as usize], i); }
+        for i in (N / 2)..N {
+            r.set_val_at(&keys[i as usize], i);
+        }
 
         let joined = l.join(&r);
         let remaining = joined.subtract(&r);
@@ -343,18 +347,35 @@ mod tests {
     /// Tests restrictions on a very dense trie
     #[test]
     fn btm_test_restrict2() {
-
         // These values are base-4 numbers in "little endian"
         let keys = [
-            vec![0],    vec![1],    vec![2],    vec![3],    vec![0, 1], vec![1, 1], vec![2, 1], vec![3, 1],
-            vec![0, 2], vec![1, 2], vec![2, 2], vec![3, 2], vec![0, 3], vec![1, 3], vec![2, 3], vec![3, 3],
-            vec![0, 0, 1], vec![1, 0, 1], vec![2, 0, 1], vec![3, 0, 1]
+            vec![0],
+            vec![1],
+            vec![2],
+            vec![3],
+            vec![0, 1],
+            vec![1, 1],
+            vec![2, 1],
+            vec![3, 1],
+            vec![0, 2],
+            vec![1, 2],
+            vec![2, 2],
+            vec![3, 2],
+            vec![0, 3],
+            vec![1, 3],
+            vec![2, 3],
+            vec![3, 3],
+            vec![0, 0, 1],
+            vec![1, 0, 1],
+            vec![2, 0, 1],
+            vec![3, 0, 1],
         ];
         let map: PathMap<i32> = keys.iter().enumerate().map(|(i, k)| (k, i as i32)).collect();
 
         // Restrict to odd numbers
-        let odd_keys = [ vec![1], vec![3]];
-        let odd_map: PathMap<i32> = odd_keys.iter().enumerate().map(|(i, k)| (k, i as i32)).collect();
+        let odd_keys = [vec![1], vec![3]];
+        let odd_map: PathMap<i32> =
+            odd_keys.iter().enumerate().map(|(i, k)| (k, i as i32)).collect();
         let restricted = map.restrict(&odd_map);
 
         assert_eq!(restricted.val_count(), 10);
@@ -370,8 +391,9 @@ mod tests {
         assert_eq!(restricted.get_val_at([3, 0, 1]), Some(&19));
 
         // Restrict to numbers divisible by 4 (exluding 0; 0 technically isn't divisible by 4)
-        let div4_keys = [ vec![0, 0], vec![0, 1], vec![0, 2], vec![0, 3]];
-        let div4_map: PathMap<i32> = div4_keys.iter().enumerate().map(|(i, k)| (k, i as i32)).collect();
+        let div4_keys = [vec![0, 0], vec![0, 1], vec![0, 2], vec![0, 3]];
+        let div4_map: PathMap<i32> =
+            div4_keys.iter().enumerate().map(|(i, k)| (k, i as i32)).collect();
         let restricted = map.restrict(&div4_map);
 
         assert_eq!(restricted.val_count(), 4);
@@ -399,8 +421,9 @@ mod tests {
         let map: PathMap<i32> = keys.iter().enumerate().map(|(i, k)| (k, i as i32)).collect();
 
         // Restrict to words beginning with "act"
-        let restrictor = [ "act" ];
-        let restrictor_map: PathMap<i32> = restrictor.iter().enumerate().map(|(i, k)| (k, i as i32)).collect();
+        let restrictor = ["act"];
+        let restrictor_map: PathMap<i32> =
+            restrictor.iter().enumerate().map(|(i, k)| (k, i as i32)).collect();
         let restricted = map.restrict(&restrictor_map);
 
         assert_eq!(restricted.val_count(), 4);
@@ -408,8 +431,9 @@ mod tests {
         assert_eq!(restricted.get_val_at("activities"), Some(&4));
 
         // Restrict to words beginning with "a"
-        let restrictor = [ "a" ];
-        let restrictor_map: PathMap<i32> = restrictor.iter().enumerate().map(|(i, k)| (k, i as i32)).collect();
+        let restrictor = ["a"];
+        let restrictor_map: PathMap<i32> =
+            restrictor.iter().enumerate().map(|(i, k)| (k, i as i32)).collect();
         let restricted = map.restrict(&restrictor_map);
 
         assert_eq!(restricted.val_count(), 8);
@@ -522,9 +546,13 @@ mod tests {
         const N: u64 = 1000;
 
         let mut l: PathMap<u64> = PathMap::new();
-        for i in 0..(N/2) { l.set_val_at(prefix_key(&i), i); }
+        for i in 0..(N / 2) {
+            l.set_val_at(prefix_key(&i), i);
+        }
         let mut r: PathMap<u64> = PathMap::new();
-        for i in (N/2)..N { r.set_val_at(prefix_key(&i), i); }
+        for i in (N / 2)..N {
+            r.set_val_at(prefix_key(&i), i);
+        }
 
         let joined = l.join(&r);
         let met = joined.meet(&l);
@@ -547,18 +575,25 @@ mod tests {
         let o = ((1. - overlap) * N as f64) as u64;
 
         let mut rng = StdRng::seed_from_u64(1);
-        let keys: Vec<Vec<u8>> = (0..N+o).into_iter().map(|_| {
-            let len = (rng.random::<u8>() % 18) + 3; //length between 3 and 20 chars
-            (0..len).into_iter().map(|_| rng.random::<u8>()).collect()
-        }).collect();
+        let keys: Vec<Vec<u8>> = (0..N + o)
+            .into_iter()
+            .map(|_| {
+                let len = (rng.random::<u8>() % 18) + 3; //length between 3 and 20 chars
+                (0..len).into_iter().map(|_| rng.random::<u8>()).collect()
+            })
+            .collect();
 
         let mut l: PathMap<u64> = PathMap::new();
-        for i in 0..N { l.set_val_at(&keys[i as usize], i); }
+        for i in 0..N {
+            l.set_val_at(&keys[i as usize], i);
+        }
         let mut r: PathMap<u64> = PathMap::new();
-        for i in o..(N+o) { r.set_val_at(&keys[i as usize], i); }
+        for i in o..(N + o) {
+            r.set_val_at(&keys[i as usize], i);
+        }
 
         let intersection = l.meet(&r);
-        assert_eq!(intersection.val_count(), (N/2) as usize);
+        assert_eq!(intersection.val_count(), (N / 2) as usize);
     }
 
     /// This test is a minimal repro case for a bug where a list node is intersected with a byte node,
@@ -569,15 +604,15 @@ mod tests {
             vec![207, 27],  //NON-OVERLAP!
             vec![207, 117], //Overlap
             vec![207, 142], //Overlap
-            // vec![208, 250], //Overlap
-            // vec![213, 63],  //Overlap
+                            // vec![208, 250], //Overlap
+                            // vec![213, 63],  //Overlap
         ];
         let r_keys = [
             vec![207, 117], //Overlap
             vec![207, 142], //Overlap
-            // vec![208, 157], //NON-OVERLAP!
-            // vec![208, 250], //Overlap
-            // vec![213, 63],  //Overlap
+                            // vec![208, 157], //NON-OVERLAP!
+                            // vec![208, 250], //Overlap
+                            // vec![213, 63],  //Overlap
         ];
         let l: PathMap<u64> = l_keys.into_iter().map(|v| (v, 0)).collect();
         let r: PathMap<u64> = r_keys.into_iter().map(|v| (v, 0)).collect();
@@ -601,10 +636,16 @@ mod tests {
             {
                 let mut vnl = PathMap::new();
                 let mut vnr = PathMap::new();
-                for i in 0..n { vnl.set_val_at(prefix_key(&i), i); }
+                for i in 0..n {
+                    vnl.set_val_at(prefix_key(&i), i);
+                }
                 // println!("{:?}", vnl.root);
-                for i in 0..n { assert_eq!(vnl.get_val_at(prefix_key(&i)), Some(i).as_ref()); }
-                for i in n..2*n { assert_eq!(vnl.get_val_at(prefix_key(&i)), None); }
+                for i in 0..n {
+                    assert_eq!(vnl.get_val_at(prefix_key(&i)), Some(i).as_ref());
+                }
+                for i in n..2 * n {
+                    assert_eq!(vnl.get_val_at(prefix_key(&i)), None);
+                }
                 let mut c: Vec<u64> = Vec::with_capacity(n as usize);
                 vnl.iter().for_each(|(k, v)| {
                     assert!(*v < n);
@@ -613,22 +654,66 @@ mod tests {
                 });
                 c.sort();
                 assert_eq!(c, (0..n).collect::<Vec<u64>>());
-                for i in o..(n+o) { vnr.set_val_at(prefix_key(&i), i); }
+                for i in o..(n + o) {
+                    vnr.set_val_at(prefix_key(&i), i);
+                }
 
                 let j: PathMap<u64> = vnl.join(&vnr);
                 let m = vnl.meet(&vnr);
                 let l_no_r = vnl.subtract(&vnr);
 
-                for i in 0..o { assert_eq!(l_no_r.get_val_at(prefix_key(&i)), vnl.get_val_at(prefix_key(&i))); }
-                for i in o..(n+o) { assert!(!l_no_r.contains(prefix_key(&i))); }
+                for i in 0..o {
+                    assert_eq!(l_no_r.get_val_at(prefix_key(&i)), vnl.get_val_at(prefix_key(&i)));
+                }
+                for i in o..(n + o) {
+                    assert!(!l_no_r.contains(prefix_key(&i)));
+                }
 
-                for i in o..n { assert!(vnl.contains(prefix_key(&i)) && vnr.contains(prefix_key(&i))); }
-                for i in 0..o { assert!(vnl.contains(prefix_key(&i)) && !vnr.contains(prefix_key(&i))); }
-                for i in n..(n+o) { assert!(!vnl.contains(prefix_key(&i)) && vnr.contains(prefix_key(&i))); }
-                for i in 0..(2*n) { assert_eq!(j.contains(prefix_key(&i)), (vnl.contains(prefix_key(&i)) || vnr.contains(prefix_key(&i)))); }
-                for i in 0..(2*n) { assert_eq!(m.contains(prefix_key(&i)), (vnl.contains(prefix_key(&i)) && vnr.contains(prefix_key(&i)))); }
-                for i in 0..(n+o) { assert_eq!(j.get_val_at(prefix_key(&i)).map(|v| *v), vnl.get_val_at(prefix_key(&i)).pjoin(&vnr.get_val_at(prefix_key(&i))).into_option([vnl.get_val_at(prefix_key(&i)).cloned(), vnr.get_val_at(prefix_key(&i)).cloned()]).flatten()); }
-                for i in o..n { assert_eq!(m.get_val_at(prefix_key(&i)).map(|v| *v), vnl.get_val_at(prefix_key(&i)).pmeet(&vnr.get_val_at(prefix_key(&i))).into_option([vnl.get_val_at(prefix_key(&i)).cloned(), vnr.get_val_at(prefix_key(&i)).cloned()]).flatten()); }
+                for i in o..n {
+                    assert!(vnl.contains(prefix_key(&i)) && vnr.contains(prefix_key(&i)));
+                }
+                for i in 0..o {
+                    assert!(vnl.contains(prefix_key(&i)) && !vnr.contains(prefix_key(&i)));
+                }
+                for i in n..(n + o) {
+                    assert!(!vnl.contains(prefix_key(&i)) && vnr.contains(prefix_key(&i)));
+                }
+                for i in 0..(2 * n) {
+                    assert_eq!(
+                        j.contains(prefix_key(&i)),
+                        (vnl.contains(prefix_key(&i)) || vnr.contains(prefix_key(&i)))
+                    );
+                }
+                for i in 0..(2 * n) {
+                    assert_eq!(
+                        m.contains(prefix_key(&i)),
+                        (vnl.contains(prefix_key(&i)) && vnr.contains(prefix_key(&i)))
+                    );
+                }
+                for i in 0..(n + o) {
+                    assert_eq!(
+                        j.get_val_at(prefix_key(&i)).map(|v| *v),
+                        vnl.get_val_at(prefix_key(&i))
+                            .pjoin(&vnr.get_val_at(prefix_key(&i)))
+                            .into_option([
+                                vnl.get_val_at(prefix_key(&i)).cloned(),
+                                vnr.get_val_at(prefix_key(&i)).cloned()
+                            ])
+                            .flatten()
+                    );
+                }
+                for i in o..n {
+                    assert_eq!(
+                        m.get_val_at(prefix_key(&i)).map(|v| *v),
+                        vnl.get_val_at(prefix_key(&i))
+                            .pmeet(&vnr.get_val_at(prefix_key(&i)))
+                            .into_option([
+                                vnl.get_val_at(prefix_key(&i)).cloned(),
+                                vnr.get_val_at(prefix_key(&i)).cloned()
+                            ])
+                            .flatten()
+                    );
+                }
                 // for i in 0..(2*N) { println!("{} {} {} {}", i, r.contains(i), vnl.contains(i), vnr.contains(i)); } // assert!(r.contains(i));
             }
         }
@@ -637,7 +722,6 @@ mod tests {
     /// This tests longer and longer keys to see if / where we blow the stack
     #[test]
     fn map_very_long_key_test() {
-
         let test_key_len = |len: usize| {
             let mut map: PathMap<u64> = PathMap::new();
             let mut z = map.write_zipper();
@@ -672,5 +756,4 @@ mod tests {
             // test_key_len(17179869184); //2^34 bytes - Still no failure at 16GB keys
         }
     }
-
 }

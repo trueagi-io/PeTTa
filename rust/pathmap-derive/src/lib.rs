@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Data, Fields};
-use syn::{Attribute, Ident};
 use std::collections::BTreeSet;
+use syn::{Attribute, Ident};
+use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum PolyZipperTrait {
@@ -95,14 +95,19 @@ fn add_trait_dependencies(traits: &mut BTreeSet<PolyZipperTrait>) {
     }
 }
 
-fn parse_explicit_traits(attrs: &[Attribute]) -> Result<Option<BTreeSet<PolyZipperTrait>>, syn::Error> {
+fn parse_explicit_traits(
+    attrs: &[Attribute],
+) -> Result<Option<BTreeSet<PolyZipperTrait>>, syn::Error> {
     let mut explicit: Option<BTreeSet<PolyZipperTrait>> = None;
     for attr in attrs {
         if !attr.path().is_ident("poly_zipper_explicit") {
             continue;
         }
         if explicit.is_some() {
-            return Err(syn::Error::new_spanned(attr, "duplicate `poly_zipper_explicit` attribute"));
+            return Err(syn::Error::new_spanned(
+                attr,
+                "duplicate `poly_zipper_explicit` attribute",
+            ));
         }
         let mut trait_set = BTreeSet::new();
         let mut saw_traits = false;
@@ -110,9 +115,10 @@ fn parse_explicit_traits(attrs: &[Attribute]) -> Result<Option<BTreeSet<PolyZipp
             if meta.path.is_ident("traits") {
                 saw_traits = true;
                 meta.parse_nested_meta(|meta| {
-                    let ident = meta.path.get_ident().ok_or_else(|| {
-                        meta.error("expected trait name identifier")
-                    })?;
+                    let ident = meta
+                        .path
+                        .get_ident()
+                        .ok_or_else(|| meta.error("expected trait name identifier"))?;
                     let trait_kind = PolyZipperTrait::from_ident(ident).ok_or_else(|| {
                         meta.error("unknown trait name in poly_zipper_explicit traits list")
                     })?;
@@ -159,7 +165,6 @@ fn derive_poly_zipper_with_traits(
     traits: BTreeSet<PolyZipperTrait>,
     include_where_clause: bool,
 ) -> TokenStream {
-
     let enum_name = &input.ident;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -202,19 +207,21 @@ fn derive_poly_zipper_with_traits(
         }
     });
 
-    let variant_arms: Vec<_> = variants.iter().map(|variant| {
-        let variant_name = &variant.ident;
-        quote! { Self::#variant_name(inner) }
-    }).collect();
+    let variant_arms: Vec<_> = variants
+        .iter()
+        .map(|variant| {
+            let variant_name = &variant.ident;
+            quote! { Self::#variant_name(inner) }
+        })
+        .collect();
 
-    let inner_types: Vec<_> = variants.iter().map(|variant| {
-        match &variant.fields {
-            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
-                &fields.unnamed[0].ty
-            }
+    let inner_types: Vec<_> = variants
+        .iter()
+        .map(|variant| match &variant.fields {
+            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => &fields.unnamed[0].ty,
             _ => panic!("Each variant must have exactly one unnamed field"),
-        }
-    }).collect();
+        })
+        .collect();
 
     // Generate Zipper trait implementation
     let zipper_impl = if traits.contains(&PolyZipperTrait::Zipper) {
@@ -320,7 +327,9 @@ fn derive_poly_zipper_with_traits(
     let variant_names: Vec<_> = variants.iter().map(|variant| &variant.ident).collect();
 
     // Generate ZipperReadOnlyConditionalValues trait implementation with witness enum
-    let zipper_read_only_conditional_values_impl = if traits.contains(&PolyZipperTrait::ZipperReadOnlyConditionalValues) {
+    let zipper_read_only_conditional_values_impl = if traits
+        .contains(&PolyZipperTrait::ZipperReadOnlyConditionalValues)
+    {
         let zipper_read_only_conditional_values_where = if include_where_clause {
             quote! {
                 where
@@ -631,7 +640,9 @@ fn derive_poly_zipper_with_traits(
     };
 
     // Generate ZipperReadOnlyIteration trait implementation
-    let zipper_read_only_iteration_impl = if traits.contains(&PolyZipperTrait::ZipperReadOnlyIteration) {
+    let zipper_read_only_iteration_impl = if traits
+        .contains(&PolyZipperTrait::ZipperReadOnlyIteration)
+    {
         let variant_arms = &variant_arms;
         let zipper_read_only_iteration_where = if include_where_clause {
             quote! {
@@ -658,7 +669,9 @@ fn derive_poly_zipper_with_traits(
     };
 
     // Generate ZipperReadOnlyConditionalIteration trait implementation
-    let zipper_read_only_conditional_iteration_impl = if traits.contains(&PolyZipperTrait::ZipperReadOnlyConditionalIteration) {
+    let zipper_read_only_conditional_iteration_impl = if traits
+        .contains(&PolyZipperTrait::ZipperReadOnlyConditionalIteration)
+    {
         let zipper_read_only_conditional_iteration_where = if include_where_clause {
             quote! {
                 where
