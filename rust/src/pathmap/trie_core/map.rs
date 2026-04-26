@@ -691,24 +691,7 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     }
 }
 
-#[cfg(feature = "old_cursor")]
-impl<V: Clone + Send + Sync + Unpin> PathMap<V> {
-    /// Returns a [super::old_cursor::PathMapCursor] to traverse all key-value pairs within the map. This
-    /// is more efficient than using [iter](Self::iter), but is not compatible with the [Iterator] trait
-    ///
-    /// NOTE: This API is deprecated in favor of the [read_zipper](Self::read_zipper) method
-    #[deprecated]
-    pub fn cursor<'a>(&'a self) -> super::old_cursor::PathMapCursor<'a, V> {
-        super::old_cursor::PathMapCursor::new(self)
-    }
 
-    /// Returns an [super::old_cursor::AllDenseCursor], which behaves exactly like a [super::old_cursor::PathMapCursor],
-    /// but is only available with the `all_dense_nodes` feature.  This is mainly kept for benchmarking.
-    #[deprecated]
-    pub fn all_dense_cursor<'a>(&'a self) -> super::old_cursor::AllDenseCursor<'a, V> {
-        super::old_cursor::AllDenseCursor::new(self)
-    }
-}
 
 impl<V: Clone + Send + Sync + Unpin, K: AsRef<[u8]>> FromIterator<(K, V)> for PathMap<V> {
     fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
@@ -1232,17 +1215,7 @@ mod tests {
         assert_eq!(a.val_count(), rs.len());
     }
 
-    #[cfg(feature = "old_cursor")]
-    #[test]
-    fn cursor_test() {
-        let table = ["A", "Bcdef", "Ghij", "Klmnopqrst"];
-        let btm: PathMap<usize> = table.iter().enumerate().map(|(n, s)| (s, n)).collect();
-        let mut cursor = btm.cursor();
-        while let Some((k, v)) = cursor.next() {
-            // println!("{}, {v}", std::str::from_utf8(k).unwrap());
-            assert_eq!(k, table[*v].as_bytes());
-        }
-    }
+    
 
     #[test]
     fn map_root_value_test1() {

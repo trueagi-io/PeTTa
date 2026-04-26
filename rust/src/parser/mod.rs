@@ -291,13 +291,13 @@ mod tests {
     fn test_parse_list() {
         let v = parse_metta("(a b c)").unwrap();
         match v {
-            MettaValue::List(items) => {
-                assert_eq!(items.len(), 3);
-                assert_eq!(items[0], MettaValue::Atom("a".into()));
-                assert_eq!(items[1], MettaValue::Atom("b".into()));
-                assert_eq!(items[2], MettaValue::Atom("c".into()));
+            MettaValue::Expression(head, args) => {
+                assert_eq!(head, "a");
+                assert_eq!(args.len(), 2);
+                assert_eq!(args[0], MettaValue::Atom("b".into()));
+                assert_eq!(args[1], MettaValue::Atom("c".into()));
             }
-            _ => panic!("Expected List"),
+            other => panic!("Expected Expression, got {:?}", other),
         }
     }
 
@@ -321,10 +321,10 @@ mod tests {
         match v {
             MettaValue::List(items) => {
                 assert_eq!(items.len(), 2);
-                assert!(matches!(&items[0], MettaValue::List(l) if l.len() == 2));
+                assert!(matches!(&items[0], MettaValue::Expression(h, a) if h == "a" && a.len() == 1));
                 assert_eq!(items[1], MettaValue::Atom("c".into()));
             }
-            _ => panic!("Expected List"),
+            other => panic!("Expected List, got {:?}", other),
         }
     }
 

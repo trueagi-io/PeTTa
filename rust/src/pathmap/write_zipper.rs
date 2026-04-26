@@ -27,21 +27,9 @@ pub trait ZipperWriting<V: Clone + Send + Sync, A: Allocator = GlobalAlloc>:
     /// Returns a mutable reference to a value at the zipper's focus, or None if no value exists
     fn get_val_mut(&mut self) -> Option<&mut V>;
 
-    /// Deprecated alias for [ZipperWriting::get_val_mut]
-    #[deprecated] //GOAT-old-names
-    fn get_value_mut(&mut self) -> Option<&mut V> {
-        self.get_val_mut()
-    }
-
     /// Returns a mutable reference to the value at the zipper's focus, inserting `default` if no
     /// value exists
     fn get_val_or_set_mut(&mut self, default: V) -> &mut V;
-
-    /// Deprecated alias for [ZipperWriting::get_val_or_set_mut]
-    #[deprecated] //GOAT-old-names
-    fn get_value_or_insert(&mut self, default: V) -> &mut V {
-        self.get_val_or_set_mut(default)
-    }
 
     /// Returns a mutable reference to the value at the zipper's focus, inserting the result of `func`
     /// if no value exists
@@ -49,38 +37,17 @@ pub trait ZipperWriting<V: Clone + Send + Sync, A: Allocator = GlobalAlloc>:
     where
         F: FnOnce() -> V;
 
-    /// Deprecated alias for [ZipperWriting::get_val_or_set_mut_with]
-    #[deprecated] //GOAT-old-names
-    fn get_value_or_insert_with<F>(&mut self, func: F) -> &mut V
-    where
-        F: FnOnce() -> V,
-    {
-        self.get_val_or_set_mut_with(func)
-    }
-
     /// Sets the value at the zipper's focus
     ///
     /// Returns `Some(replaced_val)` if an existing value was replaced, otherwise returns `None` if
     /// the value was added without replacing anything.
     fn set_val(&mut self, val: V) -> Option<V>;
 
-    /// Deprecated alias for [ZipperWriting::set_val]
-    #[deprecated] //GOAT-old-names
-    fn set_value(&mut self, val: V) -> Option<V> {
-        self.set_val(val)
-    }
-
     /// Removes the value at the zipper's focus.  Does not affect any onward branches.  Returns `Some(val)`
     /// with the value that was removed, otherwise returns `None`
     ///
     /// Pass `true` to the `prune` argument to automatically remove any dangling path created by this operation.
     fn remove_val(&mut self, prune: bool) -> Option<V>;
-
-    /// Deprecated alias for [ZipperWriting::remove_val]
-    #[deprecated] //GOAT-old-names
-    fn remove_value(&mut self) -> Option<V> {
-        self.remove_val(true)
-    }
 
     /// Creates a [ZipperHead] at the zipper's current focus
     fn zipper_head<'z>(&'z mut self) -> Self::ZipperHead<'z>;
@@ -163,16 +130,6 @@ pub trait ZipperWriting<V: Clone + Send + Sync, A: Allocator = GlobalAlloc>:
     where
         V: Lattice;
 
-    /// Depracated alias for [ZipperWriting::join_into].  Likely to be removed in the future to make way
-    /// for a method that interacts with two read-only arguments and returns a newly constructed subtrie or map.
-    #[deprecated] //GOAT-old-names
-    fn join<Z: ZipperInfallibleSubtries<V, A>>(&mut self, read_zipper: &Z) -> AlgebraicStatus
-    where
-        V: Lattice,
-    {
-        self.join_into(read_zipper)
-    }
-
     /// Joins (union of) the contents of a [PathMap] into the trie below the zipper's focus,
     /// consuming the map
     ///
@@ -186,15 +143,6 @@ pub trait ZipperWriting<V: Clone + Send + Sync, A: Allocator = GlobalAlloc>:
     fn join_map_into(&mut self, map: PathMap<V, A>) -> AlgebraicStatus
     where
         V: Lattice;
-
-    /// Depracated alias for [ZipperWriting::join_map_into]
-    #[deprecated] //GOAT-old-names
-    fn join_map(&mut self, map: PathMap<V, A>) -> AlgebraicStatus
-    where
-        V: Lattice,
-    {
-        self.join_map_into(map)
-    }
 
     /// Joins the subtrie below the focus of `src_zipper` into the subtrie below the focus of `self`,
     /// consuming the subtrie from the `src_zipper`
@@ -225,15 +173,6 @@ pub trait ZipperWriting<V: Clone + Send + Sync, A: Allocator = GlobalAlloc>:
     fn meet_k_path_into(&mut self, byte_cnt: usize, prune: bool) -> bool
     where
         V: Lattice;
-
-    /// Deprecated alias for [ZipperWriting::join_k_path_into]
-    #[deprecated] //GOAT-old-names
-    fn drop_head(&mut self, byte_cnt: usize) -> bool
-    where
-        V: Lattice,
-    {
-        self.join_k_path_into(byte_cnt, true)
-    }
 
     // GOAT QUESTION: Do we want to change the behavior to move the value as well?  Or do we want a variant
     //  of this method that moves the value?  The main guiding idea behind not shifting the value was the desire
@@ -266,15 +205,6 @@ pub trait ZipperWriting<V: Clone + Send + Sync, A: Allocator = GlobalAlloc>:
     where
         V: Lattice;
 
-    /// Deprecated alias for [ZipperWriting::meet_into].  May be replaced in the future with a different method
-    #[deprecated] //GOAT-old-names
-    fn meet<Z: ZipperInfallibleSubtries<V, A>>(&mut self, read_zipper: &Z) -> AlgebraicStatus
-    where
-        V: Lattice,
-    {
-        self.meet_into(read_zipper, true)
-    }
-
     /// Experiment.  GOAT, document this
     fn meet_2<'z, ZA: ZipperInfallibleSubtries<V, A>, ZB: ZipperInfallibleSubtries<V, A>>(
         &mut self,
@@ -293,15 +223,6 @@ pub trait ZipperWriting<V: Clone + Send + Sync, A: Allocator = GlobalAlloc>:
     ) -> AlgebraicStatus
     where
         V: DistributiveLattice;
-
-    /// Deprecated alias for [ZipperWriting::subtract_into]
-    #[deprecated] //GOAT-old-names
-    fn subtract<Z: ZipperInfallibleSubtries<V, A>>(&mut self, read_zipper: &Z) -> AlgebraicStatus
-    where
-        V: DistributiveLattice,
-    {
-        self.subtract_into(read_zipper, true)
-    }
 
     /// Restricts paths in the subtrie downstream of the `self` focus to paths prefixed by a path to a value in
     /// `read_zipper`

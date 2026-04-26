@@ -32,12 +32,6 @@ pub trait Zipper {
     /// Returns `true` if there is a value at the zipper's focus, otherwise `false`
     fn is_val(&self) -> bool;
 
-    /// Deprecated alias for [Zipper::is_val]
-    #[deprecated] //GOAT-old-names
-    fn is_value(&self) -> bool {
-        self.is_val()
-    }
-
     /// Returns the number of child branches from the focus node
     ///
     /// Returns 0 if the focus is on a leaf
@@ -56,12 +50,6 @@ pub trait ZipperValues<V> {
     /// If you have a zipper type that implements [ZipperReadOnlyValues] then [ZipperReadOnlyValues::get_val]
     /// will provide a longer-lived reference to the value.
     fn val(&self) -> Option<&V>;
-
-    /// Deprecated alias for [ZipperValues::val]
-    #[deprecated] //GOAT-old-names
-    fn value(&self) -> Option<&V> {
-        self.val()
-    }
 }
 
 /// Method to fork a read zipper from the parent zipper
@@ -224,12 +212,6 @@ pub trait ZipperMoving: Zipper {
         i
     }
 
-    /// Deprecated alias for [ZipperMoving::descend_to_val]
-    #[deprecated] //GOAT-old-names
-    fn descend_to_value<K: AsRef<[u8]>>(&mut self, k: K) -> usize {
-        self.descend_to_val(k)
-    }
-
     /// Moves the zipper one byte deeper into the trie.  Identical in effect to [descend_to](Self::descend_to)
     /// with a 1-byte key argument
     fn descend_to_byte(&mut self, k: u8) {
@@ -265,12 +247,6 @@ pub trait ZipperMoving: Zipper {
         self.descend_to_byte(child_byte);
         debug_assert!(self.path_exists());
         true
-    }
-
-    /// A deprecated alias for [ZipperMoving::descend_indexed_byte]
-    #[deprecated] //GOAT-old-names
-    fn descend_indexed_branch(&mut self, idx: usize) -> bool {
-        self.descend_indexed_byte(idx)
     }
 
     /// Descends the zipper's focus one step into the first child branch in a depth-first traversal
@@ -443,12 +419,6 @@ pub trait ZipperReadOnlyValues<'a, V>: ZipperValues<V> {
     /// NOTE: Unlike [ZipperValues::val], this method returns a reference with the lifetime of `'a`
     /// instead of the temporary lifetime of the method.
     fn get_val(&self) -> Option<&'a V>;
-
-    /// Deprecated alias for [ZipperReadOnlyValues::get_val]
-    #[deprecated] //GOAT-old-names
-    fn get_value(&self) -> Option<&'a V> {
-        self.get_val()
-    }
 }
 
 /// A [`witness`](ZipperReadOnlyConditionalValues::witness) type used by [`ReadZipperTracked`] and [`ReadZipperOwned`]
@@ -495,12 +465,6 @@ pub trait ZipperReadOnlyIteration<'a, V>: ZipperReadOnlyValues<'a, V> + ZipperIt
         } else {
             None
         }
-    }
-
-    /// Deprecated alias for [ZipperReadOnlyIteration::to_next_get_val]
-    #[deprecated] //GOAT-old-names
-    fn to_next_get_value(&mut self) -> Option<&'a V> {
-        self.to_next_get_val()
     }
 }
 

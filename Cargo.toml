@@ -129,6 +129,6 @@ num-traits = { version = "0.2" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(feature, values("arena_compact", "zipper_tracking", "random", "counters", "viz", "old_cursor", "bridge_nodes", "slim_dispatch", "slim_ptrs", "all_dense_nodes", "graft_root_vals", "nightly", "zipper_alg", "wasm", "z3", "grounding", "neo4j", "interning", "no_search", "specialize_io", "periodic_merkleize", "debug_api", "gxhash", "serialization"))',
+    'cfg(feature, values("arena_compact", "zipper_tracking", "random", "counters", "viz", "bridge_nodes", "slim_dispatch", "slim_ptrs", "all_dense_nodes", "graft_root_vals", "nightly", "zipper_alg", "wasm", "z3", "grounding", "neo4j", "interning", "no_search", "specialize_io", "periodic_merkleize", "debug_api", "gxhash", "serialization"))',
     'cfg(gxhash)',
 ] }

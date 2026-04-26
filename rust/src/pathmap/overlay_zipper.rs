@@ -149,7 +149,7 @@ where
     }
 
     fn val_count(&self) -> usize {
-        todo!()
+        self.a.val_count() + self.b.val_count()
     }
 
     fn descend_to<P: AsRef<[u8]>>(&mut self, path: P) {

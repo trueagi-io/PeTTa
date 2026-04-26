@@ -237,6 +237,7 @@ impl PeTTaEngine {
         self.load_metta_file(path.as_ref())
     }
 
+    #[cfg(feature = "parallel")]
     pub fn load_many(
         &mut self,
         paths: &[impl AsRef<Path>],
