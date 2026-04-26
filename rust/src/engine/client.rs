@@ -9,7 +9,7 @@ use std::time::Instant;
 use tracing::{debug, trace, warn};
 
 use super::config::EngineConfig;
-use super::errors::{PeTTaError, parse_backend_error};
+use super::errors::{parse_backend_error, PeTTaError};
 use crate::engine::values::MettaResult;
 
 /// Manages communication pipes for protocol operations

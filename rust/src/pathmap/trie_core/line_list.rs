@@ -14,7 +14,8 @@ use super::tiny::TinyRefNode;
 
 // Type aliases to reduce complexity in function signatures
 type SetPayloadResult<V, A> = Result<(Option<ValOrChild<V, A>>, bool), TrieNodeODRc<V, A>>;
-type MergeResult<V, A> = Result<AlgebraicResult<LineListNode<V, A>>, AlgebraicResult<DenseByteNode<V, A>>>;
+type MergeResult<V, A> =
+    Result<AlgebraicResult<LineListNode<V, A>>, AlgebraicResult<DenseByteNode<V, A>>>;
 type PathFollowResult<'a, 'k, V, A> = (bool, Option<(&'k [u8], TaggedNodeRef<'a, V, A>)>);
 
 /// A LineListNode stores up to 2 children in a single cache line
@@ -1047,19 +1048,19 @@ impl<V: Clone + Send + Sync, A: Allocator> LineListNode<V, A> {
         }
     }
     /// Sets the payload on the node with the specified key, upgrading the node if necessary.
-/// If `is_child_ptr == true`, this method always returns `(None, _)`, if it's false, will return the
-/// replaced value if there was one.
-///
-/// See [trie_node::TrieNode::node_set_val] for deeper explanation of behavior
-#[inline]
-fn set_payload_abstract<const IS_CHILD: bool>(
-    &mut self,
-    key: &[u8],
-    mut payload: ValOrChildUnion<V, A>,
-) -> SetPayloadResult<V, A>
-where
-    V: Clone,
-{
+    /// If `is_child_ptr == true`, this method always returns `(None, _)`, if it's false, will return the
+    /// replaced value if there was one.
+    ///
+    /// See [trie_node::TrieNode::node_set_val] for deeper explanation of behavior
+    #[inline]
+    fn set_payload_abstract<const IS_CHILD: bool>(
+        &mut self,
+        key: &[u8],
+        mut payload: ValOrChildUnion<V, A>,
+    ) -> SetPayloadResult<V, A>
+    where
+        V: Clone,
+    {
         // A local function to either set a child or a branch on a downstream node
         let set_payload_recursive =
             |mut child: TaggedNodeRefMut<'_, V, A>, node_key, payload: ValOrChildUnion<V, A>| {
@@ -1596,6 +1597,7 @@ fn merge_guts<
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn merge_list_nodes<V: Clone + Send + Sync + Lattice, A: Allocator>(
     a: &LineListNode<V, A>,
     b: &LineListNode<V, A>,
@@ -1800,12 +1802,12 @@ fn merge_list_nodes<V: Clone + Send + Sync + Lattice, A: Allocator>(
         }
     }
 
-//Otherwise, create a DenseByteNode
-let mut joined_node = DenseByteNode::<V, A>::with_capacity_in(entry_cnt, a.alloc.clone());
-for entry in &mut entries[..entry_cnt] {
-    let mut pair: MaybeUninit<(&[u8], ValOrChild<V, A>)> = MaybeUninit::uninit();
-    core::mem::swap(&mut pair, entry);
-    let (key, payload) = unsafe { pair.assume_init() };
+    //Otherwise, create a DenseByteNode
+    let mut joined_node = DenseByteNode::<V, A>::with_capacity_in(entry_cnt, a.alloc.clone());
+    for entry in &mut entries[..entry_cnt] {
+        let mut pair: MaybeUninit<(&[u8], ValOrChild<V, A>)> = MaybeUninit::uninit();
+        core::mem::swap(&mut pair, entry);
+        let (key, payload) = unsafe { pair.assume_init() };
         debug_assert!(!key.is_empty());
         if key.len() > 1 {
             let mut child_node = LineListNode::new_in(a.alloc.clone());

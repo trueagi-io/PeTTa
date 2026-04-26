@@ -746,14 +746,14 @@ pub(crate) mod zipper_priv {
 
         /// Returns an abstracted reference to the node at the zipper's focus
         ///
-/// The meaning of each returned value:
-/// - `AbstractNodeRef::None`: The focus is on a non-existent path
-/// - `BorrowedDyn`: The focus is on an existing node, but the node's `TrieNodeODRc`
-///   is not available so a "shallow copy" (refcount bump) is not possible
-/// - `BorrowedRc`: The focus is on an existing node with accessible `TrieNodeODRc`
-///   (ideal situation - fastest path)
-/// - `BorrowedTiny`: The focus is inside a node, represented by `TinyRefNode`
-/// - `OwnedRc`: A new node was allocated for this position (worst case performance)
+        /// The meaning of each returned value:
+        /// - `AbstractNodeRef::None`: The focus is on a non-existent path
+        /// - `BorrowedDyn`: The focus is on an existing node, but the node's `TrieNodeODRc`
+        ///   is not available so a "shallow copy" (refcount bump) is not possible
+        /// - `BorrowedRc`: The focus is on an existing node with accessible `TrieNodeODRc`
+        ///   (ideal situation - fastest path)
+        /// - `BorrowedTiny`: The focus is inside a node, represented by `TinyRefNode`
+        /// - `OwnedRc`: A new node was allocated for this position (worst case performance)
         fn get_focus(&self) -> AbstractNodeRef<'_, Self::V, Self::A>;
 
         /// Attemps to return a node at the zipper's focus.  Returns `None` if the focus is not
@@ -762,11 +762,11 @@ pub(crate) mod zipper_priv {
         /// DISCUSSION - What's the difference between `try_borrow_focus` and `get_focus`???
         /// The difference is in the intended use each is optimized for.
         ///
-/// * `get_focus`: Returns a node-like object for any existing path, succeeding
-///   regardless of trie structure. Used as source for algebraic and graft operations.
-/// * `try_borrow_focus`: Only returns a node if positioned on a node in the underlying
-///   structure. Enables cutting the structure for safe splitting into independent
-///   regions (e.g., when `ZipperHead` creates a cross-thread `WriteZipper`).
+        /// * `get_focus`: Returns a node-like object for any existing path, succeeding
+        ///   regardless of trie structure. Used as source for algebraic and graft operations.
+        /// * `try_borrow_focus`: Only returns a node if positioned on a node in the underlying
+        ///   structure. Enables cutting the structure for safe splitting into independent
+        ///   regions (e.g., when `ZipperHead` creates a cross-thread `WriteZipper`).
         fn try_borrow_focus(&self) -> Option<&TrieNodeODRc<Self::V, Self::A>>;
     }
 

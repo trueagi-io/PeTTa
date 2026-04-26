@@ -2,7 +2,7 @@
 //! Re-exports external gxhash crate or provides pure-Rust fallback.
 
 #[cfg(all(not(any(miri, target_arch = "riscv64")), feature = "fast-hasher"))]
-pub use ::gxhash::*;
+pub use gxhash::*;
 
 #[cfg(not(all(not(any(miri, target_arch = "riscv64")), feature = "fast-hasher")))]
 mod fallback {
@@ -17,10 +17,7 @@ mod fallback {
     impl GxHasher {
         pub fn with_seed(seed: i64) -> Self {
             let seed = u64::from_ne_bytes(seed.to_ne_bytes());
-            Self {
-                state_lo: seed ^ 0xA5A5A5A5_A5A5A5A5,
-                state_hi: !seed ^ 0x5A5A5A5A_5A5A5A5A,
-            }
+            Self { state_lo: seed ^ 0xA5A5A5A5_A5A5A5A5, state_hi: !seed ^ 0x5A5A5A5A_5A5A5A5A }
         }
 
         pub fn finish_u128(&self) -> u128 {

@@ -1,4 +1,4 @@
-use crate::engine::errors::{parse_backend_error, BackendErrorKind};
+use crate::engine::errors::{BackendErrorKind, parse_backend_error};
 
 #[test]
 fn parse_structured_undefined_function() {
@@ -18,7 +18,9 @@ fn parse_structured_generic() {
     let json = r#"{"kind":"swipl","message":"Something broke","raw":"Some raw text"}"#;
     let kind = parse_backend_error(json);
     match kind {
-        BackendErrorKind::Generic(msg) => assert!(msg.contains("Something broke") || msg.contains("Some raw text")),
+        BackendErrorKind::Generic(msg) => {
+            assert!(msg.contains("Something broke") || msg.contains("Some raw text"))
+        }
         _ => panic!("Expected Generic, got: {:?}", kind),
     }
 }

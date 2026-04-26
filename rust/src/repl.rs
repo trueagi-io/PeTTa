@@ -8,7 +8,7 @@ use std::path::PathBuf;
 #[cfg(feature = "repl")]
 use rustyline::DefaultEditor;
 
-use crate::utils::{cyan, green, red, yellow};
+use petta::utils::{cyan, green, red, yellow};
 use petta::{Backend, EngineConfig, PeTTaEngine};
 
 /// REPL configuration
@@ -22,11 +22,16 @@ pub struct ReplConfig {
 
 impl Default for ReplConfig {
     fn default() -> Self {
+        let history = std::env::var("PETTA_HISTORY").map(PathBuf::from).unwrap_or_else(|_| {
+            let base =
+                dirs::cache_dir().or_else(dirs::home_dir).unwrap_or_else(|| PathBuf::from("/tmp"));
+            base.join("petta").join("history.txt")
+        });
         Self {
             project_root: PathBuf::from("."),
             verbose: false,
             backend: Backend::Swipl,
-            history_file: PathBuf::from("/tmp/petta_history.txt"),
+            history_file: history,
         }
     }
 }
@@ -56,6 +61,9 @@ impl ReplConfig {
 /// Start the interactive REPL
 #[cfg(feature = "repl")]
 pub fn run_repl(config: &ReplConfig) {
+    if let Some(parent) = config.history_file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     let engine_config =
         EngineConfig::new(&config.project_root).verbose(config.verbose).backend(config.backend);
 

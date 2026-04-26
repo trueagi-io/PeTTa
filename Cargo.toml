@@ -35,7 +35,7 @@ tempfile = "3"
 thiserror = "2"
 serde_json = { version = "1.0", features = ["preserve_order"] }
 tracing = "0.1"
-nom = { version = "8", optional = true }
+nom = "8"
 
 # PathMap (inlined from repos/PathMap)
 pathmap-derive = { path = "rust/pathmap-derive" }
@@ -72,6 +72,7 @@ libz-ng-sys = { version = "1.1", optional = true }
 rayon = { version = "1.10", optional = true }
 rustyline = { version = "14", optional = true }
 clap = { version = "4.5", features = ["derive"], optional = true }
+dirs = "6.0.0"
 
 # Make MORK opt-in. Default build uses the SWI-Prolog subprocess backend
 # (stable, works on stable Rust). Enable the MORK backend explicitly with

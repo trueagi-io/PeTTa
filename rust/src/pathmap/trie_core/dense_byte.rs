@@ -12,10 +12,7 @@ use super::line_list::LineListNode;
 use super::node::*;
 
 /// Type alias to reduce complexity in function signatures
-type BothMutResult<'a, V, A> = (
-    Option<&'a mut TrieNodeODRc<V, A>>,
-    Option<&'a mut V>,
-);
+type BothMutResult<'a, V, A> = (Option<&'a mut TrieNodeODRc<V, A>>, Option<&'a mut V>);
 
 /// Type alias to reduce complexity in function signatures
 type BothOwnedResult<V, A> = (Option<TrieNodeODRc<V, A>>, Option<V>);
@@ -1550,8 +1547,8 @@ pub trait CoFree: Clone + Default + Send + Sync {
     fn set_val_option(&mut self, val: Option<Self::V>);
     fn swap_val(&mut self, val: Self::V) -> Option<Self::V>;
     fn take_val(&mut self) -> Option<Self::V>;
-fn both_mut(&mut self) -> BothMutResult<'_, Self::V, Self::A>;
-fn into_both(self) -> BothOwnedResult<Self::V, Self::A>;
+    fn both_mut(&mut self) -> BothMutResult<'_, Self::V, Self::A>;
+    fn into_both(self) -> BothOwnedResult<Self::V, Self::A>;
 }
 
 trait CfShared<OtherCf, A: Allocator>: CoFree {

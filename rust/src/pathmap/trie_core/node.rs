@@ -220,11 +220,12 @@ pub(crate) trait TrieNode<V: Clone + Send + Sync, A: Allocator>:
     /// Steps to the next existing path within the node, in a depth-first order
     ///
     /// Returns `(next_token, path, child_node, value)`
-    /// - `next_token` is the value to pass to a subsequent call of this method.  Returns
-    ///   [NODE_ITER_FINISHED] when there are no more sub-paths
+    /// - `next_token` is the value to pass to a subsequent call of this method. Returns
+    /// [NODE_ITER_FINISHED] when there are no more sub-paths
     /// - `path` is relative to the start of `node`
     /// - `child_node` an onward node link, of `None`
     /// - `value` that exists at the path, or `None`
+    #[allow(clippy::type_complexity)]
     fn next_items(&self, token: u128) -> (u128, &[u8], Option<&TrieNodeODRc<V, A>>, Option<&V>);
 
     /// Returns the total number of leaves contained within the whole subtree defined by the node
@@ -449,10 +450,7 @@ impl<'a, V: Clone + Send + Sync, A: Allocator> PayloadRef<'a, V, A> {
         matches!(self, Self::None)
     }
     pub fn is_val(&self) -> bool {
-        match self {
-            Self::Val(_) => true,
-            _ => false,
-        }
+        matches!(self, Self::Val(_))
     }
     pub fn child(&self) -> &'a TrieNodeODRc<V, A> {
         match self {
@@ -893,6 +891,7 @@ mod tagged_node_ref {
     pub(crate) static EMPTY_NODE: EmptyNode = EmptyNode;
 
     /// A reference to a node with a concrete type
+    #[allow(clippy::enum_variant_names)]
     pub enum TaggedNodeRef<'a, V: Clone + Send + Sync, A: Allocator> {
         DenseByteNode(&'a DenseByteNode<V, A>),
         LineListNode(&'a LineListNode<V, A>),
@@ -903,18 +902,9 @@ mod tagged_node_ref {
         EmptyNode,
     }
     impl<V: Clone + Send + Sync, A: Allocator> Clone for TaggedNodeRef<'_, V, A> {
+        #[inline]
         fn clone(&self) -> Self {
-            //Ugh!  This manual impl is so we can implement `Copy` without a bound on `V: Copy`
-            //But hopefully there is a way to do this without so much boilerplate (or unsafe either)
-            match self {
-                Self::DenseByteNode(node) => Self::DenseByteNode(node),
-                Self::LineListNode(node) => Self::LineListNode(node),
-                #[cfg(feature = "bridge_nodes")]
-                Self::BridgeNode(node) => Self::BridgeNode(node),
-                Self::CellByteNode(node) => Self::CellByteNode(node),
-                Self::TinyRefNode(node) => Self::TinyRefNode(node),
-                Self::EmptyNode => Self::EmptyNode,
-            }
+            *self
         }
     }
     impl<V: Clone + Send + Sync, A: Allocator> Copy for TaggedNodeRef<'_, V, A> {}
@@ -1013,6 +1003,7 @@ mod tagged_node_ref {
     }
 
     /// A mutable reference to a node with a concrete type
+    #[allow(clippy::enum_variant_names)]
     pub enum TaggedNodeRefMut<'a, V: Clone + Send + Sync, A: Allocator> {
         DenseByteNode(&'a mut DenseByteNode<V, A>),
         LineListNode(&'a mut LineListNode<V, A>),
@@ -1107,6 +1098,7 @@ mod tagged_node_ref {
 
     /// A ptr mirror of [TaggedNodeRefMut]
     #[derive(Clone)]
+    #[allow(clippy::enum_variant_names)]
     pub enum TaggedNodePtr<V: Clone + Send + Sync, A: Allocator> {
         DenseByteNode(NonNull<DenseByteNode<V, A>>),
         LineListNode(NonNull<LineListNode<V, A>>),
@@ -1342,6 +1334,7 @@ mod tagged_node_ref {
             }
         }
         #[inline(always)]
+        #[allow(clippy::type_complexity)]
         pub fn next_items(
             &self,
             token: u128,
@@ -1624,10 +1617,7 @@ mod tagged_node_ref {
 
         #[inline(always)]
         pub fn is_cell_node(&self) -> bool {
-            match self {
-                Self::CellByteNode(_) => true,
-                _ => false,
-            }
+            matches!(self, Self::CellByteNode(_))
         }
 
         #[cfg(feature = "counters")]

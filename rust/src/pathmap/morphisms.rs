@@ -308,7 +308,6 @@ pub trait Catamorphism<V> {
 ///
 /// - `alg_f`: `alg(mask: ByteMask, children: &mut [W], path: &[u8]) -> W`
 /// Aggregates the results from the child branches, `children`, descending from `path` into a single result
-
 impl<'a, Z, V: 'a> Catamorphism<V> for Z
 where
     Z: Zipper

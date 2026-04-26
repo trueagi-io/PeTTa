@@ -1,24 +1,4 @@
-//! PeTTa - MeTTa language implementation in Rust + persistent SWI-Prolog subprocess
-//!
-//! This crate embeds SWI-Prolog as a persistent subprocess using a binary
-//! length-prefixed protocol over stdin/stdout pipes. SWI is loaded once at
-//! startup, and all queries go through the same process — no startup overhead.
-//!
-//! # Protocol
-//! ```text
-//! Request (Rust → Prolog):
-//!   [1 byte: type]  'F'(70) = file, 'S'(83) = string, 'Q'(81) = quit
-//!   [4 bytes: payload length, big-endian u32]
-//!   [N bytes: UTF-8 payload]
-//!
-//! Response (Prolog → Rust):
-//!   [1 byte: status]  0 = success, 1 = error
-//!   If 0: [4 bytes: result count] then for each: [4 bytes: str len][N bytes: UTF-8]
-//!   If 1: [4 bytes: error msg len][N bytes: UTF-8 error]
-//! ```
-
 #![cfg_attr(all(test, feature = "mork"), allow(implicit_autoref))]
-// MORK requires nightly Rust for coroutine/zipper features
 #![cfg_attr(feature = "mork", allow(internal_features))]
 #![cfg_attr(feature = "mork", feature(core_intrinsics))]
 #![cfg_attr(feature = "mork", feature(portable_simd))]
@@ -29,56 +9,94 @@
 #![cfg_attr(feature = "mork", feature(gen_blocks))]
 #![cfg_attr(feature = "mork", feature(yield_expr))]
 
+pub mod parser;
+
 #[cfg(feature = "profiling")]
 pub mod profiler;
 
-/// Utility modules
-pub mod utils;
-
-/// MORK (MeTTa Optimal Reduction Kernel) - Zipper-based execution backend.
-///
-/// Inlined from <https://github.com/trueagi-io/MORK>.
-/// Requires nightly Rust when enabled.
 #[cfg(feature = "mork")]
 pub mod mork;
 #[cfg(not(feature = "mork"))]
 mod mork;
 
-/// PathMap - Byte-path-indexed trie with algebraic operations.
-///
-/// Inlined from <https://github.com/Adam-Vandervorst/PathMap>.
 pub mod pathmap;
-
-/// Shared fallback hasher for environments where gxhash is unavailable.
-
-/// Crate-level wrapper for gxhash. This file re-exports either the external
-/// `gxhash` crate or our local `hash_fallback` implementation depending on
-/// platform/feature availability. It allows existing code that refers to
-/// `gxhash::...` to compile against the fallback.
 pub mod gxhash;
+
+mod engine;
+pub use engine::{
+    Backend, BackendErrorKind, EngineConfig, MettaResult, MettaValue, PeTTaEngine, PeTTaError,
+    MIN_SWIPL_VERSION, swipl_available,
+};
 
 #[cfg(feature = "mork")]
 #[doc(hidden)]
 pub use mork::expr::compute_length;
-
-pub mod api;
 #[cfg(feature = "mork")]
 #[doc(hidden)]
 pub use mork::expr::parse as metta_parse_macro;
 
-/// Engine module - contains PeTTaEngine and all supporting types.
-mod engine;
-pub use api::{PeTTa, PeTTaBuilder};
+pub mod utils {
+    fn ansi_color(s: &str, code: u8) -> String {
+        format!("\x1b[{}m{}\x1b[0m", code, s)
+    }
 
-// Re-export engine types for public API.
-pub use engine::{
-    Backend, BackendErrorKind, EngineConfig, MIN_SWIPL_VERSION, MettaResult, MettaValue,
-    PeTTaEngine, PeTTaError, swipl_available,
-};
+    pub fn bold(s: &str) -> String {
+        format!("\x1b[1m{}\x1b[0m", s)
+    }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+    pub fn green(s: &str) -> String {
+        ansi_color(s, 32)
+    }
+    pub fn red(s: &str) -> String {
+        ansi_color(s, 31)
+    }
+    pub fn yellow(s: &str) -> String {
+        ansi_color(s, 33)
+    }
+    pub fn cyan(s: &str) -> String {
+        ansi_color(s, 36)
+    }
+
+    pub fn format_duration_ms(ms: f64) -> String {
+        if ms < 1.0 {
+            cyan(&format!("{:.2}μs", ms * 1000.0))
+        } else if ms < 1000.0 {
+            green(&format!("{:.2}ms", ms))
+        } else {
+            yellow(&format!("{:.2}s", ms / 1000.0))
+        }
+    }
+
+    pub fn truncate(s: &str, max_len: usize) -> &str {
+        if s.len() <= max_len { s } else { &s[..max_len.saturating_sub(3) + 3] }
+    }
+
+    pub fn word_wrap(text: &str, width: usize) -> String {
+        if width == 0 {
+            return text.to_string();
+        }
+        let mut result = String::new();
+        let mut line_len = 0;
+        for word in text.split_whitespace() {
+            let word_len = word.len();
+            if line_len + word_len + 1 > width {
+                if !result.is_empty() {
+                    result.push('\n');
+                }
+                result.push_str(word);
+                line_len = word_len;
+            } else {
+                if line_len > 0 {
+                    result.push(' ');
+                    line_len += 1;
+                }
+                result.push_str(word);
+                line_len += word_len;
+            }
+        }
+        result
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -100,6 +118,7 @@ mod tests {
         }
         assert!(r.is_ok());
     }
+
     #[test]
     fn test_booleansolver() {
         let mut e = make_engine();
@@ -121,6 +140,7 @@ mod tests {
             }
         }
     }
+
     #[test]
     fn test_identity() {
         let mut e = make_engine();
@@ -128,6 +148,7 @@ mod tests {
         assert!(!r.is_empty());
         assert_eq!(r[0].value, "42");
     }
+
     #[test]
     fn test_arithmetic() {
         let mut e = make_engine();
@@ -135,12 +156,14 @@ mod tests {
         assert!(!r.is_empty());
         assert_eq!(r[0].value, "3");
     }
+
     #[test]
     fn test_load_identity_file() {
         let mut e = make_engine();
         let r = e.load_metta_file(&project_root().join("examples/identity.metta")).unwrap();
         assert!(!r.is_empty());
     }
+
     #[test]
     fn test_boolean() {
         let mut e = make_engine();
@@ -148,6 +171,7 @@ mod tests {
         assert!(!r.is_empty());
         assert_eq!(r[0].value, "false");
     }
+
     #[test]
     fn test_comparison() {
         let mut e = make_engine();
@@ -155,30 +179,35 @@ mod tests {
         assert!(!r.is_empty());
         assert_eq!(r[0].value, "true");
     }
+
     #[test]
     fn test_fibonacci() {
         let mut e = make_engine();
         let r = e.load_metta_file(&project_root().join("examples/fib.metta")).unwrap();
         assert!(!r.is_empty());
     }
+
     #[test]
     fn test_state() {
         let mut e = make_engine();
         let r = e.load_metta_file(&project_root().join("examples/state.metta")).unwrap();
         assert!(!r.is_empty());
     }
+
     #[test]
     fn test_if() {
         let mut e = make_engine();
         let r = e.load_metta_file(&project_root().join("examples/if.metta")).unwrap();
         assert!(!r.is_empty());
     }
+
     #[test]
     fn test_math() {
         let mut e = make_engine();
         let r = e.load_metta_file(&project_root().join("examples/math.metta")).unwrap();
         assert!(!r.is_empty());
     }
+
     #[test]
     fn test_variable_renaming() {
         let mut e = make_engine();
@@ -187,6 +216,7 @@ mod tests {
         let v = &r[0].value;
         assert!(v.contains("$") && v.contains('x'), "Expected variable pattern, got: {}", v);
     }
+
     #[test]
     fn test_file_imports() {
         let mut e = make_engine();
@@ -195,6 +225,7 @@ mod tests {
         let r = e.process_metta_string(&format!("{}\n!(f 5)", id)).unwrap();
         assert!(r.iter().any(|x| x.value == "25"), "Expected '25': {:?}", r);
     }
+
     #[test]
     fn test_verbose_mode() {
         let root = project_root();
@@ -203,28 +234,34 @@ mod tests {
         assert!(!r.is_empty());
         assert_eq!(r[0].value, "3");
     }
+
     #[test]
     fn test_parse_int() {
         assert_eq!(MettaValue::parse("42"), Some(MettaValue::Integer("42".into())));
     }
+
     #[test]
     fn test_parse_bool() {
         assert_eq!(MettaValue::parse("true"), Some(MettaValue::Bool(true)));
         assert_eq!(MettaValue::parse("false"), Some(MettaValue::Bool(false)));
     }
+
     #[test]
     fn test_parse_float() {
         assert_eq!(MettaValue::parse("3.14"), Some(MettaValue::Float(3.14)));
     }
+
     #[test]
     fn test_parse_atom() {
         assert_eq!(MettaValue::parse("hello"), Some(MettaValue::Atom("hello".into())));
     }
+
     #[test]
     fn test_parse_list() {
         let v = MettaValue::parse("(1 2 3)");
         assert!(matches!(v, Some(MettaValue::List(ref items)) if items.len() == 3));
     }
+
     #[test]
     fn test_parse_expression() {
         let v = MettaValue::parse("(+ 1 2)");
@@ -232,6 +269,7 @@ mod tests {
             matches!(v, Some(MettaValue::Expression(ref f, ref args)) if f == "+" && args.len() == 2)
         );
     }
+
     #[test]
     fn test_parse_undefined_function_error() {
         assert!(matches!(
@@ -239,6 +277,7 @@ mod tests {
             BackendErrorKind::UndefinedFunction { name: _, arity: 2, .. }
         ));
     }
+
     #[test]
     fn test_parse_stack_overflow() {
         assert!(matches!(
@@ -246,6 +285,7 @@ mod tests {
             BackendErrorKind::StackOverflow { .. }
         ));
     }
+
     #[test]
     fn test_result_parsed_value() {
         let r = MettaResult { value: "42".into() };
@@ -279,10 +319,8 @@ mod tests {
     fn test_error_display() {
         let e = PeTTaError::FileNotFound(PathBuf::from("/nonexistent"));
         assert!(e.to_string().contains("/nonexistent"));
-
         let e = PeTTaError::ProtocolError("test error".into());
         assert!(e.to_string().contains("test error"));
-
         let e = BackendErrorKind::UndefinedFunction {
             name: "foo".into(),
             arity: 2,

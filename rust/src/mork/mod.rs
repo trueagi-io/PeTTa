@@ -7,12 +7,12 @@
 //! `mork` feature is enabled.
 
 #[cfg(feature = "mork")]
+pub mod execution;
+#[cfg(feature = "mork")]
 pub mod expr;
 #[cfg(feature = "mork")]
 pub mod frontend;
 #[cfg(feature = "mork")]
 pub mod interning;
-#[cfg(feature = "mork")]
-pub mod execution;
 #[cfg(feature = "mork")]
 pub mod space;

@@ -12,13 +12,13 @@
 //! combinators instead of DCG rules. It produces `MettaValue` AST nodes.
 
 use nom::{
-    IResult, Parser,
     branch::alt,
     bytes::complete::{tag, take_while1},
     character::complete::{char, multispace0},
     combinator::{map, opt, value},
     multi::many0,
     sequence::{delimited, preceded, terminated},
+    IResult, Parser,
 };
 
 use crate::MettaValue;
@@ -67,53 +67,16 @@ fn parenthesized_list(input: &str) -> IResult<&str, MettaValue> {
     .parse(input)?;
 
     if items.is_empty() {
-        Ok((rest, MettaValue::List(vec![])))
-    } else {
-        // Heuristic: if first item is a single-char operator-like atom (+, -, *, /, <, >, =, etc.)
-        // and there are more items, treat as Expression (function application).
-        // Otherwise treat as List.
-        if items.len() > 1 {
-            if let MettaValue::Atom(ref head) = items[0] {
-                let is_operator = matches!(
-                    head.as_str(),
-                    "+" | "-"
-                        | "*"
-                        | "/"
-                        | "%"
-                        | "<"
-                        | ">"
-                        | "="
-                        | "!"
-                        | "?"
-                        | ":"
-                        | "if"
-                        | "case"
-                        | "let"
-                        | "lambda"
-                        | "->"
-                        | "|->"
-                        | "superpose"
-                        | "collapse"
-                        | "match"
-                        | "bind!"
-                        | "add-atom"
-                        | "remove-atom"
-                );
-                if is_operator {
-                    let head = items[0].clone();
-                    let args = items.into_iter().skip(1).collect();
-                    return Ok((
-                        rest,
-                        MettaValue::Expression(
-                            if let MettaValue::Atom(h) = head { h } else { unreachable!() },
-                            args,
-                        ),
-                    ));
-                }
-            }
-        }
-        Ok((rest, MettaValue::List(items)))
+        return Ok((rest, MettaValue::List(vec![])));
     }
+    // If head is an Atom and there are more items, treat as Expression (function application)
+    if let MettaValue::Atom(head) = items[0].clone() {
+        if items.len() > 1 {
+            let args = items.into_iter().skip(1).collect();
+            return Ok((rest, MettaValue::Expression(head, args)));
+        }
+    }
+    Ok((rest, MettaValue::List(items)))
 }
 
 /// Parse a string literal: `"hello"`

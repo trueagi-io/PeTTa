@@ -117,82 +117,55 @@ impl PeTTaEngine {
         self.stdin_pipe.is_some() && self.stdout_pipe.is_some()
     }
 
-    /// Load and execute a MeTTa file
-    pub fn load_metta_file(&mut self, file_path: &Path) -> Result<Vec<MettaResult>, PeTTaError> {
+    fn with_crash_retry<F>(&mut self, f: F) -> Result<Vec<MettaResult>, PeTTaError>
+    where
+        F: Fn(
+            &mut Option<std::process::ChildStdin>,
+            &mut Option<BufReader<std::process::ChildStdout>>,
+            &EngineConfig,
+        ) -> Result<Vec<MettaResult>, PeTTaError>,
+    {
         let mut attempts = 0u32;
         loop {
-            let r = load_metta_file(
-                &mut self.stdin_pipe,
-                &mut self.stdout_pipe,
-                file_path,
-                &self.config,
-            );
-            match r {
+            match f(&mut self.stdin_pipe, &mut self.stdout_pipe, &self.config) {
                 Err(PeTTaError::ProtocolError(ref msg)) if msg.contains("child closed") => {
                     if attempts >= self.config.max_restarts {
                         return Err(PeTTaError::SubprocessCrashed { restarts: self.restart_count });
                     }
                     attempts += 1;
                     self.restart_subprocess()?;
-                    continue;
                 }
                 other => return other,
             }
         }
     }
 
-    /// Load and execute multiple MeTTa files
+    pub fn load_metta_file(&mut self, file_path: &Path) -> Result<Vec<MettaResult>, PeTTaError> {
+        let path = file_path.to_path_buf();
+        self.with_crash_retry(move |stdin, stdout, config| {
+            load_metta_file(stdin, stdout, &path, config)
+        })
+    }
+
     pub fn load_metta_files(
         &mut self,
         file_paths: &[&Path],
     ) -> Result<Vec<MettaResult>, PeTTaError> {
-        let mut attempts = 0u32;
-        loop {
-            let r = load_metta_files(
-                &mut self.stdin_pipe,
-                &mut self.stdout_pipe,
-                file_paths,
-                &self.config,
-            );
-            match r {
-                Err(PeTTaError::ProtocolError(ref msg)) if msg.contains("child closed") => {
-                    if attempts >= self.config.max_restarts {
-                        return Err(PeTTaError::SubprocessCrashed { restarts: self.restart_count });
-                    }
-                    attempts += 1;
-                    self.restart_subprocess()?;
-                    continue;
-                }
-                other => return other,
-            }
-        }
+        let paths: Vec<std::path::PathBuf> = file_paths.iter().map(|p| p.to_path_buf()).collect();
+        self.with_crash_retry(move |stdin, stdout, config| {
+            let refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
+            load_metta_files(stdin, stdout, &refs, config)
+        })
     }
 
-    /// Process a MeTTa string
     pub fn process_metta_string(
         &mut self,
         metta_code: &str,
     ) -> Result<Vec<MettaResult>, PeTTaError> {
-        let mut attempts = 0u32;
-        loop {
-            let r = process_metta_string(
-                &mut self.stdin_pipe,
-                &mut self.stdout_pipe,
-                metta_code,
-                &self.config,
-            );
-            match r {
-                Err(PeTTaError::ProtocolError(ref msg)) if msg.contains("child closed") => {
-                    if attempts >= self.config.max_restarts {
-                        return Err(PeTTaError::SubprocessCrashed { restarts: self.restart_count });
-                    }
-                    attempts += 1;
-                    self.restart_subprocess()?;
-                    continue;
-                }
-                other => return other,
-            }
-        }
+        let code = metta_code.to_string();
+        self.with_crash_retry(move |stdin, stdout, config| {
+            process_metta_string(stdin, stdout, &code, config)
+        })
     }
 
     /// Get the stderr output from the Prolog subprocess
@@ -223,6 +196,53 @@ impl PeTTaEngine {
         if let Some(mut child) = self.child.take() {
             let _ = child.wait();
         }
+    }
+
+    pub fn builder(project_root: &Path) -> EngineConfig {
+        EngineConfig::new(project_root)
+    }
+
+    pub fn eval(&mut self, expr: &str) -> Result<MettaResult, PeTTaError> {
+        let results = self.process_metta_string(expr)?;
+        Ok(results.into_iter().next().unwrap_or(MettaResult { value: String::new() }))
+    }
+
+    pub fn eval_int(&mut self, expr: &str) -> Result<i64, PeTTaError> {
+        let result = self.eval(expr)?;
+        result.value.parse().map_err(|_| {
+            PeTTaError::ProtocolError(format!("Expected integer, got: {}", result.value))
+        })
+    }
+
+    pub fn eval_float(&mut self, expr: &str) -> Result<f64, PeTTaError> {
+        let result = self.eval(expr)?;
+        result.value.parse().map_err(|_| {
+            PeTTaError::ProtocolError(format!("Expected float, got: {}", result.value))
+        })
+    }
+
+    pub fn eval_bool(&mut self, expr: &str) -> Result<bool, PeTTaError> {
+        let result = self.eval(expr)?;
+        result
+            .value
+            .parse()
+            .map_err(|_| PeTTaError::ProtocolError(format!("Expected bool, got: {}", result.value)))
+    }
+
+    pub fn eval_str(&mut self, expr: &str) -> Result<String, PeTTaError> {
+        self.eval(expr).map(|r| r.value)
+    }
+
+    pub fn load(&mut self, path: impl AsRef<Path>) -> Result<Vec<MettaResult>, PeTTaError> {
+        self.load_metta_file(path.as_ref())
+    }
+
+    pub fn load_many(
+        &mut self,
+        paths: &[impl AsRef<Path>],
+    ) -> Result<Vec<MettaResult>, PeTTaError> {
+        let paths: Vec<&Path> = paths.iter().map(|p| p.as_ref()).collect();
+        self.load_metta_files(&paths)
     }
 
     // Profiling methods

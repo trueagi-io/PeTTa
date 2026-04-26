@@ -274,10 +274,8 @@ fn test_engine_sequential_file_loads() {
 #[test]
 fn test_engine_load_multiple_files() {
     let mut e = make_engine();
-    let files = vec![
-        project_root().join("examples/identity.metta"),
-        project_root().join("examples/if.metta"),
-    ];
+    let files =
+        [project_root().join("examples/identity.metta"), project_root().join("examples/if.metta")];
     let file_refs: Vec<&std::path::Path> = files.iter().map(|p| p.as_path()).collect();
     let results = e.load_metta_files(&file_refs);
     assert!(results.is_ok());
@@ -333,7 +331,7 @@ fn test_protocol_string_special_characters() {
     // Test special characters in strings
     let results = e.process_metta_string(r#"(= (test-str) "hello\tworld\n")"#).unwrap();
     // Should not crash
-    assert!(results.is_empty() || true);
+    let _ = results;
 }
 
 #[test]

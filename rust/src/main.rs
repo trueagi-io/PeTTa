@@ -2,10 +2,9 @@
 
 mod cli;
 mod repl;
-mod utils;
 
 use cli::{BackendArg, Cli};
-use utils::{cyan, green, red, yellow};
+use petta::utils::{cyan, green, red, yellow};
 
 use clap::Parser;
 use std::path::Path;
@@ -183,7 +182,11 @@ fn run_engine_files(
         }
     }
 
-    if had_failure { Err(()) } else { Ok(()) }
+    if had_failure {
+        Err(())
+    } else {
+        Ok(())
+    }
 }
 
 /// Main file execution function
