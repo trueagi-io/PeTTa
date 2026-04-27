@@ -1,0 +1,37 @@
+[package]
+name = "pathmap"
+version = "0.2.2"
+edition = "2024"
+license = "MIT"
+description = "Efficient trie-based data structure with zipper navigation for MeTTa atom spaces"
+repository = "https://github.com/patham9/petta"
+readme = "README.md"
+
+[features]
+default = ["derive-macros"]
+fast-hasher = ["dep:gxhash"]
+serialization = ["dep:libz-ng-sys"]
+mork = ["serialization"]
+arena_compact = []
+zipper_tracking = []
+random = ["dep:rand"]
+counters = []
+viz = []
+pathmap-internal-tests = []
+derive-macros = ["dep:pathmap-derive"]
+
+[dependencies]
+pathmap-derive = { path = "../pathmap-derive", optional = true }
+gxhash = { version = "3.5", optional = true }
+dyn-clone = "1.0"
+local-or-heap = "0.1.0"
+arrayvec = "0.7.6"
+fast-slice-utils = "0.1.2"
+maybe-dangling = "0.1.1"
+reusing-vec = { version = "0.2.0", features = ["smallvec"] }
+rand = { version = "0.9", optional = true }
+smallvec = { version = "1.13", features = ["union"] }
+memmap2 = "0.9.5"
+xxhash-rust = { version = "0.8", features = ["xxh64", "xxh3", "const_xxh3"] }
+num-traits = "0.2"
+libz-ng-sys = { version = "1.1", optional = true }

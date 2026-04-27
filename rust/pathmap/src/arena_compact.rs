@@ -636,7 +636,7 @@ where
                     }
                     cur_node = self.get_node(line.child?).0;
                 }
-Node::Branch(node) => {
+                Node::Branch(node) => {
                     if path.is_empty() {
                         return node.value;
                     }
@@ -646,12 +646,7 @@ Node::Branch(node) => {
                     path = &path[1..];
                 }
             }
-            if path.is_empty() {
-                break;
-            }
-        }
-        None
-    }
+}
 }
 
 impl<Storage> ArenaCompactTree<Storage>
@@ -1737,6 +1732,10 @@ where
     ///
     /// If the focus is already on a value, this method will descend to the *next* value along
     /// the path.
+    fn descend_to_value<K: AsRef<[u8]>>(&mut self, path: K) -> usize {
+        self.descend_cond(path.as_ref(), true)
+    }
+
     fn descend_to_val<K: AsRef<[u8]>>(&mut self, path: K) -> usize {
         self.descend_cond(path.as_ref(), true)
     }

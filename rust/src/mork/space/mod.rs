@@ -655,7 +655,7 @@ impl Space {
                     ez.reset();
                     ez.write_arity(a);
                     wz.descend_to(&stack[..total]);
-                    wz.set_value(());
+                    wz.set_val(());
                     wz.reset();
                     i += 1;
                 }
@@ -715,7 +715,7 @@ impl Space {
             }
             let new_data = &buf[..oz.loc];
             wz.descend_to(&new_data[constant_template_prefix.len()..]);
-            wz.set_value(());
+            wz.set_val(());
             wz.reset();
             i += 1;
         }
@@ -958,7 +958,7 @@ impl Space {
                         wz.descend_to_byte(item_byte(Tag::SymbolSize(internal_v.len() as _)));
                         wz.descend_to(internal_v);
 
-                        wz.set_value(());
+wz.set_val(());
 
                         wz.ascend(internal_v.len() + 1);
                     }
@@ -967,7 +967,7 @@ impl Space {
                     wz.descend_to_byte(item_byte(Tag::SymbolSize(internal_v.len() as _)));
                     wz.descend_to(internal_v);
 
-                    wz.set_value(());
+                    wz.set_val(());
 
                     wz.ascend(internal_v.len() + 1);
                 }
@@ -1028,7 +1028,7 @@ impl Space {
                 wz.descend_to_byte(item_byte(Tag::SymbolSize(internal_v.len() as _)));
                 wz.descend_to(internal_v);
 
-                wz.set_value(());
+                wz.set_val(());
 
                 wz.ascend(internal_v.len() + 1);
 
@@ -1348,26 +1348,29 @@ impl Space {
     ) -> Resource<'trie, 'path> {
         match request {
             ResourceRequest::BTM(prefix) => {
-                Resource::BTM(btm.as_ref().unwrap().read_zipper_at_path(prefix))
+                Resource::BTM(unsafe { btm.as_ref().unwrap().read_zipper_at_path(prefix) })
             }
             ResourceRequest::ACT(name) => {
-                let act =
-                    mmaps.as_mut().unwrap().entry(OwnedSourceItem::from(name)).or_insert_with(
-                        || {
+                let act = unsafe {
+                    mmaps.as_mut()
+                        .unwrap()
+                        .entry(OwnedSourceItem::from(name))
+                        .or_insert_with(|| {
                             trace!(target: "query_multi_i", "open new ACT {}", name);
                             ArenaCompactTree::open_mmap(format!("{ACT_PATH}{name}.act")).unwrap()
-                        },
-                    );
+                        })
+                };
                 trace!(target: "query_multi_i", "taking RZ of {}", name);
                 Resource::ACT(act.read_zipper())
             }
             ResourceRequest::Z3(instance) => {
                 trace!(target: "query_multi_i", "getting z3 instance");
-                let mut z3 = z3s
-                    .as_mut()
-                    .unwrap()
-                    .get_mut(&OwnedSourceItem::from(instance))
-                    .unwrap_or_else(|| panic!("non existent z3 {}", instance));
+                let mut z3 = unsafe {
+                    z3s.as_mut()
+                        .unwrap()
+                        .get_mut(&OwnedSourceItem::from(instance))
+                        .unwrap_or_else(|| panic!("non existent z3 {}", instance))
+                };
                 z3.stdin
                     .as_mut()
                     .expect("access to z3 stdin")
@@ -1420,8 +1423,8 @@ impl Space {
     {
         match *request {
             WriteResourceRequest::BTM(p) => {
-                let zh = zh_wzs.0.as_mut().unwrap();
-                let wzs = zh_wzs.1.as_mut::<'w>().unwrap();
+                let zh = unsafe { zh_wzs.0.as_mut().unwrap() };
+                let wzs = unsafe { zh_wzs.1.as_mut::<'w>().unwrap() };
                 wzs.push(zh.write_zipper_at_exclusive_path_unchecked(p));
                 WriteResource::BTM(wzs.last_mut().unwrap())
             }
@@ -1431,21 +1434,22 @@ impl Space {
                 cfg.stdin = Redirection::Pipe;
                 cfg.stdout = Redirection::Pipe;
                 trace!(target: "transform", "retrieving z3 instance");
-                let instance = z3s
-                    .as_mut()
-                    .unwrap()
-                    .entry(OwnedSourceItem::from(f))
-                    .or_insert_with(|| {
-                        trace!(target: "transform", "creating new z3 popen");
-                        // let bpopen = Box::new(Popen::create(&["python", "resources/fake_cli.py", "-in", "-smt2"], cfg).unwrap());
-                        let bpopen = Box::new(
-                            Popen::create(&["z3", "-in", "-smt2"], cfg)
-                                .expect("z3: command not found"),
-                        );
-                        trace!(target: "transform", "created new z3 popen");
-                        bpopen
-                    })
-                    .as_mut();
+                let instance = unsafe {
+                    z3s.as_mut()
+                        .unwrap()
+                        .entry(OwnedSourceItem::from(f))
+                        .or_insert_with(|| {
+                            trace!(target: "transform", "creating new z3 popen");
+                            // let bpopen = Box::new(Popen::create(&["python", "resources/fake_cli.py", "-in", "-smt2"], cfg).unwrap());
+                            let bpopen = Box::new(
+                                Popen::create(&["z3", "-in", "-smt2"], cfg)
+                                    .expect("z3: command not found"),
+                            );
+                            trace!(target: "transform", "created new z3 popen");
+                            bpopen
+                        })
+                        .as_mut()
+                };
                 WriteResource::Z3(instance)
             }
         }

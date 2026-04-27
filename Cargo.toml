@@ -10,12 +10,12 @@ repository = "https://github.com/patham9/petta"
 keywords = ["metta", "logic", "prolog", "agi", "trueagi"]
 categories = ["compilers", "parser-implementations"]
 
-# Workspace: petta + pathmap-derive (proc-macro for inlined PathMap)
+# Workspace: petta + pathmap (unified) + pathmap-macros (derive macros)
 [workspace]
 resolver = "2"
 members = [
     ".",
-    "rust/pathmap-derive",
+    "rust/pathmap-macros",
 ]
 default-members = ["."]
 
@@ -38,7 +38,7 @@ tracing = "0.1"
 nom = "8"
 
 # PathMap (inlined from repos/PathMap)
-pathmap-derive = { path = "rust/pathmap-derive" }
+pathmap-macros = { path = "rust/pathmap-macros" }
 
 # PathMap internal dependencies (compiled when needed). Make gxhash optional
 # so a default stable build does not require AES/SSE2 CPU features.
@@ -104,7 +104,8 @@ profiling = []
 
 # Workspace dependencies
 [workspace.dependencies]
-pathmap-derive = { path = "rust/pathmap-derive" }
+pathmap = { path = "rust/src/pathmap", default-features = false }
+pathmap-macros = { path = "rust/pathmap-macros" }
 smallvec = { version = "1.13", features = ["union"] }
 xxhash-rust = { version = "0.8", features = ["xxh64", "xxh3", "const_xxh3"] }
 fast-slice-utils = "0.1.2"

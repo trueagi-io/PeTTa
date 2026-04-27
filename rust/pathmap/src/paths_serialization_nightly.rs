@@ -1,6 +1,7 @@
 //! Nightly-only paths serialization using coroutines
 
 use super::*;
+use super::paths_serialization::SerializationStats;
 
 /// Returns a coroutine to incrementally serialize into `.paths` data and write to `target`
 ///
@@ -10,7 +11,7 @@ pub fn paths_serialization_sink<'p, W: std::io::Write>(
     target: &mut W,
 ) -> impl std::ops::Coroutine<Option<&'p [u8]>, Yield = (), Return = std::io::Result<SerializationStats>>
 {
-    use serialize_paths_from_funcs;
+    use super::paths_serialization::serialize_paths_from_funcs;
 
     #[coroutine]
     move |mut i: Option<&'p [u8]>| {
@@ -30,6 +31,5 @@ pub fn paths_serialization_sink<'p, W: std::io::Write>(
             },
         );
         yield ();
-        Ok(SerializationStats { path_count: k, bytes_out: 0, bytes_in: 0 })
     }
 }

@@ -40,7 +40,7 @@ use super::zipper::*;
 ///     Untracked(ReadZipperUntracked<'trie, 'path, V>),
 /// }
 /// ```ignore
-pub use pathmap_macros::PolyZipper;
+pub use pathmap_derive::PolyZipper;
 
 /// Variant of [`PolyZipper`] that allows selecting which traits are derived.
 ///
@@ -58,7 +58,7 @@ pub use pathmap_macros::PolyZipper;
 ///     Untracked(ReadZipperUntracked<'trie, 'path, V>),
 /// }
 /// ```ignore
-pub use pathmap_macros::PolyZipperExplicit;
+pub use pathmap_derive::PolyZipperExplicit;
 
 #[cfg(all(test, feature = "pathmap-internal-tests"))]
 mod tests {

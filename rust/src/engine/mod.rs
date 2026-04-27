@@ -4,6 +4,11 @@
 //! protocol via stdin/stdout pipes. A single Prolog process lives for the
 //! entire session, eliminating startup overhead.
 
+#[cfg(feature = "mork")]
+mod mork_engine;
+#[cfg(feature = "mork")]
+use crate::engine::mork_engine::MORKEngine;
+
 mod client;
 mod config;
 pub(crate) mod errors;
@@ -12,7 +17,8 @@ mod subprocess;
 mod values;
 mod version;
 
-pub use config::{Backend, EngineConfig};
+pub use config::Backend;
+pub use config::EngineConfig;
 pub use errors::{BackendErrorKind, PeTTaError};
 pub use values::{MettaResult, MettaValue};
 pub use version::{MIN_SWIPL_VERSION, swipl_available};
@@ -41,6 +47,8 @@ pub struct PeTTaEngine {
     stderr_output: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
     config: EngineConfig,
     restart_count: u32,
+    #[cfg(feature = "mork")]
+    mork: Option<MORKEngine>,
 }
 
 impl PeTTaEngine {
@@ -59,6 +67,23 @@ impl PeTTaEngine {
             config.max_restarts
         );
 
+        // If configured to use the native MORK backend, create and return that
+        #[cfg(feature = "mork")]
+        if config.backend == Backend::Mork {
+            let mork = MORKEngine::new();
+            let mut engine = Self {
+                child: None,
+                stdin_pipe: None,
+                stdout_pipe: None,
+                stderr_output: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                config: config.clone(),
+                restart_count: 0,
+                mork: Some(mork),
+            };
+            info!("PeTTaEngine (MORK) initialized successfully");
+            return Ok(engine);
+        }
+
         let manager = SubprocessManager::new(config.clone());
         let (child, stdin, stdout, stderr_output) = manager.spawn()?;
 
@@ -69,6 +94,8 @@ impl PeTTaEngine {
             stderr_output,
             config: config.clone(),
             restart_count: 0,
+            #[cfg(feature = "mork")]
+            mork: None,
         };
 
         // Wait for the ready signal (0xFF)
@@ -85,6 +112,11 @@ impl PeTTaEngine {
     /// Attempt to restart the subprocess
     fn restart_subprocess(&mut self) -> Result<(), PeTTaError> {
         info!("Attempting to restart SWI-Prolog subprocess");
+        #[cfg(feature = "mork")]
+        if self.config.backend == Backend::Mork {
+            // nothing to restart for the in-process MORK backend
+            return Ok(());
+        }
         let manager = SubprocessManager::new(self.config.clone());
         let (child, stdin, stdout, stderr_output) = manager.spawn()?;
 
@@ -112,6 +144,12 @@ impl PeTTaEngine {
 
     /// Check if the Prolog subprocess is alive and responsive
     pub fn is_alive(&mut self) -> bool {
+        #[cfg(feature = "mork")]
+        {
+            if self.config.backend == Backend::Mork {
+                return self.mork.is_some();
+            }
+        }
         self.stdin_pipe.is_some() && self.stdout_pipe.is_some()
     }
 
@@ -139,6 +177,15 @@ impl PeTTaEngine {
     }
 
     pub fn load_metta_file(&mut self, file_path: &Path) -> Result<Vec<MettaResult>, PeTTaError> {
+        #[cfg(feature = "mork")]
+        if self.config.backend == Backend::Mork {
+            // For MORK, read the file and add atoms directly
+            let s = std::fs::read_to_string(file_path).map_err(|e| PeTTaError::PathError(e.to_string()))?;
+            if let Some(m) = self.mork.as_mut() {
+                m.add_atoms(&s).map_err(|e| PeTTaError::PathError(e))?;
+                return Ok(vec![MettaResult { value: "OK".into() }]);
+            }
+        }
         let path = file_path.to_path_buf();
         self.with_crash_retry(move |stdin, stdout, config| {
             load_metta_file(stdin, stdout, &path, config)
@@ -149,6 +196,17 @@ impl PeTTaEngine {
         &mut self,
         file_paths: &[&Path],
     ) -> Result<Vec<MettaResult>, PeTTaError> {
+        #[cfg(feature = "mork")]
+        if self.config.backend == Backend::Mork {
+            for p in file_paths {
+                let s = std::fs::read_to_string(p).map_err(|e| PeTTaError::PathError(e.to_string()))?;
+                if let Some(m) = self.mork.as_mut() {
+                    m.add_atoms(&s).map_err(|e| PeTTaError::PathError(e))?;
+                }
+            }
+            return Ok(vec![MettaResult { value: "OK".into() }]);
+        }
+
         let paths: Vec<std::path::PathBuf> = file_paths.iter().map(|p| p.to_path_buf()).collect();
         self.with_crash_retry(move |stdin, stdout, config| {
             let refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
@@ -160,6 +218,15 @@ impl PeTTaEngine {
         &mut self,
         metta_code: &str,
     ) -> Result<Vec<MettaResult>, PeTTaError> {
+        #[cfg(feature = "mork")]
+        if self.config.backend == Backend::Mork {
+            if let Some(m) = self.mork.as_mut() {
+                let out = m.process(metta_code);
+                let results = out.into_iter().map(|s| MettaResult { value: s }).collect();
+                return Ok(results);
+            }
+        }
+
         let code = metta_code.to_string();
         self.with_crash_retry(move |stdin, stdout, config| {
             process_metta_string(stdin, stdout, &code, config)
