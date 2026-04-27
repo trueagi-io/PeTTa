@@ -12,34 +12,6 @@ use super::config::EngineConfig;
 use super::errors::{parse_backend_error, PeTTaError};
 use crate::engine::values::MettaResult;
 
-/// Manages communication pipes for protocol operations
-struct PipeManager<'a> {
-    stdin_pipe: &'a mut Option<std::process::ChildStdin>,
-    stdout_pipe: &'a mut Option<BufReader<std::process::ChildStdout>>,
-}
-
-impl<'a> PipeManager<'a> {
-    fn new(
-        stdin_pipe: &'a mut Option<std::process::ChildStdin>,
-        stdout_pipe: &'a mut Option<BufReader<std::process::ChildStdout>>,
-    ) -> Self {
-        Self { stdin_pipe, stdout_pipe }
-    }
-
-    fn stdin(&mut self) -> Result<&mut std::process::ChildStdin, PeTTaError> {
-        self.stdin_pipe
-            .as_mut()
-            .ok_or_else(|| PeTTaError::ProtocolError("stdin pipe unavailable".into()))
-    }
-
-    fn stdout(&mut self) -> Result<&mut BufReader<std::process::ChildStdout>, PeTTaError> {
-        self.stdout_pipe
-            .as_mut()
-            .ok_or_else(|| PeTTaError::ProtocolError("stdout pipe unavailable".into()))
-    }
-}
-
-/// Extension trait for write operations with error handling
 trait WriteExt {
     fn write_checked(&mut self, data: &[u8]) -> Result<(), PeTTaError>;
 }
@@ -50,11 +22,9 @@ impl<W: Write> WriteExt for W {
     }
 }
 
-/// Protocol client for sending queries to Prolog backend
 pub struct ProtocolClient;
 
 impl ProtocolClient {
-    /// Send a query and receive results
     pub fn send_query(
         stdin_pipe: &mut Option<std::process::ChildStdin>,
         stdout_pipe: &mut Option<BufReader<std::process::ChildStdout>>,
@@ -91,12 +61,11 @@ fn send_query_inner(
     config: &EngineConfig,
 ) -> Result<Vec<MettaResult>, PeTTaError> {
     let start_time = Instant::now();
-    let mut pipes = PipeManager::new(stdin_pipe, stdout_pipe);
+    let sin = stdin_pipe.as_mut().ok_or_else(|| PeTTaError::ProtocolError("stdin pipe unavailable".into()))?;
+    let reader = stdout_pipe.as_mut().ok_or_else(|| PeTTaError::ProtocolError("stdout pipe unavailable".into()))?;
 
-    // Send request
     let pb = payload.as_bytes();
     let len = pb.len() as u32;
-    let sin = pipes.stdin()?;
     sin.write_checked(&[query_type])?;
     sin.write_checked(&len.to_be_bytes())?;
     sin.write_checked(pb)?;
@@ -104,33 +73,28 @@ fn send_query_inner(
 
     check_timeout(start_time, config)?;
 
-    // Read response status
-    let status = {
-        let mut b = [0u8; 1];
-        let reader = pipes.stdout()?;
-        read_exact_with_timeout(reader, &mut b, start_time, config)?;
-        b[0]
-    };
+    let mut b = [0u8; 1];
+    read_exact_with_timeout(reader, &mut b, start_time, config)?;
+    let status = b[0];
 
     match status {
         0 => {
-            let count = read_u32_with_timeout(pipes.stdout()?, start_time, config)?;
+            let count = read_u32_with_timeout(reader, start_time, config)?;
             trace!("Query succeeded: {} result(s)", count);
             let mut results = Vec::with_capacity(count as usize);
             for _ in 0..count {
-                let len = read_u32_with_timeout(pipes.stdout()?, start_time, config)?;
+                let len = read_u32_with_timeout(reader, start_time, config)?;
                 let mut buf = vec![0u8; len as usize];
-                read_exact_with_timeout(pipes.stdout()?, &mut buf, start_time, config)?;
-                let value = String::from_utf8(buf)
-                    .map_err(|e| PeTTaError::ProtocolError(e.to_string()))?;
+                read_exact_with_timeout(reader, &mut buf, start_time, config)?;
+                let value = String::from_utf8(buf).map_err(|e| PeTTaError::ProtocolError(e.to_string()))?;
                 results.push(MettaResult { value });
             }
             Ok(results)
         }
         1 => {
-            let len = read_u32_with_timeout(pipes.stdout()?, start_time, config)?;
+            let len = read_u32_with_timeout(reader, start_time, config)?;
             let mut buf = vec![0u8; len as usize];
-            read_exact_with_timeout(pipes.stdout()?, &mut buf, start_time, config)?;
+            read_exact_with_timeout(reader, &mut buf, start_time, config)?;
             let msg = String::from_utf8_lossy(&buf).to_string();
             debug!("Prolog error response: {}", msg);
             Err(PeTTaError::BackendError(parse_backend_error(&msg)))
@@ -139,7 +103,6 @@ fn send_query_inner(
     }
 }
 
-/// Check if the query has exceeded its configured timeout
 pub fn check_timeout(start_time: Instant, config: &EngineConfig) -> Result<(), PeTTaError> {
     if let Some(timeout) = config.query_timeout {
         if start_time.elapsed() >= timeout {
@@ -149,7 +112,6 @@ pub fn check_timeout(start_time: Instant, config: &EngineConfig) -> Result<(), P
     Ok(())
 }
 
-/// Read exactly `buf.len()` bytes, checking timeout before each read attempt
 pub fn read_exact_with_timeout<R: Read>(
     reader: &mut R,
     buf: &mut [u8],
@@ -174,7 +136,6 @@ pub fn read_exact_with_timeout<R: Read>(
     Ok(())
 }
 
-/// Read a big-endian u32 with timeout checking
 pub fn read_u32_with_timeout<R: Read>(
     reader: &mut R,
     start_time: Instant,
@@ -185,7 +146,6 @@ pub fn read_u32_with_timeout<R: Read>(
     Ok(u32::from_be_bytes(b))
 }
 
-/// Load a single MeTTa file
 pub fn load_metta_file(
     stdin_pipe: &mut Option<std::process::ChildStdin>,
     stdout_pipe: &mut Option<BufReader<std::process::ChildStdout>>,
@@ -200,7 +160,6 @@ pub fn load_metta_file(
     ProtocolClient::send_query(stdin_pipe, stdout_pipe, b'F', &abs.to_string_lossy(), config)
 }
 
-/// Load multiple MeTTa files
 pub fn load_metta_files(
     stdin_pipe: &mut Option<std::process::ChildStdin>,
     stdout_pipe: &mut Option<BufReader<std::process::ChildStdout>>,
@@ -225,7 +184,6 @@ pub fn load_metta_files(
     ProtocolClient::send_query(stdin_pipe, stdout_pipe, b'S', &combined, config)
 }
 
-/// Process a MeTTa string
 pub fn process_metta_string(
     stdin_pipe: &mut Option<std::process::ChildStdin>,
     stdout_pipe: &mut Option<BufReader<std::process::ChildStdout>>,

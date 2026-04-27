@@ -19,8 +19,6 @@ pub use version::{MIN_SWIPL_VERSION, swipl_available};
 
 use std::io::{BufReader, Write};
 use std::path::Path;
-#[cfg(feature = "parallel")]
-use std::path::PathBuf;
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
@@ -209,24 +207,17 @@ impl PeTTaEngine {
 
     pub fn eval_int(&mut self, expr: &str) -> Result<i64, PeTTaError> {
         let result = self.eval(expr)?;
-        result.value.parse().map_err(|_| {
-            PeTTaError::ProtocolError(format!("Expected integer, got: {}", result.value))
-        })
+        result.value.parse().map_err(|_| PeTTaError::ProtocolError(format!("Expected integer, got: {}", result.value)))
     }
 
     pub fn eval_float(&mut self, expr: &str) -> Result<f64, PeTTaError> {
         let result = self.eval(expr)?;
-        result.value.parse().map_err(|_| {
-            PeTTaError::ProtocolError(format!("Expected float, got: {}", result.value))
-        })
+        result.value.parse().map_err(|_| PeTTaError::ProtocolError(format!("Expected float, got: {}", result.value)))
     }
 
     pub fn eval_bool(&mut self, expr: &str) -> Result<bool, PeTTaError> {
         let result = self.eval(expr)?;
-        result
-            .value
-            .parse()
-            .map_err(|_| PeTTaError::ProtocolError(format!("Expected bool, got: {}", result.value)))
+        result.value.parse().map_err(|_| PeTTaError::ProtocolError(format!("Expected bool, got: {}", result.value)))
     }
 
     pub fn eval_str(&mut self, expr: &str) -> Result<String, PeTTaError> {
@@ -238,10 +229,7 @@ impl PeTTaEngine {
     }
 
     #[cfg(feature = "parallel")]
-    pub fn load_many(
-        &mut self,
-        paths: &[impl AsRef<Path>],
-    ) -> Result<Vec<MettaResult>, PeTTaError> {
+    pub fn load_many(&mut self, paths: &[impl AsRef<Path>]) -> Result<Vec<MettaResult>, PeTTaError> {
         let paths: Vec<&Path> = paths.iter().map(|p| p.as_ref()).collect();
         self.load_metta_files(&paths)
     }
