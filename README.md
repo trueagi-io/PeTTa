@@ -12,7 +12,7 @@ PeTTa is an efficient, embeddable runtime for the [MeTTa](https://wiki.opencog.o
 
 ## What is MeTTa? 🤔
 
-MeTTa (Meta-Truth Theory) is a typed, eager, expressive language built on unified pattern matching and direct expression manipulation. It serves as both a **programming language** and a **knowledge representation format** — ideal for systems that must reason about their own code and data.
+MeTTa (Meta Type Talk) is a typed, eager, expressive language built on unified pattern matching and direct expression manipulation. It serves as both a **programming language** and a **knowledge representation format** — ideal for systems that must reason about their own code and data.
 
 The runtime compiles MeTTa source to the **Warren Abstract Machine (WAM)**, leveraging decades of proven Prolog execution semantics. The result is mathematically rigorous, battle-tested, and genuinely comprehensible. ✨
 
