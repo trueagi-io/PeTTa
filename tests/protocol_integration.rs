@@ -345,3 +345,66 @@ fn test_protocol_multiple_consecutive_errors() {
     let r = e.process_metta_string("!(+ 1 2)").unwrap();
     assert_eq!(r[0].value, "3");
 }
+
+// ---------------------------------------------------------------------------
+// Issue #160: is-member returns multiple unexpected matches for unassigned variables
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_is_member_unassigned_variable() {
+    let mut e = make_engine();
+    // Test is-member with an unassigned variable - should return single false, not multiple trues
+    let code = r#"
+!(let*
+    (
+        ($pat (hi name boss))
+        ($bool (is-member $new $pat))
+    )
+    $bool
+)
+"#;
+    let results = e.process_metta_string(code).unwrap();
+    // Should return exactly one result (not multiple like before the fix)
+    assert_eq!(results.len(), 1, "is-member with unassigned variable should return exactly one result, got: {:?}", results.iter().map(|r| &r.value).collect::<Vec<_>>());
+    // The result should be false (unassigned variable is not a member)
+    let value = &results[0].value;
+    assert!(value.eq_ignore_ascii_case("false"), "is-member with unassigned variable should be false, got: {}", value);
+}
+
+#[test]
+fn test_is_member_existing_element() {
+    let mut e = make_engine();
+    // Test is-member with an existing element - should return true
+    let code = r#"
+!(let*
+    (
+        ($pat (hi name boss))
+        ($bool (is-member hi $pat))
+    )
+    $bool
+)
+"#;
+    let results = e.process_metta_string(code).unwrap();
+    // At least one result should be true
+    let values: Vec<&str> = results.iter().map(|r| r.value.as_str()).collect();
+    assert!(values.iter().any(|v| v.eq_ignore_ascii_case("true")), "is-member with existing element should return true, got: {:?}", values);
+}
+
+#[test]
+fn test_is_member_non_existing_element() {
+    let mut e = make_engine();
+    // Test is-member with a non-existing element - should return false
+    let code = r#"
+!(let*
+    (
+        ($pat (hi name boss))
+        ($bool (is-member missing $pat))
+    )
+    $bool
+)
+"#;
+    let results = e.process_metta_string(code).unwrap();
+    // The result should be false
+    let values: Vec<&str> = results.iter().map(|r| r.value.as_str()).collect();
+    assert!(values.iter().any(|v| v.eq_ignore_ascii_case("false")), "is-member with non-existing element should return false, got: {:?}", values);
+}

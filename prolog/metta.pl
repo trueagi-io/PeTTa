@@ -147,9 +147,10 @@ alpha_list_to_set_assoc([H|T], SeenIn, R) :-
 decons(List, Result) :- 'decons-atom'(List, Result).
 cons(Head, Tail, Result) :- 'cons-atom'(Head, Tail, Result).
 'index-atom'(List, Index, Elem) :- nth0(Index, List, Elem).
-member(X, L, true) :- member(X, L).
-'is-member'(X, List, true) :- member(X, List).
-'is-member'(X, List, false) :- \+ member(X, List).
+member(X, L, true) :- nonvar(X), member(X, L).
+'is-member'(X, List, true) :- nonvar(X), member(X, List).
+'is-member'(X, List, false) :- nonvar(X), \+ member(X, List).
+'is-member'(_, _, false).
 'exclude-item'(A, L, R) :- exclude(==(A), L, R).
 
 %Multisets:
