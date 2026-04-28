@@ -12,13 +12,13 @@
 //! combinators instead of DCG rules. It produces `MettaValue` AST nodes.
 
 use nom::{
+    IResult, Parser,
     branch::alt,
     bytes::complete::{tag, take_while1},
     character::complete::{char, multispace0},
     combinator::{map, opt, value},
     multi::many0,
     sequence::{delimited, preceded, terminated},
-    IResult, Parser,
 };
 
 use crate::MettaValue;
@@ -321,7 +321,9 @@ mod tests {
         match v {
             MettaValue::List(items) => {
                 assert_eq!(items.len(), 2);
-                assert!(matches!(&items[0], MettaValue::Expression(h, a) if h == "a" && a.len() == 1));
+                assert!(
+                    matches!(&items[0], MettaValue::Expression(h, a) if h == "a" && a.len() == 1)
+                );
                 assert_eq!(items[1], MettaValue::Atom("c".into()));
             }
             other => panic!("Expected List, got {:?}", other),

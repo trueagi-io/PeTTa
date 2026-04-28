@@ -958,7 +958,7 @@ impl Space {
                         wz.descend_to_byte(item_byte(Tag::SymbolSize(internal_v.len() as _)));
                         wz.descend_to(internal_v);
 
-wz.set_val(());
+                        wz.set_val(());
 
                         wz.ascend(internal_v.len() + 1);
                     }
@@ -1352,13 +1352,12 @@ wz.set_val(());
             }
             ResourceRequest::ACT(name) => {
                 let act = unsafe {
-                    mmaps.as_mut()
-                        .unwrap()
-                        .entry(OwnedSourceItem::from(name))
-                        .or_insert_with(|| {
+                    mmaps.as_mut().unwrap().entry(OwnedSourceItem::from(name)).or_insert_with(
+                        || {
                             trace!(target: "query_multi_i", "open new ACT {}", name);
                             ArenaCompactTree::open_mmap(format!("{ACT_PATH}{name}.act")).unwrap()
-                        })
+                        },
+                    )
                 };
                 trace!(target: "query_multi_i", "taking RZ of {}", name);
                 Resource::ACT(act.read_zipper())

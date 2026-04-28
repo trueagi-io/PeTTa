@@ -178,11 +178,7 @@ fn run_engine_files(
         }
     }
 
-    if had_failure {
-        Err(())
-    } else {
-        Ok(())
-    }
+    if had_failure { Err(()) } else { Ok(()) }
 }
 
 /// Main file execution function

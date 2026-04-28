@@ -9,7 +9,7 @@ use std::time::Instant;
 use tracing::{debug, trace, warn};
 
 use super::config::EngineConfig;
-use super::errors::{parse_backend_error, PeTTaError};
+use super::errors::{PeTTaError, parse_backend_error};
 use crate::engine::values::MettaResult;
 
 trait WriteExt {
@@ -61,8 +61,12 @@ fn send_query_inner(
     config: &EngineConfig,
 ) -> Result<Vec<MettaResult>, PeTTaError> {
     let start_time = Instant::now();
-    let sin = stdin_pipe.as_mut().ok_or_else(|| PeTTaError::ProtocolError("stdin pipe unavailable".into()))?;
-    let reader = stdout_pipe.as_mut().ok_or_else(|| PeTTaError::ProtocolError("stdout pipe unavailable".into()))?;
+    let sin = stdin_pipe
+        .as_mut()
+        .ok_or_else(|| PeTTaError::ProtocolError("stdin pipe unavailable".into()))?;
+    let reader = stdout_pipe
+        .as_mut()
+        .ok_or_else(|| PeTTaError::ProtocolError("stdout pipe unavailable".into()))?;
 
     let pb = payload.as_bytes();
     let len = pb.len() as u32;
@@ -86,7 +90,8 @@ fn send_query_inner(
                 let len = read_u32_with_timeout(reader, start_time, config)?;
                 let mut buf = vec![0u8; len as usize];
                 read_exact_with_timeout(reader, &mut buf, start_time, config)?;
-                let value = String::from_utf8(buf).map_err(|e| PeTTaError::ProtocolError(e.to_string()))?;
+                let value =
+                    String::from_utf8(buf).map_err(|e| PeTTaError::ProtocolError(e.to_string()))?;
                 results.push(MettaResult { value });
             }
             Ok(results)

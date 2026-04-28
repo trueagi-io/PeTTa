@@ -636,7 +636,7 @@ where
                     }
                     cur_node = self.get_node(line.child?).0;
                 }
-Node::Branch(node) => {
+                Node::Branch(node) => {
                     if path.is_empty() {
                         return node.value;
                     }

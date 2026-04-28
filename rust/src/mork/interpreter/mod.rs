@@ -7,10 +7,10 @@
 //! - Binding: let, let*
 //! - Evaluation: eval, reduce, match
 
+use crate::mork::space::Space;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use crate::mork::space::Space;
 
 /// Metta value types
 #[derive(Debug, Clone, PartialEq)]
@@ -100,10 +100,7 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new(space: Arc<Mutex<Space>>) -> Self {
-        Interpreter {
-            space,
-            bindings: RefCell::new(HashMap::new()),
-        }
+        Interpreter { space, bindings: RefCell::new(HashMap::new()) }
     }
 
     /// Evaluate a MeTTa expression string
@@ -119,25 +116,21 @@ impl Interpreter {
 
     fn parse_expr(&self, input: &str) -> Result<MettaValue> {
         let input = input.trim();
-        
+
         if input.is_empty() {
             return Err(InterpreterError::ParseError("Empty expression".to_string()));
         }
 
-        if input.starts_with('(') {
-            self.parse_list_expr(input)
-        } else {
-            self.parse_atom(input)
-        }
+        if input.starts_with('(') { self.parse_list_expr(input) } else { self.parse_atom(input) }
     }
 
-fn parse_list_expr(&self, input: &str) -> Result<MettaValue> {
-let input = input.trim();
-if !input.starts_with('(') || !input.ends_with(')') {
-return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
-}
+    fn parse_list_expr(&self, input: &str) -> Result<MettaValue> {
+        let input = input.trim();
+        if !input.starts_with('(') || !input.ends_with(')') {
+            return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
+        }
 
-        let inner = &input[1..input.len()-1].trim();
+        let inner = &input[1..input.len() - 1].trim();
         if inner.is_empty() {
             return Ok(MettaValue::Expression(vec![]));
         }
@@ -192,7 +185,7 @@ return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
 
     fn parse_atom(&self, input: &str) -> Result<MettaValue> {
         let input = input.trim();
-        
+
         if input.is_empty() {
             return Err(InterpreterError::ParseError("Empty atom".to_string()));
         }
@@ -205,7 +198,7 @@ return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
         }
 
         if input.starts_with('"') && input.ends_with('"') && input.len() >= 2 {
-            return Ok(MettaValue::String(input[1..input.len()-1].to_string()));
+            return Ok(MettaValue::String(input[1..input.len() - 1].to_string()));
         }
 
         if input.starts_with('$') {
@@ -228,13 +221,13 @@ return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
                 if expr.is_empty() {
                     return Ok(MettaValue::Expression(vec![]));
                 }
-                
+
                 if let Some(MettaValue::Symbol(op)) = expr.first() {
                     let op = op.clone();
                     let args = &expr[1..];
                     return self.eval_builtin(&op, args);
                 }
-                
+
                 self.eval_expression(&value)
             }
             MettaValue::Symbol(ref sym) => {
@@ -423,44 +416,50 @@ return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
         if args.len() != 3 {
             return Err(InterpreterError::SyntaxError("let requires 3 arguments".to_string()));
         }
-        
+
         let var = match &args[0] {
             MettaValue::Symbol(s) => s.clone(),
-            _ => return Err(InterpreterError::TypeError {
-                expected: "symbol".to_string(),
-                found: "non-symbol".to_string(),
-            }),
+            _ => {
+                return Err(InterpreterError::TypeError {
+                    expected: "symbol".to_string(),
+                    found: "non-symbol".to_string(),
+                });
+            }
         };
 
         let value = self.eval_value(args[1].clone())?;
         self.bindings.borrow_mut().insert(var.clone(), value.clone());
         let result = self.eval_value(args[2].clone())?;
         self.bindings.borrow_mut().remove(&var);
-        
+
         Ok(result)
     }
 
     fn eval_let_star(&mut self, args: &[MettaValue]) -> Result<MettaValue> {
         if args.is_empty() {
-            return Err(InterpreterError::SyntaxError("let* requires at least 1 argument".to_string()));
+            return Err(InterpreterError::SyntaxError(
+                "let* requires at least 1 argument".to_string(),
+            ));
         }
 
         let body = args.last().unwrap().clone();
-        let bindings = &args[..args.len()-1];
+        let bindings = &args[..args.len() - 1];
 
         for binding in bindings {
             if let MettaValue::Expression(pair) = binding {
                 if pair.len() != 2 {
                     return Err(InterpreterError::SyntaxError(
-                        "let* binding must be a pair".to_string()
+                        "let* binding must be a pair".to_string(),
                     ));
                 }
                 let var = match &pair[0] {
                     MettaValue::Symbol(s) => s.clone(),
-                    _ => return Err(InterpreterError::TypeError {
-                        expected: "symbol".to_string(),
-                        found: "non-symbol".to_string(),
-                    }),
+                    _ => {
+                        return Err(InterpreterError::TypeError {
+                            expected: "symbol".to_string(),
+                            found: "non-symbol".to_string(),
+                        });
+                    }
                 };
                 let value = self.eval_value(pair[1].clone())?;
                 self.bindings.borrow_mut().insert(var.clone(), value);
@@ -491,11 +490,11 @@ return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
         if args.len() != 3 {
             return Err(InterpreterError::SyntaxError("match requires 3 arguments".to_string()));
         }
-        
+
         let _space = &args[0];
         let _pattern = &args[1];
         let template = &args[2];
-        
+
         self.eval_value(template.clone())
     }
 
@@ -503,10 +502,10 @@ return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
         if args.len() != 2 {
             return Err(InterpreterError::SyntaxError("test requires 2 arguments".to_string()));
         }
-        
+
         let result = self.eval_value(args[0].clone())?;
         let expected = self.eval_value(args[1].clone())?;
-        
+
         if result == expected {
             Ok(MettaValue::Bool(true))
         } else {
@@ -520,9 +519,11 @@ return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
 
     fn eval_append(&mut self, args: &[MettaValue]) -> Result<MettaValue> {
         if args.len() < 2 {
-            return Err(InterpreterError::SyntaxError("append requires at least 2 arguments".to_string()));
+            return Err(InterpreterError::SyntaxError(
+                "append requires at least 2 arguments".to_string(),
+            ));
         }
-        
+
         let mut result = Vec::new();
         for arg in args {
             if let MettaValue::Expression(expr) = arg {
@@ -531,45 +532,48 @@ return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
                 result.push(arg.clone());
             }
         }
-        
+
         Ok(MettaValue::Expression(result))
     }
 
-fn eval_user_function(&mut self, name: &str, args: &[MettaValue]) -> Result<MettaValue> {
-// Special case for facF - inline evaluation since space lookup is complex
-if name == "facF" && args.len() == 1 {
-let n_val = &args[0];
-let n = match n_val {
-MettaValue::Number(n) => *n,
-MettaValue::Integer(n) => *n as f64,
-_ => return Err(InterpreterError::TypeError {
-expected: "number".to_string(),
-found: format!("{:?}", n_val),
-}),
-};
+    fn eval_user_function(&mut self, name: &str, args: &[MettaValue]) -> Result<MettaValue> {
+        // Special case for facF - inline evaluation since space lookup is complex
+        if name == "facF" && args.len() == 1 {
+            let n_val = &args[0];
+            let n = match n_val {
+                MettaValue::Number(n) => *n,
+                MettaValue::Integer(n) => *n as f64,
+                _ => {
+                    return Err(InterpreterError::TypeError {
+                        expected: "number".to_string(),
+                        found: format!("{:?}", n_val),
+                    });
+                }
+            };
 
-// facF(n) = if n == 0 then 1 else n * facF(n-1)
-if n == 0.0 {
-return Ok(MettaValue::Integer(1));
-} else {
-// Recursive call: n * facF(n-1)
-let recursive_args = vec![MettaValue::Number(n - 1.0)];
-let recursive_result = self.eval_user_function("facF", &recursive_args)?;
-let recursive_n = match recursive_result {
-MettaValue::Number(n) => n,
-MettaValue::Integer(n) => n as f64,
-_ => return Err(InterpreterError::EvaluationError("facF recursive call failed".to_string())),
-};
-return Ok(MettaValue::Number(n * recursive_n));
-}
-}
+            // facF(n) = if n == 0 then 1 else n * facF(n-1)
+            if n == 0.0 {
+                return Ok(MettaValue::Integer(1));
+            } else {
+                // Recursive call: n * facF(n-1)
+                let recursive_args = vec![MettaValue::Number(n - 1.0)];
+                let recursive_result = self.eval_user_function("facF", &recursive_args)?;
+                let recursive_n = match recursive_result {
+                    MettaValue::Number(n) => n,
+                    MettaValue::Integer(n) => n as f64,
+                    _ => {
+                        return Err(InterpreterError::EvaluationError(
+                            "facF recursive call failed".to_string(),
+                        ));
+                    }
+                };
+                return Ok(MettaValue::Number(n * recursive_n));
+            }
+        }
 
-// For other functions, return error
-Err(InterpreterError::UndefinedFunction(format!(
-"User function '{}' not defined",
-name
-)))
-}
+        // For other functions, return error
+        Err(InterpreterError::UndefinedFunction(format!("User function '{}' not defined", name)))
+    }
 
     fn get_number(&self, value: &MettaValue) -> Result<f64> {
         match value {
@@ -606,7 +610,7 @@ mod tests {
     #[test]
     fn test_arithmetic() {
         let mut interp = make_interpreter();
-        
+
         assert_eq!(interp.eval("(+ 2 3)").unwrap(), MettaValue::Number(5.0));
         assert_eq!(interp.eval("(- 5 2)").unwrap(), MettaValue::Number(3.0));
         assert_eq!(interp.eval("(* 4 3)").unwrap(), MettaValue::Number(12.0));
@@ -616,7 +620,7 @@ mod tests {
     #[test]
     fn test_comparison() {
         let mut interp = make_interpreter();
-        
+
         assert_eq!(interp.eval("(== 5 5)").unwrap(), MettaValue::Bool(true));
         assert_eq!(interp.eval("(== 5 3)").unwrap(), MettaValue::Bool(false));
         assert_eq!(interp.eval("(!= 5 3)").unwrap(), MettaValue::Bool(true));
@@ -627,7 +631,7 @@ mod tests {
     #[test]
     fn test_logic() {
         let mut interp = make_interpreter();
-        
+
         assert_eq!(interp.eval("(if True 1 2)").unwrap(), MettaValue::Integer(1));
         assert_eq!(interp.eval("(if False 1 2)").unwrap(), MettaValue::Integer(2));
         assert_eq!(interp.eval("(and True True)").unwrap(), MettaValue::Bool(true));
@@ -638,7 +642,7 @@ mod tests {
     #[test]
     fn test_let() {
         let mut interp = make_interpreter();
-        
+
         assert_eq!(interp.eval("(let $x 5 $x)").unwrap(), MettaValue::Integer(5));
     }
 }

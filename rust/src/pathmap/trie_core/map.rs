@@ -691,8 +691,6 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
     }
 }
 
-
-
 impl<V: Clone + Send + Sync + Unpin, K: AsRef<[u8]>> FromIterator<(K, V)> for PathMap<V> {
     fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
         let mut map = Self::new();
@@ -1214,8 +1212,6 @@ mod tests {
         }
         assert_eq!(a.val_count(), rs.len());
     }
-
-    
 
     #[test]
     fn map_root_value_test1() {

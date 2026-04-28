@@ -19,14 +19,14 @@ pub mod mork;
 #[cfg(not(feature = "mork"))]
 mod mork;
 
-pub mod pathmap;
 pub mod gxhash;
+pub mod pathmap;
 pub mod utils;
 
 pub mod engine;
 pub use engine::{
-    Backend, BackendErrorKind, EngineConfig, MettaResult, MettaValue, PeTTaEngine, PeTTaError,
-    MIN_SWIPL_VERSION, swipl_available,
+    Backend, BackendErrorKind, EngineConfig, MIN_SWIPL_VERSION, MettaResult, MettaValue,
+    PeTTaEngine, PeTTaError, swipl_available,
 };
 
 #[cfg(test)]
