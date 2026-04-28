@@ -8,7 +8,6 @@ use super::super::frontend::bytestring_parser::{Context, Parser, ParserError};
 use super::super::frontend::json_parser::Transcriber;
 use super::super::interning::{SharedMapping, SharedMappingHandle, WritePermit};
 use super::super::space::ACT_PATH;
-use super::pure;
 use crate::pathmap::PathMap;
 use crate::pathmap::morphisms::Catamorphism;
 use crate::pathmap::ring::{AlgebraicStatus, Lattice};

@@ -1,18 +1,22 @@
 //! MORK backend implementation using internal Rust MORK.
 
+use crate::mork::interpreter::{Interpreter, MettaValue};
 use crate::mork::space::Space;
 use crate::pathmap::PathMap;
 use std::sync::{Arc, Mutex};
 
 pub struct MORKEngine {
     space: Arc<Mutex<Space>>,
+    interpreter: Interpreter,
 }
 
 impl MORKEngine {
     pub fn new() -> Self {
         let space = Space::new();
+        let space_arc = Arc::new(Mutex::new(space));
         MORKEngine {
-            space: Arc::new(Mutex::new(space)),
+            space: space_arc.clone(),
+            interpreter: Interpreter::new(space_arc),
         }
     }
 
@@ -85,22 +89,25 @@ impl MORKEngine {
             let cmd = parts.get(0).map(|s| *s).unwrap_or("");
             let input = parts.get(1).map(|s| *s).unwrap_or("");
             
-            let result = match cmd {
-                "add-atoms" => self.add_atoms(input),
-                "remove-atoms" => self.remove_atoms(input),
-                "get-atoms" => self.get_atoms(),
-                "match" => self.match_pattern(input),
-                "mm2-exec" => self.mm2_exec(input),
-                _ => {
-                    if line.starts_with("!(") {
-                        Ok(format!("TODO: eval {}", &line[2..]))
-                    } else {
-                        Ok(line.to_string())
-                    }
+        let result = match cmd {
+            "add-atoms" => self.add_atoms(input),
+            "remove-atoms" => self.remove_atoms(input),
+            "get-atoms" => self.get_atoms(),
+            "match" => self.match_pattern(input),
+            "mm2-exec" => self.mm2_exec(input),
+            _ => {
+                if line.starts_with("!(") {
+                    let inner = &line[2..line.len()-1];
+                    self.interpreter.eval(inner)
+                        .map(|v| v.to_string())
+                        .map_err(|e| format!("ERR: {}", e))
+                } else {
+                    Ok(line.to_string())
                 }
-            };
-            
-            results.push(result.unwrap_or_else(|e| e));
+            }
+        };
+
+        results.push(result.unwrap_or_else(|e| format!("ERR: {}", e)));
         }
         
         if results.is_empty() {
