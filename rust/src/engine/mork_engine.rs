@@ -95,16 +95,19 @@ impl MORKEngine {
             "get-atoms" => self.get_atoms(),
             "match" => self.match_pattern(input),
             "mm2-exec" => self.mm2_exec(input),
-            _ => {
-                if line.starts_with("!(") {
-                    let inner = &line[2..line.len()-1];
-                    self.interpreter.eval(inner)
-                        .map(|v| v.to_string())
-                        .map_err(|e| format!("ERR: {}", e))
-                } else {
-                    Ok(line.to_string())
-                }
-            }
+_ => {
+if line.starts_with('!') && line.ends_with(')') {
+// Extract content after !, which should be the full expression
+// !(+ 1 2) -> (+ 1 2)
+let inner = &line[1..];
+Ok(self.interpreter.eval(inner)
+.map(|v| v.to_string())
+.unwrap_or_else(|e| format!("ERR: {}", e)))
+} else {
+// Not an evaluation, add as atom or return as-is
+Ok(line.to_string())
+}
+}
         };
 
         results.push(result.unwrap_or_else(|e| format!("ERR: {}", e)));

@@ -131,11 +131,11 @@ impl Interpreter {
         }
     }
 
-    fn parse_list_expr(&self, input: &str) -> Result<MettaValue> {
-        let input = input.trim();
-        if !input.starts_with('(') || !input.ends_with(')') {
-            return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
-        }
+fn parse_list_expr(&self, input: &str) -> Result<MettaValue> {
+let input = input.trim();
+if !input.starts_with('(') || !input.ends_with(')') {
+return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
+}
 
         let inner = &input[1..input.len()-1].trim();
         if inner.is_empty() {

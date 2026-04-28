@@ -176,36 +176,38 @@ impl PeTTaEngine {
         }
     }
 
-    pub fn load_metta_file(&mut self, file_path: &Path) -> Result<Vec<MettaResult>, PeTTaError> {
-        #[cfg(feature = "mork")]
-        if self.config.backend == Backend::Mork {
-            // For MORK, read the file and add atoms directly
-            let s = std::fs::read_to_string(file_path).map_err(|e| PeTTaError::PathError(e.to_string()))?;
-            if let Some(m) = self.mork.as_mut() {
-                m.add_atoms(&s).map_err(|e| PeTTaError::PathError(e))?;
-                return Ok(vec![MettaResult { value: "OK".into() }]);
-            }
-        }
+pub fn load_metta_file(&mut self, file_path: &Path) -> Result<Vec<MettaResult>, PeTTaError> {
+#[cfg(feature = "mork")]
+if self.config.backend == Backend::Mork {
+// For MORK, read the file and process it (parse and evaluate)
+let s = std::fs::read_to_string(file_path).map_err(|e| PeTTaError::PathError(e.to_string()))?;
+if let Some(m) = self.mork.as_mut() {
+let results = m.process(&s);
+return Ok(results.into_iter().map(|v| MettaResult { value: v }).collect());
+}
+}
         let path = file_path.to_path_buf();
         self.with_crash_retry(move |stdin, stdout, config| {
             load_metta_file(stdin, stdout, &path, config)
         })
     }
 
-    pub fn load_metta_files(
-        &mut self,
-        file_paths: &[&Path],
-    ) -> Result<Vec<MettaResult>, PeTTaError> {
-        #[cfg(feature = "mork")]
-        if self.config.backend == Backend::Mork {
-            for p in file_paths {
-                let s = std::fs::read_to_string(p).map_err(|e| PeTTaError::PathError(e.to_string()))?;
-                if let Some(m) = self.mork.as_mut() {
-                    m.add_atoms(&s).map_err(|e| PeTTaError::PathError(e))?;
-                }
-            }
-            return Ok(vec![MettaResult { value: "OK".into() }]);
-        }
+pub fn load_metta_files(
+&mut self,
+file_paths: &[&Path],
+) -> Result<Vec<MettaResult>, PeTTaError> {
+#[cfg(feature = "mork")]
+if self.config.backend == Backend::Mork {
+let mut all_results = Vec::new();
+for p in file_paths {
+let s = std::fs::read_to_string(p).map_err(|e| PeTTaError::PathError(e.to_string()))?;
+if let Some(m) = self.mork.as_mut() {
+let results = m.process(&s);
+all_results.extend(results.into_iter().map(|v| MettaResult { value: v }));
+}
+}
+return Ok(all_results);
+}
 
         let paths: Vec<std::path::PathBuf> = file_paths.iter().map(|p| p.to_path_buf()).collect();
         self.with_crash_retry(move |stdin, stdout, config| {

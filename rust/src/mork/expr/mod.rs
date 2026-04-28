@@ -14,10 +14,10 @@ use std::{
 pub mod macros;
 
 pub mod expr_tests {
-    #[cfg(test)]
-    pub use crate::compute_length;
-    #[cfg(test)]
-    pub use crate::parse;
+#[cfg(test)]
+pub use super::compute_length;
+#[cfg(test)]
+pub use super::parse;
 }
 
 // Re-export macros at module level for convenience (they are defined with #[macro_export] below)
