@@ -76,49 +76,103 @@ impl MORKEngine {
         Ok("OK: executed".to_string())
     }
 
-    pub fn process(&mut self, code: &str) -> Vec<String> {
-        let mut results = Vec::new();
-        
-        for line in code.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            
-            let parts: Vec<&str> = line.splitn(2, ' ').collect();
-            let cmd = parts.get(0).map(|s| *s).unwrap_or("");
-            let input = parts.get(1).map(|s| *s).unwrap_or("");
-            
-        let result = match cmd {
-            "add-atoms" => self.add_atoms(input),
-            "remove-atoms" => self.remove_atoms(input),
-            "get-atoms" => self.get_atoms(),
-            "match" => self.match_pattern(input),
-            "mm2-exec" => self.mm2_exec(input),
+pub fn process(&mut self, code: &str) -> Vec<String> {
+let mut results = Vec::new();
+let mut buffer = String::new();
+let mut paren_depth = 0;
+
+for line in code.lines() {
+let line = line.trim();
+if line.is_empty() {
+continue;
+}
+
+// If we're accumulating a multi-line expression, keep going
+if !buffer.is_empty() {
+buffer.push(' ');
+buffer.push_str(line);
+// Recalculate paren depth
+paren_depth = buffer.chars().filter(|&c| c == '(').count() as i32
+- buffer.chars().filter(|&c| c == ')').count() as i32;
+
+if paren_depth <= 0 {
+// Complete expression - process it
+let result = self.process_line(&buffer);
+results.push(result);
+buffer.clear();
+paren_depth = 0;
+}
+continue;
+}
+
+// Check if this line starts a multi-line expression
+if line.starts_with('(') {
+paren_depth = line.chars().filter(|&c| c == '(').count() as i32
+- line.chars().filter(|&c| c == ')').count() as i32;
+
+if paren_depth > 0 {
+// Multi-line expression - start buffering
+buffer = line.to_string();
+continue;
+}
+}
+
+let result = self.process_line(line);
+results.push(result);
+}
+
+// Process any remaining buffered content
+if !buffer.is_empty() {
+let result = self.process_line(&buffer);
+results.push(result);
+}
+
+if results.is_empty() {
+results.push("true".to_string());
+}
+
+results
+}
+
+fn process_line(&mut self, line: &str) -> String {
+let line = line.trim();
+if line.is_empty() {
+return "OK".to_string();
+}
+
+let parts: Vec<&str> = line.splitn(2, ' ').collect();
+let cmd = parts.get(0).map(|s| *s).unwrap_or("");
+
+match cmd {
+"add-atoms" => self.add_atoms(parts.get(1).unwrap_or(&"")).unwrap_or_else(|e| format!("ERR: {}", e)),
+"remove-atoms" => self.remove_atoms(parts.get(1).unwrap_or(&"")).unwrap_or_else(|e| format!("ERR: {}", e)),
+"get-atoms" => self.get_atoms().unwrap_or_else(|e| format!("ERR: {}", e)),
+"match" => self.match_pattern(parts.get(1).unwrap_or(&"")).unwrap_or_else(|e| format!("ERR: {}", e)),
+"mm2-exec" => self.mm2_exec(parts.get(1).unwrap_or(&"")).unwrap_or_else(|e| format!("ERR: {}", e)),
 _ => {
 if line.starts_with('!') && line.ends_with(')') {
-// Extract content after !, which should be the full expression
-// !(+ 1 2) -> (+ 1 2)
+// Evaluation: !(...)
 let inner = &line[1..];
-Ok(self.interpreter.eval(inner)
+self.interpreter.eval(inner)
 .map(|v| v.to_string())
-.unwrap_or_else(|e| format!("ERR: {}", e)))
+.unwrap_or_else(|e| format!("ERR: {}", e))
+} else if line.starts_with("(= ") {
+// Definition - add to space
+let mut space = match self.space.lock() {
+Ok(s) => s,
+Err(e) => return format!("LOCK ERR: {}", e),
+};
+match space.add_all_sexpr(line.as_bytes()) {
+Ok(_) => "OK".to_string(),
+Err(e) => format!("ERR: {}", e),
+}
 } else {
-// Not an evaluation, add as atom or return as-is
-Ok(line.to_string())
+// Comment or unknown - OK
+"OK".to_string()
 }
 }
-        };
-
-        results.push(result.unwrap_or_else(|e| format!("ERR: {}", e)));
-        }
-        
-        if results.is_empty() {
-            results.push("true".to_string());
-        }
-        
-        results
-    }
+}
+}
 }
 
 impl Default for MORKEngine {

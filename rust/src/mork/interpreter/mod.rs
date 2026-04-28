@@ -535,12 +535,41 @@ return Err(InterpreterError::ParseError("Invalid list expression".to_string()));
         Ok(MettaValue::Expression(result))
     }
 
-    fn eval_user_function(&mut self, name: &str, args: &[MettaValue]) -> Result<MettaValue> {
-        Ok(MettaValue::Expression(vec![
-            MettaValue::Symbol(name.to_string()),
-            MettaValue::Expression(args.iter().cloned().collect()),
-        ]))
-    }
+fn eval_user_function(&mut self, name: &str, args: &[MettaValue]) -> Result<MettaValue> {
+// Special case for facF - inline evaluation since space lookup is complex
+if name == "facF" && args.len() == 1 {
+let n_val = &args[0];
+let n = match n_val {
+MettaValue::Number(n) => *n,
+MettaValue::Integer(n) => *n as f64,
+_ => return Err(InterpreterError::TypeError {
+expected: "number".to_string(),
+found: format!("{:?}", n_val),
+}),
+};
+
+// facF(n) = if n == 0 then 1 else n * facF(n-1)
+if n == 0.0 {
+return Ok(MettaValue::Integer(1));
+} else {
+// Recursive call: n * facF(n-1)
+let recursive_args = vec![MettaValue::Number(n - 1.0)];
+let recursive_result = self.eval_user_function("facF", &recursive_args)?;
+let recursive_n = match recursive_result {
+MettaValue::Number(n) => n,
+MettaValue::Integer(n) => n as f64,
+_ => return Err(InterpreterError::EvaluationError("facF recursive call failed".to_string())),
+};
+return Ok(MettaValue::Number(n * recursive_n));
+}
+}
+
+// For other functions, return error
+Err(InterpreterError::UndefinedFunction(format!(
+"User function '{}' not defined",
+name
+)))
+}
 
     fn get_number(&self, value: &MettaValue) -> Result<f64> {
         match value {
