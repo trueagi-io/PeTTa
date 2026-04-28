@@ -10,12 +10,13 @@ repository = "https://github.com/patham9/petta"
 keywords = ["metta", "logic", "prolog", "agi", "trueagi"]
 categories = ["compilers", "parser-implementations"]
 
-# Workspace: petta + pathmap (unified) + pathmap-macros (derive macros)
+# Workspace: petta (main crate) + pathmap-macros (procedural macros)
+# Note: PathMap is fully inlined as rust/src/pathmap/, not a separate workspace member
 [workspace]
 resolver = "2"
 members = [
-    ".",
-    "rust/pathmap-macros",
+  ".",
+  "rust/pathmap-macros",
 ]
 default-members = ["."]
 
