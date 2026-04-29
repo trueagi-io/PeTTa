@@ -22,7 +22,7 @@ pub use config::Backend;
 pub use config::BackendCapabilities;
 pub use config::BackendConfig;
 pub use config::EngineConfig;
-pub use errors::{BackendErrorKind, PeTTaError};
+pub use errors::{BackendErrorKind, DiagLocation, DiagSeverity, Diagnostic, PeTTaError};
 pub use formatters::{create_formatter, CompactFormatter, JsonFormatter, OutputFormatter, PrettyFormatter, SExprFormatter};
 pub use values::{MettaResult, MettaValue};
 pub use version::{MIN_SWIPL_VERSION, swipl_available};

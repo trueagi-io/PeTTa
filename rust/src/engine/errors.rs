@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-#[allow(dead_code)]
 pub trait Diagnostic: Send + Sync {
     fn severity(&self) -> DiagSeverity;
     fn message(&self) -> String;
@@ -10,7 +9,6 @@ pub trait Diagnostic: Send + Sync {
     fn location(&self) -> Option<DiagLocation>;
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagSeverity {
     Error,
@@ -19,7 +17,6 @@ pub enum DiagSeverity {
     Info,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DiagLocation {
     pub file: String,

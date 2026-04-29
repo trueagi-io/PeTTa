@@ -26,8 +26,9 @@ pub mod viz;
 
 pub mod engine;
 pub use engine::{
-Backend, BackendCapabilities, BackendConfig, BackendErrorKind, EngineConfig, MIN_SWIPL_VERSION,
-MettaResult, MettaValue, PeTTaEngine, PeTTaError, swipl_available,
+    Backend, BackendCapabilities, BackendConfig, BackendErrorKind, DiagLocation, DiagSeverity, Diagnostic,
+    EngineConfig, MIN_SWIPL_VERSION, MettaResult, MettaValue, PeTTaEngine, PeTTaError, swipl_available,
+    create_formatter, CompactFormatter, JsonFormatter, OutputFormatter, PrettyFormatter, SExprFormatter,
 };
 
 #[cfg(feature = "bench")]
