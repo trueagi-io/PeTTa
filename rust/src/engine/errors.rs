@@ -1,6 +1,32 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[allow(dead_code)]
+pub trait Diagnostic: Send + Sync {
+    fn severity(&self) -> DiagSeverity;
+    fn message(&self) -> String;
+    fn code(&self) -> Option<String>;
+    fn suggestions(&self) -> Vec<String>;
+    fn location(&self) -> Option<DiagLocation>;
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagSeverity {
+    Error,
+    Warning,
+    Hint,
+    Info,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct DiagLocation {
+    pub file: String,
+    pub line: u32,
+    pub column: u32,
+}
+
 // Engine error parsing and mapping
 //
 // This module provides two main responsibilities:

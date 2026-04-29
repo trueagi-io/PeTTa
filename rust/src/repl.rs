@@ -1,7 +1,7 @@
 //! Interactive REPL for PeTTa
 //!
 //! Provides an interactive Read-Eval-Print Loop for MeTTa execution
-//! with support for commands, history, and syntax highlighting.
+//! with support for commands, history, tab completion, and syntax highlighting.
 
 use std::path::PathBuf;
 
@@ -59,25 +59,25 @@ impl ReplConfig {
 }
 
 /// Start the interactive REPL
-    #[cfg(feature = "repl")]
-    pub fn run_repl(config: &ReplConfig) {
+#[cfg(feature = "repl")]
+pub fn run_repl(config: &ReplConfig) {
     if let Some(parent) = config.history_file.parent() {
-    let _ = std::fs::create_dir_all(parent);
+        let _ = std::fs::create_dir_all(parent);
     }
     let engine_config =
-    EngineConfig::new(&config.project_root).verbose(config.verbose).backend(config.backend);
+        EngineConfig::new(&config.project_root).verbose(config.verbose).backend(config.backend);
 
     let mut engine = match PeTTaEngine::with_config(&engine_config) {
-    Ok(e) => e,
-    Err(e) => {
-    eprintln!("{} Failed to initialize PeTTa engine: {}", red("✗"), e);
-    return;
-    }
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("{} Failed to initialize PeTTa engine: {}", red("✗"), e);
+            return;
+        }
     };
 
     let mut rl = DefaultEditor::new().unwrap_or_else(|_| {
-    eprintln!("Warning: Failed to initialize line editor");
-    DefaultEditor::new().unwrap()
+        eprintln!("Warning: Failed to initialize line editor");
+        DefaultEditor::new().unwrap()
     });
 
     // Load history if available

@@ -12,6 +12,7 @@ use crate::engine::mork_engine::MORKEngine;
 mod client;
 mod config;
 pub(crate) mod errors;
+mod formatters;
 mod server;
 mod subprocess;
 mod values;
@@ -22,6 +23,7 @@ pub use config::BackendCapabilities;
 pub use config::BackendConfig;
 pub use config::EngineConfig;
 pub use errors::{BackendErrorKind, PeTTaError};
+pub use formatters::{create_formatter, CompactFormatter, JsonFormatter, OutputFormatter, PrettyFormatter, SExprFormatter};
 pub use values::{MettaResult, MettaValue};
 pub use version::{MIN_SWIPL_VERSION, swipl_available};
 

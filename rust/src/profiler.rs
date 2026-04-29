@@ -5,6 +5,10 @@
 //! - Query serialization
 //! - Prolog round-trip
 //! - Result parsing
+//!
+//! Also provides:
+//! - ASCII tree visualization for expression trees
+//! - Step-by-step trace output
 
 use std::time::Duration;
 use tracing::info;
@@ -100,4 +104,90 @@ impl ProfileStats {
     pub fn log(&self) {
         info!("{}", self.summary());
     }
+}
+
+/// Print a performance profile table in ASCII art
+pub fn print_profile_table(profiles: &[QueryProfile]) {
+    if profiles.is_empty() {
+        println!("No profiles to display.");
+        return;
+    }
+
+    println!("╭──────────────────────────────────────────────────╮");
+    println!("│ ⏱️  Performance Profile                          │");
+    println!("├──────────────────────────────────────────────────┤");
+
+    for p in profiles {
+        let total_ms = p.total_time.as_secs_f64() * 1000.0;
+        println!("│ {}: {}ms ({} results)    │", p.query_type, format!("{:.2}", total_ms), p.result_count);
+    }
+
+    println!("╰──────────────────────────────────────────────────╯");
+}
+
+/// Print step-by-step trace for reduction
+pub fn print_trace_step(step: usize, expr: &str, action: &str, result: &str) {
+    println!("Step {}: {}", step, expr);
+    println!("  📍 Match: {}", action);
+    println!("  → {}", result);
+}
+
+/// Visualize an expression tree as ASCII
+pub fn visualize_expr_tree(expr: &str, indent: usize) -> String {
+    let mut output = String::new();
+    let prefix = make_indent("  ", indent);
+
+    if expr.starts_with('(') {
+        let parts = parse_expr_parts(expr);
+        if parts.is_empty() {
+            output.push_str(&format!("{}{}\n", prefix, expr));
+        } else {
+            output.push_str(&format!("{}{}\n", prefix, parts[0]));
+            for part in &parts[1..] {
+                output.push_str(&visualize_expr_tree(part, indent + 1));
+            }
+        }
+    } else {
+        output.push_str(&format!("{}{}\n", prefix, expr));
+    }
+
+    output
+}
+
+fn parse_expr_parts(expr: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut depth = 0;
+    let mut current = String::new();
+
+    for c in expr.chars() {
+        match c {
+            '(' => {
+                depth += 1;
+                current.push(c);
+            }
+            ')' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ' ' if depth == 0 => {
+                if !current.is_empty() {
+                    results.push(current.trim().to_string());
+                    current = String::new();
+                }
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        results.push(current.trim().to_string());
+    }
+
+    results
+}
+
+fn make_indent(s: &str, n: usize) -> String {
+    (0..n).map(|_| s).collect()
 }
