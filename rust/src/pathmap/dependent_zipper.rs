@@ -1,3 +1,5 @@
+#![allow(clippy::wrong_self_convention)]
+
 use super::trie_core::r#ref::TrieRef;
 
 use super::PathMap;

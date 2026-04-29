@@ -67,15 +67,15 @@ pub fn indices_to_bob<const NUM_SIZE: usize, R: PathInteger<NUM_SIZE>>(
 ) -> usize {
     assert!(xs.len() <= 8);
     let steps = xs.iter().map(|x| (NUM_SIZE * 8) - (x.leading_zeros() as usize)).max().unwrap_or(0);
-    for c in (0..steps).rev() {
-        bob.push(0);
-        for i in 0..xs.len() {
-            unsafe {
-                *bob.last_mut().unwrap_unchecked() |=
-                    ((xs[i] >> c) & R::one()).to_u8().unwrap_unchecked() << i;
-            }
-        }
-    }
+for c in (0..steps).rev() {
+bob.push(0);
+for (i, &x) in xs.iter().enumerate() {
+unsafe {
+*bob.last_mut().unwrap_unchecked() |=
+((x >> c) & R::one()).to_u8().unwrap_unchecked() << i;
+}
+}
+}
     steps
 }
 
@@ -83,13 +83,13 @@ pub fn indices_to_bob<const NUM_SIZE: usize, R: PathInteger<NUM_SIZE>>(
 /// Requires `xs` to be zeroed.
 pub fn bob_to_indices<const NUM_SIZE: usize, R: PathInteger<NUM_SIZE>>(bob: &[u8], xs: &mut [R]) {
     assert!(xs.len() <= 8 && bob.len() <= NUM_SIZE * 8);
-    for i in 0..bob.len() {
-        for k in 0..xs.len() {
-            unsafe {
-                xs[k] |= R::from_u8((bob[i] >> k) & 1).unwrap_unchecked() << (bob.len() - 1 - i);
-            }
-        }
-    }
+for (i, &bob_byte) in bob.iter().enumerate() {
+for (k, x) in xs.iter_mut().enumerate() {
+unsafe {
+*x |= R::from_u8((bob_byte >> k) & 1).unwrap_unchecked() << (bob.len() - 1 - i);
+}
+}
+}
 }
 
 /// Encode multiple integers big-endian round-robin wise into a byte path.

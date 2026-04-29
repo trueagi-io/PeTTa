@@ -1,9 +1,11 @@
 //! # Zipper Usage
 //!
-//! A zipper represents a cursor in a trie, and has a location called the focus.  A zipper can be moved
-//! within the trie in order to access the trie for reading and/or writing.  A zipper's focus may not be
+//! A zipper represents a cursor in a trie, and has a location called the focus. A zipper can be moved
+//! within the trie in order to access the trie for reading and/or writing. A zipper's focus may not be
 //! moved above the zipper's root.
 //!
+
+#![allow(clippy::wrong_self_convention, clippy::assertions_on_constants)]
 
 use fast_slice_utils::find_prefix_overlap;
 use maybe_dangling::MaybeDangling;
@@ -2723,10 +2725,10 @@ unsafe { core::mem::transmute(root_node.as_tagged()) }
                 }
             }
             Self {
-                origin_path: SliceOrLen::from(path),
-                root_key_start,
-                root_parent_key_start,
-                root_val: root_val,
+origin_path: SliceOrLen::from(path),
+root_key_start,
+root_parent_key_start,
+root_val,
                 focus_node: MiriWrapper::new(focus),
                 root_node,
                 focus_iter_token: NODE_ITER_INVALID,

@@ -58,11 +58,7 @@ self.query_errors_total.load(std::sync::atomic::Ordering::Relaxed)
 pub fn query_duration_avg(&self) -> Duration {
 let sum = self.query_duration_sum_ns.load(std::sync::atomic::Ordering::Relaxed);
 let count = self.query_duration_count.load(std::sync::atomic::Ordering::Relaxed);
-if count == 0 {
-Duration::ZERO
-} else {
-Duration::from_nanos(sum / count)
-}
+Duration::from_nanos(sum.checked_div(count).unwrap_or(0))
 }
 
 pub fn uptime(&self) -> Duration {

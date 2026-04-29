@@ -1,3 +1,5 @@
+#![allow(clippy::wrong_self_convention)]
+
 use core::ptr::NonNull;
 use maybe_dangling::MaybeDangling;
 
@@ -205,14 +207,14 @@ pub trait ZipperWriting<V: Clone + Send + Sync, A: Allocator = GlobalAlloc>:
     where
         V: Lattice;
 
-    /// Experiment.  GOAT, document this
-    fn meet_2<'z, ZA: ZipperInfallibleSubtries<V, A>, ZB: ZipperInfallibleSubtries<V, A>>(
-        &mut self,
-        rz_a: &ZA,
-        rz_b: &ZB,
-    ) -> AlgebraicStatus
-    where
-        V: Lattice;
+/// Experiment. GOAT, document this
+fn meet_2<ZA: ZipperInfallibleSubtries<V, A>, ZB: ZipperInfallibleSubtries<V, A>>(
+&mut self,
+rz_a: &ZA,
+rz_b: &ZB,
+) -> AlgebraicStatus
+where
+V: Lattice;
 
     /// Subtracts the subtrie downstream of the focus of `read_zipper` from the subtrie below the `self` zipper's
     /// focus
@@ -1330,11 +1332,17 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperSubtries<V, A> for Writ
     }
 }
 
+impl<V: Clone + Send + Sync + Unpin> Default for WriteZipperOwned<V> {
+fn default() -> Self {
+Self::new()
+}
+}
+
 impl<V: Clone + Send + Sync + Unpin> WriteZipperOwned<V> {
-    /// Create a brand new `WriteZipperOwned` containing no paths nor values
-    pub fn new() -> Self {
-        PathMap::new().into_write_zipper([])
-    }
+/// Create a brand new `WriteZipperOwned` containing no paths nor values
+pub fn new() -> Self {
+PathMap::new().into_write_zipper([])
+}
 }
 
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> WriteZipperOwned<V, A> {

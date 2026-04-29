@@ -26,10 +26,11 @@ pub(crate) fn render_debug_path(path: &[u8], mode: PathRenderMode) -> Option<Cow
     if mode == PathRenderMode::RequireAscii || mode == PathRenderMode::TryAscii {
         let short_path = &path[..path.len().min(MAX_DEBUG_ASCII_PATH_LEN)];
 
-        //QUESTION: Do we want to actually fall back if we encounter any control chars?
-        //  Chars <32 might indicate that we would be better off printing this as
-        //  a list as opposed to a str.
-        match str::from_utf8(short_path) {
+//QUESTION: Do we want to actually fall back if we encounter any control chars?
+// Chars <32 might indicate that we would be better off printing this as
+// a list as opposed to a str.
+#[allow(clippy::incompatible_msrv)]
+match str::from_utf8(short_path) {
             Ok(key) => {
                 if path.len() > MAX_DEBUG_ASCII_PATH_LEN {
                     return Some(Cow::Owned(format!("{key}...")));

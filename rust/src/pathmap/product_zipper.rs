@@ -1,3 +1,5 @@
+#![allow(clippy::wrong_self_convention)]
+
 use super::alloc::{Allocator, GlobalAlloc};
 use super::trie_core::node::*;
 use super::trie_core::r#ref::TrieRef;

@@ -618,10 +618,10 @@ impl Stack {
         Self::push_state_raw(&mut self.stack, &mut self.position, z);
     }
 
-    pub fn push_state_raw<'a, Z>(stack: &mut Vec<StackFrame>, position: &mut usize, zipper: &Z)
-    where
-        Z: Zipper,
-    {
+pub fn push_state_raw<Z>(stack: &mut Vec<StackFrame>, position: &mut usize, zipper: &Z)
+where
+Z: Zipper,
+{
         *position = position.wrapping_add(1);
         assert!(*position <= stack.len(), "stack invariant: position <= len");
         if *position == stack.len() {

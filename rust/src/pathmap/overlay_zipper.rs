@@ -11,9 +11,11 @@
 // a zipper API.
 //
 //A half-step might be to change the mapping function into a "merging" function,
-// e.g. `Fn(Option<&VBase>, Option<&VOverlay>) -> VOverlay`  Although this also breaks the trait contract
+// e.g. `Fn(Option<&VBase>, Option<&VOverlay>) -> VOverlay` Although this also breaks the trait contract
 // with ZipperValues, etc. because we don't have a place to store the newly created value
 //
+
+#![allow(clippy::wrong_self_convention)]
 
 use super::utils::{BitMask, ByteMask};
 use super::zipper::{Zipper, ZipperIteration, ZipperMoving, ZipperValues};

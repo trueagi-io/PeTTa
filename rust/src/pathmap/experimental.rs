@@ -2,7 +2,7 @@
 //!
 //! Contains `FullZipper` and `NullZipper` - test stubs with incomplete methods.
 
-#![allow(unused_variables, unreachable_code, unused_mut, dead_code, unused_imports)]
+#![allow(unused_variables, unreachable_code, unused_mut, dead_code, unused_imports, clippy::wrong_self_convention)]
 
 use super::PathMap;
 use super::TrieValue;

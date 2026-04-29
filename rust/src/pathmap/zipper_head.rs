@@ -487,13 +487,13 @@ where
 /// Ensures that the node at the specified path exists, and is a [CellByteNode]
 ///
 /// Discussion: This function is fairly complicated because we are only able to safely access the top
-///  of the focus stack.
+/// of the focus stack.
 /// There are 4 paths through this function:
-/// 1. Both the WriteZipper and target path are at the root.  This is the only case where the reference
-///  to the root_val is returned.
+/// 1. Both the WriteZipper and target path are at the root. This is the only case where the reference
+///    to the root_val is returned.
 /// 2. The target path is below the focus root, in which case we traverse to the node
 /// 3. The zipper focus doesn't exist, in which case we need to create it, and then follow one of the
-///  other paths.
+///    other paths.
 /// 4. The target path is the zipper focus
 pub(crate) fn prepare_exclusive_write_path<
     'a,
