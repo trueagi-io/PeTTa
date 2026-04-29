@@ -9,15 +9,16 @@ pub trait Diagnostic: Send + Sync {
     fn location(&self) -> Option<DiagLocation>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DiagSeverity {
+    #[default]
     Error,
     Warning,
     Hint,
     Info,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DiagLocation {
     pub file: String,
     pub line: u32,
@@ -133,7 +134,7 @@ pub(crate) fn parse_backend_error(raw: &str) -> BackendErrorKind {
 }
 
 // ---------------------------------------------------------------------------
-// Shared error kind parser
+// Helper functions
 // ---------------------------------------------------------------------------
 
 fn extract_name_arity(raw: &str) -> Option<(String, usize)> {

@@ -12,6 +12,18 @@ use super::config::EngineConfig;
 use super::errors::{PeTTaError, parse_backend_error};
 use crate::engine::values::MettaResult;
 
+/// Protocol status codes
+mod status {
+    pub const SUCCESS: u8 = 0;
+    pub const ERROR: u8 = 1;
+}
+
+/// Protocol query types
+mod query_type {
+    pub const FILE: u8 = b'F';
+    pub const STRING: u8 = b'S';
+}
+
 trait WriteExt {
     fn write_checked(&mut self, data: &[u8]) -> Result<(), PeTTaError>;
 }
@@ -82,9 +94,9 @@ fn send_query_inner(
     let status = b[0];
 
     match status {
-        0 => {
+        status::SUCCESS => {
             let count = read_u32_with_timeout(reader, start_time, config)?;
-            trace!("Query succeeded: {} result(s)", count);
+            trace!("Query succeeded: {} results(s)", count);
             let mut results = Vec::with_capacity(count as usize);
             for _ in 0..count {
                 let len = read_u32_with_timeout(reader, start_time, config)?;
@@ -96,7 +108,7 @@ fn send_query_inner(
             }
             Ok(results)
         }
-        1 => {
+        status::ERROR => {
             let len = read_u32_with_timeout(reader, start_time, config)?;
             let mut buf = vec![0u8; len as usize];
             read_exact_with_timeout(reader, &mut buf, start_time, config)?;
@@ -162,7 +174,7 @@ pub fn load_metta_file(
         return Err(PeTTaError::FileNotFound(abs));
     }
     debug!("Loading MeTTa file: {}", abs.display());
-    ProtocolClient::send_query(stdin_pipe, stdout_pipe, b'F', &abs.to_string_lossy(), config)
+    ProtocolClient::send_query(stdin_pipe, stdout_pipe, query_type::FILE, &abs.to_string_lossy(), config)
 }
 
 pub fn load_metta_files(
@@ -186,7 +198,7 @@ pub fn load_metta_files(
         })
         .collect::<Result<Vec<String>, PeTTaError>>()?
         .join("\n");
-    ProtocolClient::send_query(stdin_pipe, stdout_pipe, b'S', &combined, config)
+    ProtocolClient::send_query(stdin_pipe, stdout_pipe, query_type::STRING, &combined, config)
 }
 
 pub fn process_metta_string(
@@ -196,5 +208,5 @@ pub fn process_metta_string(
     config: &EngineConfig,
 ) -> Result<Vec<MettaResult>, PeTTaError> {
     debug!("Processing MeTTa string ({} bytes)", metta_code.len());
-    ProtocolClient::send_query(stdin_pipe, stdout_pipe, b'S', metta_code, config)
+    ProtocolClient::send_query(stdin_pipe, stdout_pipe, query_type::STRING, metta_code, config)
 }

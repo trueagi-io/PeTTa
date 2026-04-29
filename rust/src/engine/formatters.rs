@@ -44,6 +44,7 @@ impl OutputFormatter for PrettyFormatter {
     }
 }
 
+#[derive(Default)]
 pub struct CompactFormatter;
 
 impl CompactFormatter {
@@ -52,19 +53,9 @@ impl CompactFormatter {
     }
 }
 
-impl Default for CompactFormatter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl OutputFormatter for CompactFormatter {
     fn format(&self, results: &[MettaResult]) -> String {
-        results
-            .iter()
-            .map(|r| r.value.clone())
-            .collect::<Vec<_>>()
-            .join(" ")
+        results.iter().map(|r| &*r.value).collect::<Vec<_>>().join(" ")
     }
 
     fn format_single(&self, result: &MettaResult) -> String {
@@ -72,6 +63,7 @@ impl OutputFormatter for CompactFormatter {
     }
 }
 
+#[derive(Default)]
 pub struct JsonFormatter;
 
 impl JsonFormatter {
@@ -80,23 +72,18 @@ impl JsonFormatter {
     }
 }
 
-impl Default for JsonFormatter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl OutputFormatter for JsonFormatter {
     fn format(&self, results: &[MettaResult]) -> String {
         let values: Vec<&str> = results.iter().map(|r| r.value.as_str()).collect();
-        serde_json::to_string(&values).unwrap_or_default()
+        serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string())
     }
 
     fn format_single(&self, result: &MettaResult) -> String {
-        serde_json::to_string(&result.value).unwrap_or_default()
+        serde_json::to_string(&result.value).unwrap_or_else(|_| "\"\"".to_string())
     }
 }
 
+#[derive(Default)]
 pub struct SExprFormatter;
 
 impl SExprFormatter {
@@ -105,19 +92,9 @@ impl SExprFormatter {
     }
 }
 
-impl Default for SExprFormatter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl OutputFormatter for SExprFormatter {
     fn format(&self, results: &[MettaResult]) -> String {
-        results
-            .iter()
-            .map(|r| self.format_single(r))
-            .collect::<Vec<_>>()
-            .join("\n")
+        results.iter().map(|r| self.format_single(r)).collect::<Vec<_>>().join("\n")
     }
 
     fn format_single(&self, result: &MettaResult) -> String {

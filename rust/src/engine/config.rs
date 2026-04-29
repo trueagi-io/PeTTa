@@ -25,15 +25,10 @@ impl std::fmt::Display for Backend {
 /// Backend capabilities for feature detection
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendCapabilities {
-    /// Supports parallel execution
     pub supports_parallel: bool,
-    /// Supports persistent storage
     pub supports_persistence: bool,
-    /// Supports incremental updates
     pub supports_incremental: bool,
-    /// Maximum number of atoms (if limited)
     pub max_atoms: Option<usize>,
-    /// List of supported features
     pub features: Vec<&'static str>,
 }
 
@@ -79,14 +74,11 @@ impl BackendCapabilities {
 pub enum BackendConfig {
     /// MORK backend configuration
     Mork {
-        /// Arena size for MORK (default: 1MB)
         arena_size: usize,
-        /// Enable garbage collection
         enable_gc: bool,
     },
     /// SWI-Prolog backend configuration
     Swipl {
-        /// Path to SWI-Prolog binary
         path: PathBuf,
     },
 }
@@ -111,27 +103,16 @@ impl Default for BackendConfig {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct EngineConfig {
-    /// Backend implementation to use (default: auto-detect).
     pub backend: Backend,
-    /// Backend-specific configuration
     pub backend_config: BackendConfig,
-    /// Path to the SWI-Prolog binary (defaults to "swipl").
     pub swipl_path: PathBuf,
-    /// Source directory containing .pl files (defaults to `<project_root>/src`).
     pub src_dir: Option<PathBuf>,
-    /// Enable verbose debug output from Prolog.
     pub verbose: bool,
-    /// Enable query profiling.
     pub profile: bool,
-    /// Timeout for query execution. None means no timeout.
     pub query_timeout: Option<Duration>,
-    /// Maximum number of automatic restarts on subprocess crash (default: 0).
     pub max_restarts: u32,
-    /// Minimum SWI-Prolog version required (major, minor).
     pub min_swipl_version: (u32, u32),
-    /// Enable parallel execution
     pub parallel: bool,
-    /// Auto-detect best backend
     pub auto_detect: bool,
 }
 

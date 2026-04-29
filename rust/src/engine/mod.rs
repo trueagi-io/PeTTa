@@ -275,36 +275,35 @@ impl PeTTaEngine {
         EngineConfig::new(project_root)
     }
 
-    pub fn eval(&mut self, expr: &str) -> Result<MettaResult, PeTTaError> {
-        let results = self.process_metta_string(expr)?;
-        Ok(results.into_iter().next().unwrap_or(MettaResult { value: String::new() }))
-    }
+pub fn eval(&mut self, expr: &str) -> Result<MettaResult, PeTTaError> {
+    let results = self.process_metta_string(expr)?;
+    Ok(results.into_iter().next().unwrap_or(MettaResult { value: String::new() }))
+}
 
-    pub fn eval_int(&mut self, expr: &str) -> Result<i64, PeTTaError> {
-        let result = self.eval(expr)?;
-        result.value.parse().map_err(|_| {
-            PeTTaError::ProtocolError(format!("Expected integer, got: {}", result.value))
-        })
-    }
+pub fn eval_int(&mut self, expr: &str) -> Result<i64, PeTTaError> {
+    let result = self.eval(expr)?;
+    result.value.parse().map_err(|_| {
+        PeTTaError::ProtocolError(format!("Expected integer, got: {}", result.value))
+    })
+}
 
-    pub fn eval_float(&mut self, expr: &str) -> Result<f64, PeTTaError> {
-        let result = self.eval(expr)?;
-        result.value.parse().map_err(|_| {
-            PeTTaError::ProtocolError(format!("Expected float, got: {}", result.value))
-        })
-    }
+pub fn eval_float(&mut self, expr: &str) -> Result<f64, PeTTaError> {
+    let result = self.eval(expr)?;
+    result.value.parse().map_err(|_| {
+        PeTTaError::ProtocolError(format!("Expected float, got: {}", result.value))
+    })
+}
 
-    pub fn eval_bool(&mut self, expr: &str) -> Result<bool, PeTTaError> {
-        let result = self.eval(expr)?;
-        result
-            .value
-            .parse()
-            .map_err(|_| PeTTaError::ProtocolError(format!("Expected bool, got: {}", result.value)))
-    }
+pub fn eval_bool(&mut self, expr: &str) -> Result<bool, PeTTaError> {
+    let result = self.eval(expr)?;
+    result.value.parse().map_err(|_| {
+        PeTTaError::ProtocolError(format!("Expected bool, got: {}", result.value))
+    })
+}
 
-    pub fn eval_str(&mut self, expr: &str) -> Result<String, PeTTaError> {
-        self.eval(expr).map(|r| r.value)
-    }
+pub fn eval_str(&mut self, expr: &str) -> Result<String, PeTTaError> {
+    self.eval(expr).map(|r| r.value)
+}
 
     pub fn load(&mut self, path: impl AsRef<Path>) -> Result<Vec<MettaResult>, PeTTaError> {
         self.load_metta_file(path.as_ref())

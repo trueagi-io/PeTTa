@@ -23,6 +23,14 @@ use nom::{
 
 use crate::MettaValue;
 
+/// Constants for parser
+mod constants {
+    pub const PAREN_OPEN: char = '(';
+    pub const PAREN_CLOSE: char = ')';
+    pub const STRING_DELIM: char = '"';
+    pub const VARIABLE_PREFIX: char = '$';
+}
+
 /// Parse a MeTTa S-expression string into a `MettaValue`.
 ///
 /// This is the main entry point for the native Rust parser.
@@ -52,7 +60,14 @@ pub fn parse_metta(input: &str) -> Result<MettaValue, String> {
 fn sexpr(input: &str) -> IResult<&str, MettaValue> {
     preceded(
         multispace0,
-        alt((string_literal, parenthesized_list, variable, number, boolean_literal, atom)),
+        alt((
+            string_literal,
+            parenthesized_list,
+            variable,
+            number,
+            boolean_literal,
+            atom,
+        )),
     )
     .parse(input)
 }
@@ -60,16 +75,16 @@ fn sexpr(input: &str) -> IResult<&str, MettaValue> {
 /// Parse a parenthesized list/expression: `(a b c)` or `()`
 fn parenthesized_list(input: &str) -> IResult<&str, MettaValue> {
     let (rest, items) = delimited(
-        terminated(char('('), multispace0),
+        terminated(char(constants::PAREN_OPEN), multispace0),
         many0(terminated(sexpr, multispace0)),
-        char(')'),
+        char(constants::PAREN_CLOSE),
     )
     .parse(input)?;
 
     if items.is_empty() {
         return Ok((rest, MettaValue::List(vec![])));
     }
-    // If head is an Atom and there are more items, treat as Expression (function application)
+
     if let MettaValue::Atom(head) = items[0].clone() {
         if items.len() > 1 {
             let args = items.into_iter().skip(1).collect();
@@ -81,7 +96,13 @@ fn parenthesized_list(input: &str) -> IResult<&str, MettaValue> {
 
 /// Parse a string literal: `"hello"`
 fn string_literal(input: &str) -> IResult<&str, MettaValue> {
-    delimited(char('"'), parse_string_content, char('"')).map(MettaValue::Atom).parse(input)
+    delimited(
+        char(constants::STRING_DELIM),
+        parse_string_content,
+        char(constants::STRING_DELIM),
+    )
+    .map(MettaValue::Atom)
+    .parse(input)
 }
 
 fn parse_string_content(input: &str) -> IResult<&str, String> {
@@ -144,8 +165,10 @@ fn parse_string_content(input: &str) -> IResult<&str, String> {
 /// Parse a MeTTa variable: `$x`, `$foo`
 fn variable(input: &str) -> IResult<&str, MettaValue> {
     preceded(
-        char('$'),
-        map(take_while1(is_token_char), |name: &str| MettaValue::Atom(format!("${}", name))),
+        char(constants::VARIABLE_PREFIX),
+        map(take_while1(is_token_char), |name: &str| {
+            MettaValue::Atom(format!("${}", name))
+        }),
     )
     .parse(input)
 }
@@ -198,8 +221,9 @@ fn atom(input: &str) -> IResult<&str, MettaValue> {
 }
 
 /// Characters allowed in tokens (atoms, variable names, numbers).
+#[inline]
 fn is_token_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_' || c == '-' || c == '+' || c == '*' || c == '/' || c == '.'
+    matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '+' | '*' | '/' | '.')
 }
 
 // ---------------------------------------------------------------------------
