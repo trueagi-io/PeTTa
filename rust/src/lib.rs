@@ -26,13 +26,20 @@ pub mod viz;
 
 pub mod engine;
 pub use engine::{
-    Backend, BackendCapabilities, BackendConfig, BackendErrorKind, EngineConfig, MIN_SWIPL_VERSION,
-    MettaResult, MettaValue, PeTTaEngine, PeTTaError, swipl_available,
+Backend, BackendCapabilities, BackendConfig, BackendErrorKind, EngineConfig, MIN_SWIPL_VERSION,
+MettaResult, MettaValue, PeTTaEngine, PeTTaError, swipl_available,
 };
 
 #[cfg(feature = "bench")]
 pub mod benchmark;
 pub mod differential;
+
+// Phase 4: Production Excellence
+pub mod observability;
+pub mod reliability;
+
+pub use observability::{ObservabilityConfig, Metrics, HealthStatus, ServiceStatus};
+pub use reliability::{ReliabilityConfig, CircuitBreaker, CircuitState};
 
 #[cfg(test)]
 mod tests {
