@@ -26,9 +26,13 @@ pub mod viz;
 
 pub mod engine;
 pub use engine::{
-    Backend, BackendErrorKind, EngineConfig, MIN_SWIPL_VERSION, MettaResult, MettaValue,
-    PeTTaEngine, PeTTaError, swipl_available,
+    Backend, BackendCapabilities, BackendConfig, BackendErrorKind, EngineConfig, MIN_SWIPL_VERSION,
+    MettaResult, MettaValue, PeTTaEngine, PeTTaError, swipl_available,
 };
+
+#[cfg(feature = "bench")]
+pub mod benchmark;
+pub mod differential;
 
 #[cfg(test)]
 mod tests {
@@ -253,15 +257,15 @@ mod tests {
         assert!(e.to_string().contains("/nonexistent"));
         let e = PeTTaError::ProtocolError("test error".into());
         assert!(e.to_string().contains("test error"));
-let e = BackendErrorKind::UndefinedFunction {
-name: "foo".into(),
-arity: 2,
-context: String::new(),
-suggestion: "bar".into(),
-};
-let s = e.to_string();
-assert!(s.contains("foo/2"));
-assert!(s.contains("bar"));
+        let e = BackendErrorKind::UndefinedFunction {
+            name: "foo".into(),
+            arity: 2,
+            context: String::new(),
+            suggestion: "bar".into(),
+        };
+        let s = e.to_string();
+        assert!(s.contains("foo/2"));
+        assert!(s.contains("bar"));
     }
 
     #[test]

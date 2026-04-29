@@ -18,6 +18,8 @@ mod values;
 mod version;
 
 pub use config::Backend;
+pub use config::BackendCapabilities;
+pub use config::BackendConfig;
 pub use config::EngineConfig;
 pub use errors::{BackendErrorKind, PeTTaError};
 pub use values::{MettaResult, MettaValue};
