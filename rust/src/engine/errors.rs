@@ -18,38 +18,52 @@ use std::time::Duration;
 // fails, the raw message is returned inside BackendErrorKind::Generic.
 
 /// Unified backend error kinds (canonical type for all backends).
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum BackendErrorKind {
-    #[error("MeTTa function '{name}/{arity}' is not defined{}", .suggestion.as_ref().map(|s| format!(". Did you mean '{}'?", s)).unwrap_or_default())]
-    UndefinedFunction { name: String, arity: usize, suggestion: Option<String> },
+    #[derive(Debug, Clone, thiserror::Error)]
+    pub enum BackendErrorKind {
+    #[error("🔴 undefined function `{name}/{arity}`\n{context}{suggestion}")]
+    UndefinedFunction {
+        name: String,
+        arity: usize,
+        context: String,
+        suggestion: String,
+    },
 
-    #[error("Type error: expected {expected}, got {found}{}", .context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
-    TypeMismatch { expected: String, found: String, context: Option<String> },
+    #[error("🟡 type error: expected {expected}, got {found}{context}")]
+    TypeMismatch {
+        expected: String,
+        found: String,
+        context: String,
+    },
 
-    #[error("Syntax error: {detail}")]
-    SyntaxError { location: Option<String>, line: Option<u32>, column: Option<u32>, detail: String },
+    #[error("🔴 syntax error: {detail}{location}")]
+    SyntaxError {
+        location: String,
+        line: Option<u32>,
+        column: Option<u32>,
+        detail: String,
+    },
 
-    #[error("Variable is not bound")]
-    UnboundVariable { location: Option<String> },
+    #[error("🟡 variable is not bound{location}")]
+    UnboundVariable { location: String },
 
-    #[error("Argument is not sufficiently instantiated{}", .location.as_ref().map(|l| format!(" at {}", l)).unwrap_or_default())]
-    UninstantiatedArgument { location: Option<String> },
+    #[error("🟡 argument not instantiated{location}")]
+    UninstantiatedArgument { location: String },
 
-    #[error("Permission denied: {operation} on {target}")]
+    #[error("🔴 permission denied: {operation} on {target}")]
     PermissionDenied { operation: String, target: String },
 
-    #[error("{error_type} {term} does not exist")]
+    #[error("🔴 {error_type} {term} does not exist")]
     ExistenceError { error_type: String, term: String },
 
-    #[error("Stack overflow{}", .limit.map(|l| format!(" (limit: {})", l)).unwrap_or_default())]
-    StackOverflow { limit: Option<u32> },
+    #[error("🔴 stack overflow{limit}")]
+    StackOverflow { limit: String },
 
-    #[error("Evaluation error: {0}")]
+    #[error("🔴 evaluation error: {0}")]
     EvaluationError(String),
 
-    #[error("{0}")]
+    #[error("🔴 {0}")]
     Generic(String),
-}
+    }
 
 /// Top-level error type for PeTTa operations.
 #[derive(Debug, thiserror::Error)]
@@ -120,127 +134,150 @@ fn extract_between(s: &str, start: &str, end: &str) -> Option<String> {
 }
 
 fn parse_json_error(raw: &str) -> Option<BackendErrorKind> {
-    // Quick check: must start with '{' (allow whitespace)
-    if raw.trim_start().starts_with('{') {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
-            if let Some(obj) = v.as_object() {
-                // message/raw fields
-                let message = obj.get("message").and_then(|m| m.as_str()).map(|s| s.to_string());
-                let raw_field = obj.get("raw").and_then(|m| m.as_str()).map(|s| s.to_string());
-                // Additional structured fields we may emit from Prolog
-                let functor = obj.get("functor").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let _functor_arity =
-                    obj.get("functor_arity").and_then(|v| v.as_u64()).map(|n| n as usize);
-                let name = obj.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let name_arity =
-                    obj.get("name_arity").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let suggestion =
-                    obj.get("suggestion").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let context = obj.get("context").and_then(|v| v.as_str()).map(|s| s.to_string());
-                // kind-based parsing (for now treat as swipl-like)
-                if let Some(kind) = obj.get("kind").and_then(|k| k.as_str())
-                    && matches!(kind, "swipl" | "prolog")
-                {
-                    // Use explicit structured fields when present to construct
-                    // precise BackendErrorKind variants.
-                    if let (Some(n), Some(a)) = (name.clone(), name_arity.clone()) {
-                        // Try to parse name_arity as an arity number
-                        if let Ok(arity) = a.parse::<usize>() {
-                            return Some(BackendErrorKind::UndefinedFunction {
-                                name: n,
-                                arity,
-                                suggestion,
-                            });
+        // Quick check: must start with '{' (allow whitespace)
+        if raw.trim_start().starts_with('{') {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
+                if let Some(obj) = v.as_object() {
+                    let message = obj.get("message").and_then(|m| m.as_str()).map(|s| s.to_string());
+                    let raw_field = obj.get("raw").and_then(|m| m.as_str()).map(|s| s.to_string());
+                    let functor = obj.get("functor").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let name = obj.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let name_arity =
+                        obj.get("name_arity").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let suggestion_str =
+                        obj.get("suggestion").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let context_str = obj.get("context").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+                    if let Some(kind) = obj.get("kind").and_then(|k| k.as_str())
+                        && matches!(kind, "swipl" | "prolog")
+                    {
+                        if let (Some(n), Some(a)) = (name.clone(), name_arity.clone()) {
+                            if let Ok(arity) = a.parse::<usize>() {
+                                let suggestion = suggestion_str
+                                    .map(|s| format!("\n💡 suggestion: did you mean `{}`?", s))
+                                    .unwrap_or_default();
+                                let context = context_str
+                                    .map(|c| format!(" at {}", c))
+                                    .unwrap_or_default();
+                                return Some(BackendErrorKind::UndefinedFunction {
+                                    name: n,
+                                    arity,
+                                    context,
+                                    suggestion,
+                                });
+                            }
                         }
+                        if let Some(f) = functor.clone() {
+                            if f.contains("syntax_error") {
+                                let location = context_str
+                                    .clone()
+                                    .map(|c| format!(" at {}", c))
+                                    .unwrap_or_default();
+                                return Some(BackendErrorKind::SyntaxError {
+                                    location,
+                                    line: None,
+                                    column: None,
+                                    detail: message.clone().unwrap_or_else(|| "syntax error".into()),
+                                });
+                            }
+                            if f.contains("existence_error") {
+                                return Some(BackendErrorKind::ExistenceError {
+                                    error_type: f,
+                                    term: raw_field.clone().unwrap_or_default(),
+                                });
+                            }
+                        }
+                        if let Some(formal) = obj.get("formal").and_then(|v| v.as_str()) {
+                            if let Ok(k) = parse_error_kind(formal) {
+                                return Some(k);
+                            }
+                        }
+                        let probe = raw_field.as_deref().or(message.as_deref()).unwrap_or(raw);
+                        return parse_error_kind(probe).ok();
                     }
-                    if let Some(f) = functor.clone() {
-                        // Map some known functors heuristically
-                        if f.contains("syntax_error") {
-                            return Some(BackendErrorKind::SyntaxError {
-                                location: context.clone(),
-                                line: None,
-                                column: None,
-                                detail: message.clone().unwrap_or_else(|| "syntax error".into()),
-                            });
-                        }
-                        if f.contains("existence_error") {
-                            return Some(BackendErrorKind::ExistenceError {
-                                error_type: f,
-                                term: raw_field.clone().unwrap_or_default(),
-                            });
-                        }
+                    if let Some(msg) = message.or(raw_field) {
+                        return Some(BackendErrorKind::Generic(msg));
                     }
-                    // Prefer the 'formal' or 'raw' fields if available; fall back to message.
-                    if let Some(formal) = obj.get("formal").and_then(|v| v.as_str()) {
-                        // Try parsing the formal representation first
-                        if let Ok(k) = parse_error_kind(formal) {
-                            return Some(k);
-                        }
-                    }
-                    let probe = raw_field.as_deref().or(message.as_deref()).unwrap_or(raw);
-                    return parse_error_kind(probe).ok();
-                }
-                // fallback: use message/raw or raw text
-                if let Some(msg) = message.or(raw_field) {
-                    return Some(BackendErrorKind::Generic(msg));
                 }
             }
         }
+        None
     }
-    None
-}
 
 fn parse_error_kind(raw: &str) -> Result<BackendErrorKind, String> {
-    // Try JSON structured error first. Prolog may emit a JSON object with
-    // deterministic fields when available. Example: {"kind":"swipl","message":"...","raw":"..."}
-    if let Some(kind) = parse_json_error(raw) {
-        return Ok(kind);
-    }
-    if raw.contains("existence_error") && raw.contains("procedure") {
-        if let Some((name, arity)) = extract_name_arity(raw) {
-            return Ok(BackendErrorKind::UndefinedFunction { name, arity, suggestion: None });
+        // Try JSON structured error first. Prolog may emit a JSON object with
+        // deterministic fields when available. Example: {"kind":"swipl","message":"...","raw":"..."}
+        if let Some(kind) = parse_json_error(raw) {
+            return Ok(kind);
         }
+        if raw.contains("existence_error") && raw.contains("procedure") {
+            if let Some((name, arity)) = extract_name_arity(raw) {
+                let suggestion = if let Some(s) = extract_between(raw, "Did you mean ", "?") {
+                    format!("\n💡 suggestion: did you mean `{}`?", s.trim_end_matches(')'))
+                } else {
+                    String::new()
+                };
+                let context = extract_between(raw, "in ", " at")
+                    .map(|loc| format!(" at {}", loc))
+                    .unwrap_or_default();
+                return Ok(BackendErrorKind::UndefinedFunction {
+                    name,
+                    arity,
+                    context,
+                    suggestion,
+                });
+            }
+        }
+        if raw.contains("type_error") {
+            let expected = extract_between(raw, "expected ", ",")
+                .unwrap_or_else(|| "unknown".into());
+            let found = extract_between(raw, "got ", ")")
+                .unwrap_or_else(|| "unknown".into());
+            let context = extract_between(raw, "in ", " at")
+                .map(|loc| format!(" at {}", loc))
+                .unwrap_or_default();
+            return Ok(BackendErrorKind::TypeMismatch {
+                expected,
+                found,
+                context,
+            });
+        }
+        if raw.contains("syntax_error") {
+            let location = extract_between(raw, "line ", ":")
+                .map(|line| format!(" at line {}", line))
+                .unwrap_or_default();
+            let detail = extract_between(raw, "syntax_error(", ")")
+                .unwrap_or_else(|| "unknown".into());
+            return Ok(BackendErrorKind::SyntaxError {
+                location,
+                line: None,
+                column: None,
+                detail,
+            });
+        }
+        if raw.contains("instantiation_error") || raw.contains("uninstantiated") {
+            let location = extract_between(raw, "in ", " at")
+                .map(|loc| format!(" at {}", loc))
+                .unwrap_or_default();
+            return Ok(BackendErrorKind::UninstantiatedArgument { location });
+        }
+        if raw.contains("Stack depth") || raw.contains("stack_limit") {
+            let limit = extract_between(raw, "limit: ", ")")
+                .map(|l| format!(" (limit: {})", l))
+                .unwrap_or_default();
+            return Ok(BackendErrorKind::StackOverflow { limit });
+        }
+        if raw.contains("permission_error") {
+            let operation =
+                extract_between(raw, "permission_error(", ",").unwrap_or_else(|| "unknown".into());
+            let target = extract_between(raw, ", ", ")").unwrap_or_else(|| "unknown".into());
+            return Ok(BackendErrorKind::PermissionDenied { operation, target });
+        }
+        if raw.contains("existence_error") {
+            let error_type =
+                extract_between(raw, "existence_error(", ",").unwrap_or_else(|| "unknown".into());
+            let term = extract_between(raw, ", ", ")").unwrap_or_else(|| "unknown".into());
+            return Ok(BackendErrorKind::ExistenceError { error_type, term });
+        }
+        Err(raw.lines().next().unwrap_or(raw).trim().to_string())
     }
-    if raw.contains("type_error") {
-        return Ok(BackendErrorKind::TypeMismatch {
-            expected: "unknown".into(),
-            found: "unknown".into(),
-            context: None,
-        });
-    }
-    if raw.contains("syntax_error") {
-        return Ok(BackendErrorKind::SyntaxError {
-            location: extract_between(raw, "line ", ":"),
-            line: extract_between(raw, "line ", ":").and_then(|s| s.parse().ok()),
-            column: extract_between(raw, ":", "(").and_then(|s| s.parse().ok()),
-            detail: extract_between(raw, "syntax_error(", ")").unwrap_or_else(|| "unknown".into()),
-        });
-    }
-    if raw.contains("instantiation_error") {
-        return Ok(BackendErrorKind::UninstantiatedArgument {
-            location: extract_between(raw, "in ", " at"),
-        });
-    }
-    if raw.contains("uninstantiated") {
-        return Ok(BackendErrorKind::UnboundVariable {
-            location: extract_between(raw, "in ", " at"),
-        });
-    }
-    if raw.contains("Stack depth") || raw.contains("stack_limit") {
-        let limit = extract_between(raw, "limit: ", ")").and_then(|s| s.parse().ok());
-        return Ok(BackendErrorKind::StackOverflow { limit });
-    }
-    if raw.contains("permission_error") {
-        let operation =
-            extract_between(raw, "permission_error(", ",").unwrap_or_else(|| "unknown".into());
-        let target = extract_between(raw, ", ", ")").unwrap_or_else(|| "unknown".into());
-        return Ok(BackendErrorKind::PermissionDenied { operation, target });
-    }
-    if raw.contains("existence_error") {
-        let error_type =
-            extract_between(raw, "existence_error(", ",").unwrap_or_else(|| "unknown".into());
-        let term = extract_between(raw, ", ", ")").unwrap_or_else(|| "unknown".into());
-        return Ok(BackendErrorKind::ExistenceError { error_type, term });
-    }
-    Err(raw.lines().next().unwrap_or(raw).trim().to_string())
-}

@@ -22,6 +22,7 @@ mod mork;
 pub mod gxhash;
 pub mod pathmap;
 pub mod utils;
+pub mod viz;
 
 pub mod engine;
 pub use engine::{
@@ -252,14 +253,15 @@ mod tests {
         assert!(e.to_string().contains("/nonexistent"));
         let e = PeTTaError::ProtocolError("test error".into());
         assert!(e.to_string().contains("test error"));
-        let e = BackendErrorKind::UndefinedFunction {
-            name: "foo".into(),
-            arity: 2,
-            suggestion: Some("bar".into()),
-        };
-        let s = e.to_string();
-        assert!(s.contains("foo/2"));
-        assert!(s.contains("bar"));
+let e = BackendErrorKind::UndefinedFunction {
+name: "foo".into(),
+arity: 2,
+context: String::new(),
+suggestion: "bar".into(),
+};
+let s = e.to_string();
+assert!(s.contains("foo/2"));
+assert!(s.contains("bar"));
     }
 
     #[test]
