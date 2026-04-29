@@ -263,11 +263,12 @@ mod tests {
         assert_eq!(v, MettaValue::Integer("-42".into()));
     }
 
-    #[test]
-    fn test_parse_number_float() {
-        let v = parse_metta("3.14").unwrap();
-        assert!(matches!(v, MettaValue::Float(f) if (f - 3.14).abs() < 1e-10));
-    }
+#[test]
+#[allow(clippy::approx_constant)]
+fn test_parse_number_float() {
+    let v = parse_metta("3.14").unwrap();
+    assert!(matches!(v, MettaValue::Float(f) if (f - 3.14).abs() < 1e-10));
+}
 
     #[test]
     fn test_parse_string_literal() {

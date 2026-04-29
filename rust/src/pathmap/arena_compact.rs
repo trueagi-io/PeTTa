@@ -1255,7 +1255,7 @@ where
     Storage: AsRef<[u8]>,
 {
     type WitnessT = ();
-    fn witness<'w>(&self) -> Self::WitnessT {}
+    fn witness(&self) -> Self::WitnessT {}
     fn get_val_with_witness<'w>(&self, _witness: &'w Self::WitnessT) -> Option<&'w ()>
     where
         'tree: 'w,
@@ -1269,7 +1269,7 @@ where
     Storage: AsRef<[u8]>,
 {
     type WitnessT = ();
-    fn witness<'w>(&self) -> Self::WitnessT {}
+    fn witness(&self) -> Self::WitnessT {}
     fn get_val_with_witness<'w>(&self, _witness: &'w Self::WitnessT) -> Option<&'w u64>
     where
         'tree: 'w,

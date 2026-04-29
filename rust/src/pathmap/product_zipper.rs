@@ -344,7 +344,7 @@ impl<'factor_z, 'trie, V: Clone + Send + Sync + Unpin + 'trie, A: Allocator + 't
     ZipperReadOnlyConditionalValues<'trie, V> for ProductZipper<'factor_z, 'trie, V, A>
 {
     type WitnessT = ProductZipperWitness<V, A>;
-    fn witness<'w>(&self) -> Self::WitnessT {
+    fn witness(&self) -> Self::WitnessT {
         let primary_witness = self.z.witness();
         let secondary_witnesses = self
             .secondaries
@@ -660,7 +660,7 @@ where
     SecondaryZ: ZipperMoving + ZipperReadOnlyConditionalValues<'trie, V>,
 {
     type WitnessT = (PrimaryZ::WitnessT, Vec<SecondaryZ::WitnessT>);
-    fn witness<'w>(&self) -> Self::WitnessT {
+    fn witness(&self) -> Self::WitnessT {
         let primary_witness = self.primary.witness();
         let secondary_witnesses =
             self.secondary.iter().map(|secondary| secondary.witness()).collect();

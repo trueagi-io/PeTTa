@@ -1029,17 +1029,18 @@ impl<'a, V: Clone + Send + Sync + Unpin, A: Allocator> WriteZipperUntracked<'a, 
 }
 
 impl<'a, 'path, V: Clone + Send + Sync + Unpin, A: Allocator + 'a>
-    WriteZipperUntracked<'a, 'path, V, A>
+WriteZipperUntracked<'a, 'path, V, A>
 {
-    /// Creates a new zipper, with a path relative to a node
-    pub(crate) fn new_with_node_and_path_in(
-        root_node: &'a mut TrieNodeODRc<V, A>,
-        root_val: Option<&'a mut Option<V>>,
-        path: &'path [u8],
-        root_prefix_len: usize,
-        root_key_start: usize,
-        alloc: A,
-    ) -> Self {
+/// Creates a new zipper, with a path relative to a node
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_path_in(
+root_node: &'a mut TrieNodeODRc<V, A>,
+root_val: Option<&'a mut Option<V>>,
+path: &'path [u8],
+root_prefix_len: usize,
+root_key_start: usize,
+alloc: A,
+) -> Self {
         let core = WriteZipperCore::<'a, 'path, V, A>::new_with_node_and_path_in(
             root_node,
             root_val,
@@ -1053,15 +1054,16 @@ impl<'a, 'path, V: Clone + Send + Sync + Unpin, A: Allocator + 'a>
     /// Creates a new zipper, with a path relative to a node, assuming the path is fully-contained within
     /// the node
     ///
-    /// NOTE: This method doesn't descend subnodes.  Use [WriteZipperUntracked::new_with_node_and_path] if you can't
-    /// guarantee the path is within the supplied node.
-    pub(crate) fn new_with_node_and_path_internal_in(
-        root_node: &'a mut TrieNodeODRc<V, A>,
-        root_val: Option<&'a mut Option<V>>,
-        path: &'path [u8],
-        root_key_start: usize,
-        alloc: A,
-    ) -> Self {
+/// NOTE: This method doesn't descend subnodes. Use [WriteZipperUntracked::new_with_node_and_path] if you can't
+/// guarantee the path is within the supplied node.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_path_internal_in(
+root_node: &'a mut TrieNodeODRc<V, A>,
+root_val: Option<&'a mut Option<V>>,
+path: &'path [u8],
+root_key_start: usize,
+alloc: A,
+) -> Self {
         let core = WriteZipperCore::<'a, 'path, V, A>::new_with_node_and_path_internal_in(
             root_node,
             root_val,
@@ -1895,14 +1897,15 @@ impl<'a, V: Clone + Send + Sync + Unpin, A: Allocator> WriteZipperCore<'a, 'stat
             alloc,
         )
     }
-    /// See [WriteZipperUntracked::new_with_node_and_path_internal]
-    pub(crate) fn new_with_node_and_cloned_path_internal_in(
-        root_node: &'a mut TrieNodeODRc<V, A>,
-        root_val: Option<&'a mut Option<V>>,
-        path: &[u8],
-        root_key_start: usize,
-        alloc: A,
-    ) -> Self {
+/// See [WriteZipperUntracked::new_with_node_and_path_internal]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_cloned_path_internal_in(
+root_node: &'a mut TrieNodeODRc<V, A>,
+root_val: Option<&'a mut Option<V>>,
+path: &[u8],
+root_key_start: usize,
+alloc: A,
+) -> Self {
         let focus_stack = MutNodeStack::new(root_node);
         debug_assert!((path.len() - root_key_start == 0) != (root_val.is_none())); //We must have either a node_path or a root_val, but never both
         Self {
@@ -1915,30 +1918,32 @@ impl<'a, V: Clone + Send + Sync + Unpin, A: Allocator> WriteZipperCore<'a, 'stat
 }
 
 impl<'a, 'path, V: Clone + Send + Sync + Unpin, A: Allocator + 'a>
-    WriteZipperCore<'a, 'path, V, A>
+WriteZipperCore<'a, 'path, V, A>
 {
-    /// Creates a new zipper, with a path relative to a node
-    pub(crate) fn new_with_node_and_path_in(
-        root_node: &'a mut TrieNodeODRc<V, A>,
-        root_val: Option<&'a mut Option<V>>,
-        path: &'path [u8],
-        root_prefix_len: usize,
-        root_key_start: usize,
-        alloc: A,
-    ) -> Self {
+/// Creates a new zipper, with a path relative to a node
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_path_in(
+root_node: &'a mut TrieNodeODRc<V, A>,
+root_val: Option<&'a mut Option<V>>,
+path: &'path [u8],
+root_prefix_len: usize,
+root_key_start: usize,
+alloc: A,
+) -> Self {
         let (key, node) = node_along_path_mut(root_node, &path[root_key_start..], true);
 
         let new_root_key_start = root_prefix_len - key.len();
         Self::new_with_node_and_path_internal_in(node, root_val, path, new_root_key_start, alloc)
     }
-    /// See [WriteZipperUntracked::new_with_node_and_path_internal]
-    pub(crate) fn new_with_node_and_path_internal_in(
-        root_node: &'a mut TrieNodeODRc<V, A>,
-        root_val: Option<&'a mut Option<V>>,
-        path: &'path [u8],
-        root_key_start: usize,
-        alloc: A,
-    ) -> Self {
+/// See [WriteZipperUntracked::new_with_node_and_path_internal]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_path_internal_in(
+root_node: &'a mut TrieNodeODRc<V, A>,
+root_val: Option<&'a mut Option<V>>,
+path: &'path [u8],
+root_key_start: usize,
+alloc: A,
+) -> Self {
         let focus_stack = MutNodeStack::new(root_node);
         debug_assert!((path.len() - root_key_start == 0) != (root_val.is_none())); //We must have either a node_path or a root_val, but never both
         Self {
@@ -3553,10 +3558,11 @@ mod mut_node_stack {
         {
             let mut old_top_ref = self.top_mut().unwrap();
 
-            //SAFETY: The `MutNodeStack` type ensures that the mutably borrowed stack frames aren't
-            // accessible.  See the `mutcursor` crate for a more thorough discussion on this pattern
-            // and why it's safe.
-            let borrowed_top = unsafe { core::mem::transmute(&mut old_top_ref) };
+//SAFETY: The `MutNodeStack` type ensures that the mutably borrowed stack frames aren't
+// accessible. See the `mutcursor` crate for a more thorough discussion on this pattern
+// and why it's safe.
+#[allow(clippy::missing_transmute_annotations)]
+let borrowed_top = unsafe { core::mem::transmute(&mut old_top_ref) };
 
             match step_f(borrowed_top) {
                 Some(new_ref) => {

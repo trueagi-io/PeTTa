@@ -141,7 +141,7 @@ impl<'a, V: Clone + Send + Sync> ZipperReadOnlyValues<'a, V> for EmptyZipper {
 
 impl<'a, V: Clone + Send + Sync> ZipperReadOnlyConditionalValues<'a, V> for EmptyZipper {
     type WitnessT = ();
-    fn witness<'w>(&self) -> Self::WitnessT {}
+    fn witness(&self) -> Self::WitnessT {}
     fn get_val_with_witness<'w>(&self, _witness: &'w Self::WitnessT) -> Option<&'w V>
     where
         'a: 'w,

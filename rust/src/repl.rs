@@ -90,14 +90,14 @@ pub fn run_repl(config: &ReplConfig) {
     println!("Type {} for available commands.\n", cyan(":help"));
 
     loop {
-    let prompt = format!("{}", green("metta> "));
+    let prompt = green("metta> ").to_string();
     let readline = rl.readline(&prompt);
     match readline {
     Ok(line) => {
     // Handle multi-line input
     let mut input = line.clone();
     while needs_more_input(&input) {
-    let prompt = format!("{}", yellow("...   "));
+let prompt = yellow("... ").to_string();
     if let Ok(more) = rl.readline(&prompt) {
     input.push('\n');
     input.push_str(&more);

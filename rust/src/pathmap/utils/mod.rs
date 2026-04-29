@@ -764,30 +764,30 @@ pub const fn empty_mask() -> [u64; 4] {
 
 #[test]
 fn bit_utils_test() {
-    let mut mask = ByteMask::EMPTY;
-    assert_eq!(mask.count_bits(), 0);
-    assert_eq!(mask.is_empty_mask(), true);
+let mut mask = ByteMask::EMPTY;
+assert_eq!(mask.count_bits(), 0);
+assert!(mask.is_empty_mask());
 
-    mask.set_bit(b'C');
-    mask.set_bit(b'a');
-    mask.set_bit(b't');
-    assert_eq!(mask.is_empty_mask(), false);
-    assert_eq!(mask.count_bits(), 3);
+mask.set_bit(b'C');
+mask.set_bit(b'a');
+mask.set_bit(b't');
+assert!(!mask.is_empty_mask());
+assert_eq!(mask.count_bits(), 3);
 
-    mask.set_bit(b'C');
-    mask.set_bit(b'a');
-    mask.set_bit(b'n');
-    assert_eq!(mask.count_bits(), 4);
+mask.set_bit(b'C');
+mask.set_bit(b'a');
+mask.set_bit(b'n');
+assert_eq!(mask.count_bits(), 4);
 
-    mask.clear_bit(b't');
-    assert_eq!(mask.test_bit(b'n'), true);
-    assert_eq!(mask.test_bit(b't'), false);
+mask.clear_bit(b't');
+assert!(mask.test_bit(b'n'));
+assert!(!mask.test_bit(b't'));
 }
 
 #[test]
 fn next_bit_test() {
     fn do_test(test_mask: ByteMask) {
-        let set_bits: Vec<u8> = (0..=255).into_iter().filter(|i| test_mask.test_bit(*i)).collect();
+        let set_bits: Vec<u8> = (0..=255).filter(|i| test_mask.test_bit(*i)).collect();
 
         let mut i = 0;
         let mut cnt = test_mask.test_bit(0) as usize;
@@ -819,7 +819,7 @@ fn next_bit_test() {
         0b0000000000000000000000000000000000000000000000000000000000000000u64,
         0b1001000000000000000000000000000000000000000000000000000000000001u64,
     ]));
-    do_test(ByteMask::from(ByteMask::FULL));
+    do_test(ByteMask::FULL);
 }
 
 #[test]

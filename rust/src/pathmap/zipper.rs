@@ -440,9 +440,9 @@ pub trait ZipperReadOnlyConditionalValues<'a, V>: ZipperValues<V> {
     /// The type that acts as a witness for the validity of the zipper
     type WitnessT;
 
-    /// Creates a witness that can allow acquisition of longer-lived borrows of values, while the
-    /// zipper itself is mutated
-    fn witness<'w>(&self) -> Self::WitnessT;
+/// Creates a witness that can allow acquisition of longer-lived borrows of values, while the
+/// zipper itself is mutated
+fn witness(&self) -> Self::WitnessT;
 
     /// Returns a refernce to the value at the zipper's focus, or `None` if there is no value
     ///
@@ -685,12 +685,15 @@ pub trait ZipperConcrete {
 
 /// Provides more direct control over a [ZipperMoving] zipper's path buffer
 pub trait ZipperPathBuffer: ZipperMoving {
-    /// Internal method to get the path, beyond its length.  Panics if `len` > the path's capacity, or
-    /// if the zipper is relative and doesn't have an `origin_path`
-    ///
-    /// This method is unsafe because it relies on the caller to not read uninitialized memory, even if
-    /// the memory has been allocated.
-    unsafe fn origin_path_assert_len(&self, len: usize) -> &[u8];
+/// Internal method to get the path, beyond its length. Panics if `len` > the path's capacity, or
+/// if the zipper is relative and doesn't have an `origin_path`
+///
+/// # Safety
+///
+/// This method is unsafe because it relies on the caller to not read uninitialized memory, even if
+/// the memory has been allocated. The caller must ensure that `len` does not exceed the allocated
+/// capacity of the path buffer.
+unsafe fn origin_path_assert_len(&self, len: usize) -> &[u8];
 
     /// Make sure the path buffer is allocated, to facilitate zipper movement
     fn prepare_buffers(&mut self);
@@ -1185,19 +1188,20 @@ impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a> ZipperReadOnlyP
 }
 
 impl<'a, 'path, V: Clone + Send + Sync + Unpin, A: Allocator + 'a>
-    ReadZipperTracked<'a, 'path, V, A>
+ReadZipperTracked<'a, 'path, V, A>
 {
-    /// See [ReadZipperCore::new_with_node_and_path]
-    pub(crate) fn new_with_node_and_path_in(
-        root_node: &'a TrieNodeODRc<V, A>,
-        owned_root: bool,
-        path: &'path [u8],
-        root_prefix_len: usize,
-        root_key_start: usize,
-        root_val: Option<&'a V>,
-        alloc: A,
-        tracker: Option<ZipperTracker<TrackingRead>>,
-    ) -> Self {
+/// See [ReadZipperCore::new_with_node_and_path]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_path_in(
+root_node: &'a TrieNodeODRc<V, A>,
+owned_root: bool,
+path: &'path [u8],
+root_prefix_len: usize,
+root_key_start: usize,
+root_val: Option<&'a V>,
+alloc: A,
+tracker: Option<ZipperTracker<TrackingRead>>,
+) -> Self {
         let core = ReadZipperCore::new_with_node_and_path_in(
             root_node,
             owned_root,
@@ -1209,17 +1213,18 @@ impl<'a, 'path, V: Clone + Send + Sync + Unpin, A: Allocator + 'a>
         );
         Self { z: core, tracker }
     }
-    /// See [ReadZipperCore::new_with_node_and_cloned_path]
-    pub(crate) fn new_with_node_and_cloned_path_in(
-        root_node: &'a TrieNodeODRc<V, A>,
-        owned_root: bool,
-        path: &[u8],
-        root_prefix_len: usize,
-        root_key_start: usize,
-        root_val: Option<&'a V>,
-        alloc: A,
-        tracker: Option<ZipperTracker<TrackingRead>>,
-    ) -> Self {
+/// See [ReadZipperCore::new_with_node_and_cloned_path]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_cloned_path_in(
+root_node: &'a TrieNodeODRc<V, A>,
+owned_root: bool,
+path: &[u8],
+root_prefix_len: usize,
+root_key_start: usize,
+root_val: Option<&'a V>,
+alloc: A,
+tracker: Option<ZipperTracker<TrackingRead>>,
+) -> Self {
         let core = ReadZipperCore::new_with_node_and_cloned_path_in(
             root_node,
             owned_root,
@@ -1347,7 +1352,7 @@ impl<'trie, V: Clone + Send + Sync + Unpin + 'trie, A: Allocator + 'trie>
     ZipperReadOnlyConditionalValues<'trie, V> for ReadZipperUntracked<'trie, '_, V, A>
 {
     type WitnessT = ();
-    fn witness<'w>(&self) -> Self::WitnessT {}
+    fn witness(&self) -> Self::WitnessT {}
     fn get_val_with_witness<'w>(&self, _witness: &'w Self::WitnessT) -> Option<&'w V>
     where
         'trie: 'w,
@@ -1400,17 +1405,18 @@ impl<'trie, V: Clone + Send + Sync + Unpin + 'trie, A: Allocator + 'trie>
 }
 
 impl<'a, 'path, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a>
-    ReadZipperUntracked<'a, 'path, V, A>
+ReadZipperUntracked<'a, 'path, V, A>
 {
-    /// See [ReadZipperCore::new_with_node_and_path]
-    pub(crate) fn new_with_node_and_path_in(
-        root_node: &'a TrieNodeODRc<V, A>,
-        path: &'path [u8],
-        root_prefix_len: usize,
-        root_key_start: usize,
-        root_val: Option<&'a V>,
-        alloc: A,
-    ) -> Self {
+/// See [ReadZipperCore::new_with_node_and_path]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_path_in(
+root_node: &'a TrieNodeODRc<V, A>,
+path: &'path [u8],
+root_prefix_len: usize,
+root_key_start: usize,
+root_val: Option<&'a V>,
+alloc: A,
+) -> Self {
         let core = ReadZipperCore::new_with_node_and_path_in(
             root_node,
             false,
@@ -1422,14 +1428,15 @@ impl<'a, 'path, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a>
         );
         Self { z: core }
     }
-    /// See [ReadZipperCore::new_with_node_and_path_internal]
-    pub(crate) fn new_with_node_and_path_internal_in(
-        root_node: &'a TrieNodeODRc<V, A>,
-        path: &'path [u8],
-        root_key_start: usize,
-        root_val: Option<&'a V>,
-        alloc: A,
-    ) -> Self {
+/// See [ReadZipperCore::new_with_node_and_path_internal]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_path_internal_in(
+root_node: &'a TrieNodeODRc<V, A>,
+path: &'path [u8],
+root_key_start: usize,
+root_val: Option<&'a V>,
+alloc: A,
+) -> Self {
         let core = ReadZipperCore::new_with_node_and_path_internal_in(
             OwnedOrBorrowed::Borrowed(root_node),
             path,
@@ -1439,15 +1446,16 @@ impl<'a, 'path, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a>
         );
         Self { z: core }
     }
-    /// See [ReadZipperCore::new_with_node_and_cloned_path]
-    pub(crate) fn new_with_node_and_cloned_path_in(
-        root_node: &'a TrieNodeODRc<V, A>,
-        path: &[u8],
-        root_prefix_len: usize,
-        root_key_start: usize,
-        root_val: Option<&'a V>,
-        alloc: A,
-    ) -> Self {
+/// See [ReadZipperCore::new_with_node_and_cloned_path]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_cloned_path_in(
+root_node: &'a TrieNodeODRc<V, A>,
+path: &[u8],
+root_prefix_len: usize,
+root_key_start: usize,
+root_val: Option<&'a V>,
+alloc: A,
+) -> Self {
         let core = ReadZipperCore::new_with_node_and_cloned_path_in(
             root_node,
             false,
@@ -1573,35 +1581,35 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperInfallibleSubtries<V, A
 {
     zipper_impl_lens!(ZipperInfallibleSubtries self => self.z);
 }
-impl<'trie, V: Clone + Send + Sync + Unpin + 'trie, A: Allocator + 'trie> ZipperMoving
-    for ReadZipperOwned<V, A>
+impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperMoving
+for ReadZipperOwned<V, A>
 {
-    zipper_impl_lens!(ZipperMoving self => self.z);
+zipper_impl_lens!(ZipperMoving self => self.z);
 }
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperConcrete for ReadZipperOwned<V, A> {
-    zipper_impl_lens!(ZipperConcrete self => self.z);
+zipper_impl_lens!(ZipperConcrete self => self.z);
 }
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperPriv for ReadZipperOwned<V, A> {
-    zipper_impl_lens!(ZipperPriv self => self.z);
+zipper_impl_lens!(ZipperPriv self => self.z);
 }
-impl<'trie, V: Clone + Send + Sync + Unpin + 'trie, A: Allocator + 'trie> ZipperPathBuffer
-    for ReadZipperOwned<V, A>
+impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperPathBuffer
+for ReadZipperOwned<V, A>
 {
-    zipper_impl_lens!(ZipperPathBuffer self => self.z);
+zipper_impl_lens!(ZipperPathBuffer self => self.z);
 }
-impl<'trie, V: Clone + Send + Sync + Unpin + 'trie, A: Allocator + 'trie> ZipperIteration
-    for ReadZipperOwned<V, A>
+impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperIteration
+for ReadZipperOwned<V, A>
 {
-    zipper_impl_lens!(ZipperIteration self => self.z);
+zipper_impl_lens!(ZipperIteration self => self.z);
 }
-impl<'trie, V: Clone + Send + Sync + Unpin + 'trie, A: Allocator + 'trie>
-    ZipperReadOnlyConditionalIteration<'trie, V> for ReadZipperOwned<V, A>
+impl<V: Clone + Send + Sync + Unpin, A: Allocator>
+ZipperReadOnlyConditionalIteration<'static, V> for ReadZipperOwned<V, A>
 {
 }
-impl<'trie, V: Clone + Send + Sync + Unpin + 'trie, A: Allocator + 'trie> ZipperAbsolutePath
-    for ReadZipperOwned<V, A>
+impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperAbsolutePath
+for ReadZipperOwned<V, A>
 {
-    zipper_impl_lens!(ZipperAbsolutePath self => self.z);
+zipper_impl_lens!(ZipperAbsolutePath self => self.z);
 }
 
 impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperValues<V> for ReadZipperOwned<V, A> {
@@ -1625,7 +1633,7 @@ impl<'trie, V: Clone + Send + Sync + Unpin + 'trie, A: Allocator + 'trie>
     ZipperReadOnlyConditionalValues<'trie, V> for ReadZipperOwned<V, A>
 {
     type WitnessT = ReadZipperWitness<V, A>;
-    fn witness<'w>(&self) -> ReadZipperWitness<V, A> {
+    fn witness(&self) -> ReadZipperWitness<V, A> {
         self.z.witness()
     }
     fn get_val_with_witness<'w>(&self, witness: &'w ReadZipperWitness<V, A>) -> Option<&'w V>
@@ -2220,8 +2228,8 @@ pub(crate) mod read_zipper_core {
             // avoids copying the whole path argument into the path buffer unless that's actually needed.
             // So this loop copies the path arg in chunks.  If we didn't care about this, we could just
             // grow the path buffer in one call with `self.descend_to_internal(k)`, like `descend_to` does
-            const CHUNK_SIZE: usize = 64;
-            debug_assert!(CHUNK_SIZE >= MAX_NODE_KEY_BYTES);
+const CHUNK_SIZE: usize = 64;
+debug_assert!(CHUNK_SIZE >= MAX_NODE_KEY_BYTES);
             while !k.is_empty() {
                 let (chunk, remaining) = if k.len() > CHUNK_SIZE {
                     (&k[..CHUNK_SIZE], &k[CHUNK_SIZE..])
@@ -2491,7 +2499,7 @@ pub(crate) mod read_zipper_core {
         ZipperReadOnlyConditionalValues<'trie, V> for ReadZipperCore<'trie, '_, V, A>
     {
         type WitnessT = ReadZipperWitness<V, A>;
-        fn witness<'w>(&self) -> Self::WitnessT {
+        fn witness(&self) -> Self::WitnessT {
             if self.root_node.is_owned() {
                 ReadZipperWitness(Some(self.root_node.as_ref().clone()))
             } else {
@@ -2656,16 +2664,17 @@ pub(crate) mod read_zipper_core {
         ///                       ^         ^
         ///                       |   root_prefix_len
         ///                 root_key_start
-        /// ```ignore
-        pub(crate) fn new_with_node_and_path_in(
-            root_node: &'a TrieNodeODRc<V, A>,
-            owned_root: bool,
-            path: &'path [u8],
-            root_prefix_len: usize,
-            root_key_start: usize,
-            root_val: Option<&'a V>,
-            alloc: A,
-        ) -> Self {
+/// ```ignore
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_path_in(
+root_node: &'a TrieNodeODRc<V, A>,
+owned_root: bool,
+path: &'path [u8],
+root_prefix_len: usize,
+root_key_start: usize,
+root_val: Option<&'a V>,
+alloc: A,
+) -> Self {
             let (node, key, val) =
                 node_along_path(root_node, &path[root_key_start..], root_val, false);
             let node = if owned_root {
@@ -2679,22 +2688,24 @@ pub(crate) mod read_zipper_core {
         /// Creates a new zipper, with a path relative to a node, assuming the path is fully-contained within
         /// the node
         ///
-        /// NOTE: This method currently doesn't descend subnodes.  Use [Self::new_with_node_and_path_in] if you can't
-        /// guarantee the path is within the supplied node.
-        pub(crate) fn new_with_node_and_path_internal_in(
-            root_node: OwnedOrBorrowed<'a, TrieNodeODRc<V, A>>,
-            path: &'path [u8],
-            mut root_key_start: usize,
-            root_val: Option<&'a V>,
-            alloc: A,
-        ) -> Self {
+/// NOTE: This method currently doesn't descend subnodes. Use [Self::new_with_node_and_path_in] if you can't
+/// guarantee the path is within the supplied node.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_path_internal_in(
+root_node: OwnedOrBorrowed<'a, TrieNodeODRc<V, A>>,
+path: &'path [u8],
+mut root_key_start: usize,
+root_val: Option<&'a V>,
+alloc: A,
+) -> Self {
             let mut focus: TaggedNodeRef<'a, V, A> = match &root_node {
                 OwnedOrBorrowed::Owned(root_node) => {
-                    // SAFETY: The root_node makes the ReadZipper essentially a self-referential type.  As long
-                    // as the ReadZipperCore is alive, this will remain valid, and the "witness" mechanism in
-                    // `ZipperReadOnlyConditionalValues` makes sure the references returned from the `get_val`
-                    // method remain valid
-                    unsafe { core::mem::transmute(root_node.as_tagged()) }
+// SAFETY: The root_node makes the ReadZipper essentially a self-referential type. As long
+// as the ReadZipperCore is alive, this will remain valid, and the "witness" mechanism in
+// `ZipperReadOnlyConditionalValues` makes sure the references returned from the `get_val`
+// method remain valid
+#[allow(clippy::missing_transmute_annotations)]
+unsafe { core::mem::transmute(root_node.as_tagged()) }
                 }
                 OwnedOrBorrowed::Borrowed(root_node) => root_node.as_tagged(),
                 OwnedOrBorrowed::None => TaggedNodeRef::empty_node(),
@@ -2715,7 +2726,7 @@ pub(crate) mod read_zipper_core {
                 origin_path: SliceOrLen::from(path),
                 root_key_start,
                 root_parent_key_start,
-                root_val: root_val.map(|v| v),
+                root_val: root_val,
                 focus_node: MiriWrapper::new(focus),
                 root_node,
                 focus_iter_token: NODE_ITER_INVALID,
@@ -2724,14 +2735,15 @@ pub(crate) mod read_zipper_core {
                 alloc,
             }
         }
-        /// Same as [Self::new_with_node_and_path_in], but inits the zipper stack ahead of time, allowing a zipper
-        /// that isn't bound by `'path`
-        pub(crate) fn new_with_node_and_cloned_path_in(
-            root_node: &'a TrieNodeODRc<V, A>,
-            owned_root: bool,
-            path: &[u8],
-            root_prefix_len: usize,
-            root_key_start: usize,
+/// Same as [Self::new_with_node_and_path_in], but inits the zipper stack ahead of time, allowing a zipper
+/// that isn't bound by `'path`
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn new_with_node_and_cloned_path_in(
+root_node: &'a TrieNodeODRc<V, A>,
+owned_root: bool,
+path: &[u8],
+root_prefix_len: usize,
+root_key_start: usize,
             root_val: Option<&'a V>,
             alloc: A,
         ) -> Self {

@@ -87,17 +87,17 @@ pub trait Catamorphism<V> {
     /// ## Arguments to `alg_f`:
     /// `(child_mask: &`[`ByteMask`]`, children: &mut [W], value: Option<&V>, path: &[u8]`
     ///
-    /// - `child_mask`: A [`ByteMask`] indicating the corresponding byte for each downstream branche in
-    /// `children`.
-    ///
-    /// - `children`: A slice containing all the `W` values from previous invocations of `alg_f` for
-    /// downstream branches.
-    ///
-    /// - `value`: A value associated with a given path in the trie, or `None` if the trie has no value at
-    /// that path.
-    ///
-    /// - `path`: The [`origin_path`](ZipperAbsolutePath::origin_path) for the invocation.  The `alg_f` will
-    /// be run exactly once for each unique path in the trie.
+/// - `child_mask`: A [`ByteMask`] indicating the corresponding byte for each downstream branche in
+///   `children`.
+///
+/// - `children`: A slice containing all the `W` values from previous invocations of `alg_f` for
+///   downstream branches.
+///
+/// - `value`: A value associated with a given path in the trie, or `None` if the trie has no value at
+///   that path.
+///
+/// - `path`: The [`origin_path`](ZipperAbsolutePath::origin_path) for the invocation. The `alg_f` will
+///   be run exactly once for each unique path in the trie.
     ///
     /// ## Behavior
     ///
@@ -128,8 +128,8 @@ pub trait Catamorphism<V> {
     /// ## Arguments to `alg_f`:
     /// `(child_mask: &`[`ByteMask`]`, children: &mut [W], jumped_byte_cnt: usize, value: Option<&V>, path: &[u8]`
     ///
-    /// - `jumped_byte_cnt`: The number of bytes before the `alg_f` will be called again.  The "jumped" substring
-    /// is equal to `path[path.len()-jumped_byte_cnt..]`
+/// - `jumped_byte_cnt`: The number of bytes before the `alg_f` will be called again. The "jumped" substring
+///   is equal to `path[path.len()-jumped_byte_cnt..]`
     ///
     /// See [into_cata_side_effect](Catamorphism::into_cata_side_effect) for explanation of other arguments and
     /// behavior
@@ -162,14 +162,14 @@ pub trait Catamorphism<V> {
     /// ## Arguments to `alg_f`:
     /// `(child_mask: &`[`ByteMask`]`, children: &mut [W], val: Option<&V>`
     ///
-    /// - `child_mask`: A [`ByteMask`] indicating the corresponding byte for each downstream branche in
-    /// `children`.
-    ///
-    /// - `children`: A slice containing all the `W` values from previous invocations of `alg_f` for
-    /// downstream branches.
-    ///
-    /// - `value`: A value associated with a given path in the trie, or `None` if the trie has no value at
-    /// that path.
+/// - `child_mask`: A [`ByteMask`] indicating the corresponding byte for each downstream branche in
+///   `children`.
+///
+/// - `children`: A slice containing all the `W` values from previous invocations of `alg_f` for
+///   downstream branches.
+///
+/// - `value`: A value associated with a given path in the trie, or `None` if the trie has no value at
+///   that path.
     ///
     /// ## Behavior
     ///
@@ -205,8 +205,8 @@ pub trait Catamorphism<V> {
     /// ## Arguments to `alg_f`:
     /// `(child_mask: &`[`ByteMask`]`, children: &mut [W], value: Option<&V>, sub_path: &[u8]`
     ///
-    /// - `sub_path`: A slice of path bytes for which the `alf_f` will not be called.  Consider the
-    /// trie below:
+/// - `sub_path`: A slice of path bytes for which the `alf_f` will not be called. Consider the
+///   trie below:
     ///
     /// ```ignoretxt
     /// ─── c ─── o ─── m ─┬─ b ─── o               → "combo"
@@ -301,13 +301,16 @@ pub trait Catamorphism<V> {
 ///
 /// ## Args
 /// - `map_f`: `mapper(v: &V, path: &[u8]) -> W`
-/// Maps value `v` at a leaf `path` into an intermediate result
+///
+///   Maps value `v` at a leaf `path` into an intermediate result
 ///
 /// - `collapse_f`: `collapse(v: &V, w: W, path: &[u8]) -> W`
-/// Folds value `v` at a non-leaf `path` with the aggregated results from the trie below `path`
+///
+///   Folds value `v` at a non-leaf `path` with the aggregated results from the trie below `path`
 ///
 /// - `alg_f`: `alg(mask: ByteMask, children: &mut [W], path: &[u8]) -> W`
-/// Aggregates the results from the child branches, `children`, descending from `path` into a single result
+///
+///   Aggregates the results from the child branches, `children`, descending from `path` into a single result
 impl<'a, Z, V: 'a> Catamorphism<V> for Z
 where
     Z: Zipper
@@ -1082,11 +1085,15 @@ impl<V: Clone + Send + Sync, W: Default, A: Allocator> TrieBuilder<V, W, A> {
             self.child_paths.pop_front().map(|v| &v.as_slice()[1..])
         }
     }
-    /// Returns the number of children that have been pushed to the `TrieBuilder`, so far
-    pub fn len(&self) -> usize {
-        self.child_structs.len()
-    }
-    /// Simultaneously sets all child branches with single-byte path continuations
+/// Returns the number of children that have been pushed to the `TrieBuilder`, so far
+pub fn len(&self) -> usize {
+self.child_structs.len()
+}
+/// Returns true if the `TrieBuilder` has no children
+pub fn is_empty(&self) -> bool {
+self.child_structs.is_empty()
+}
+/// Simultaneously sets all child branches with single-byte path continuations
     ///
     /// Panics if existing children have already been set / pushed, or if the number of bits set in `mask`
     /// doesn't match `children.len()`.

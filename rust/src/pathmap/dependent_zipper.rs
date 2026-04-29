@@ -323,7 +323,7 @@ where
     SecondaryZ: ZipperMoving + ZipperReadOnlyConditionalValues<'trie, V>,
 {
     type WitnessT = (PrimaryZ::WitnessT, Vec<SecondaryZ::WitnessT>);
-    fn witness<'w>(&self) -> Self::WitnessT {
+    fn witness(&self) -> Self::WitnessT {
         let primary_witness = self.primary.witness();
         let secondary_witnesses =
             self.secondary.iter().map(|secondary| secondary.witness()).collect();

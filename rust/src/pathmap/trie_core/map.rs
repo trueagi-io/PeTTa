@@ -624,26 +624,24 @@ impl<V: Clone + Send + Sync + Unpin, A: Allocator> PathMap<V, A> {
         if other.root_val().is_some() {
             return self.clone();
         }
-        let self_root = self.root();
-        let other_root = other.root();
-        if self_root.is_none() || other_root.is_none() {
-            Self::new_in(self.alloc.clone())
-        } else {
-            match self_root.unwrap().as_tagged().prestrict_dyn(other_root.unwrap().as_tagged()) {
-                AlgebraicResult::Element(new_root) => {
-                    Self::new_with_root_in(Some(new_root), None, self.alloc.clone())
-                }
-                AlgebraicResult::None => Self::new_in(self.alloc.clone()),
-                AlgebraicResult::Identity(mask) => {
-                    debug_assert_eq!(mask, SELF_IDENT);
-                    Self::new_with_root_in(
-                        Some(self.root().cloned().unwrap()),
-                        None,
-                        self.alloc.clone(),
-                    )
-                }
-            }
-        }
+if let (Some(self_root), Some(other_root)) = (self.root(), other.root()) {
+match self_root.as_tagged().prestrict_dyn(other_root.as_tagged()) {
+AlgebraicResult::Element(new_root) => {
+return Self::new_with_root_in(Some(new_root), None, self.alloc.clone());
+}
+AlgebraicResult::None => {
+return Self::new_in(self.alloc.clone());
+}
+AlgebraicResult::Identity(_) => {
+return Self::new_with_root_in(
+Some(self_root.clone()),
+None,
+self.alloc.clone(),
+);
+}
+}
+}
+Self::new_in(self.alloc.clone())
     }
 
     /// Returns a new `PathMap` containing the contents from `self` minus the contents of `other`

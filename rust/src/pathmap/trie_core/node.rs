@@ -217,16 +217,16 @@ pub(crate) trait TrieNode<V: Clone + Send + Sync, A: Allocator>:
     /// specified path
     fn iter_token_for_path(&self, key: &[u8]) -> u128;
 
-    /// Steps to the next existing path within the node, in a depth-first order
-    ///
-    /// Returns `(next_token, path, child_node, value)`
-    /// - `next_token` is the value to pass to a subsequent call of this method. Returns
-    /// [NODE_ITER_FINISHED] when there are no more sub-paths
-    /// - `path` is relative to the start of `node`
-    /// - `child_node` an onward node link, of `None`
-    /// - `value` that exists at the path, or `None`
-    #[allow(clippy::type_complexity)]
-    fn next_items(&self, token: u128) -> (u128, &[u8], Option<&TrieNodeODRc<V, A>>, Option<&V>);
+/// Steps to the next existing path within the node, in a depth-first order
+///
+/// Returns `(next_token, path, child_node, value)`
+/// - `next_token` is the value to pass to a subsequent call of this method. Returns
+///   [NODE_ITER_FINISHED] when there are no more sub-paths
+/// - `path` is relative to the start of `node`
+/// - `child_node` an onward node link, of `None`
+/// - `value` that exists at the path, or `None`
+#[allow(clippy::type_complexity)]
+fn next_items(&self, token: u128) -> (u128, &[u8], Option<&TrieNodeODRc<V, A>>, Option<&V>);
 
     /// Returns the total number of leaves contained within the whole subtree defined by the node
     /// GOAT, this should be deprecated
@@ -3091,10 +3091,11 @@ mod opaque_dyn_rc_trie_node {
             #[cfg(feature = "nightly")]
             let inner: Arc<dyn TrieNode<V, A>, A> = Arc::new_in(obj, alloc);
 
-            //SAFETY NOTE: The key to making this abstraction safe is the bound on this method,
-            // such that it's impossible to create this wrapper around a concrete type unless the
-            // same lifetime can bound both the trait's type parameter and the type itself
-            unsafe { Self(core::mem::transmute(inner)) }
+//SAFETY NOTE: The key to making this abstraction safe is the bound on this method,
+// such that it's impossible to create this wrapper around a concrete type unless the
+// same lifetime can bound both the trait's type parameter and the type itself
+#[allow(clippy::missing_transmute_annotations)]
+unsafe { Self(core::mem::transmute(inner)) }
         }
         /// Creates a new `TrieNodeODRc` that references a node that exists in memory (ie. not a sentinel for EmptyNode),
         /// but contains no values or onward links

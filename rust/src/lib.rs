@@ -190,10 +190,11 @@ mod tests {
         assert_eq!(MettaValue::parse("false"), Some(MettaValue::Bool(false)));
     }
 
-    #[test]
-    fn test_parse_float() {
-        assert_eq!(MettaValue::parse("3.14"), Some(MettaValue::Float(3.14)));
-    }
+#[test]
+#[allow(clippy::approx_constant)]
+fn test_parse_float() {
+    assert_eq!(MettaValue::parse("3.14"), Some(MettaValue::Float(3.14)));
+}
 
     #[test]
     fn test_parse_atom() {

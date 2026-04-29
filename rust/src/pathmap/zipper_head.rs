@@ -27,23 +27,33 @@ pub trait ZipperCreation<'trie, V: Clone + Send + Sync, A: Allocator = GlobalAll
     where
         'trie: 'a;
 
-    /// Creates a new read-only [Zipper] with the path specified from the `ZipperHead`, where the caller
-    /// guarantees that there are and there never will be any conflicts with any [write zippers](ZipperWriting)s at this time
-    /// or any time before the returned zipper is dropped
-    ///
-    /// The returned type is [ReadZipperTracked] although the tracking logic will be skipped in release mode.
-    unsafe fn read_zipper_at_path_unchecked<'a, K: AsRef<[u8]>>(
+/// Creates a new read-only [Zipper] with the path specified from the `ZipperHead`, where the caller
+/// guarantees that there are and there never will be any conflicts with any [write zippers](ZipperWriting)s at this time
+/// or any time before the returned zipper is dropped
+///
+/// # Safety
+///
+/// The caller must guarantee that there are and there never will be any conflicts with any write zippers
+/// at this time or any time before the returned zipper is dropped.
+///
+/// The returned type is [ReadZipperTracked] although the tracking logic will be skipped in release mode.
+unsafe fn read_zipper_at_path_unchecked<'a, K: AsRef<[u8]>>(
         &'a self,
         path: K,
     ) -> ReadZipperTracked<'a, 'static, V, A>
     where
         'trie: 'a;
 
-    /// A more efficient version of [read_zipper_at_path_unchecked](ZipperCreation::read_zipper_at_path_unchecked),
-    /// where the returned zipper is constrained by the `'path` lifetime
-    ///
-    /// The returned type is [ReadZipperTracked] although the tracking logic will be skipped in release mode.
-    unsafe fn read_zipper_at_borrowed_path_unchecked<'a, 'path>(
+/// A more efficient version of [read_zipper_at_path_unchecked](ZipperCreation::read_zipper_at_path_unchecked),
+/// where the returned zipper is constrained by the `'path` lifetime
+///
+/// # Safety
+///
+/// The caller must guarantee that there are and there never will be any conflicts with any write zippers
+/// at this time or any time before the returned zipper is dropped.
+///
+/// The returned type is [ReadZipperTracked] although the tracking logic will be skipped in release mode.
+unsafe fn read_zipper_at_borrowed_path_unchecked<'a, 'path>(
         &'a self,
         path: &'path [u8],
     ) -> ReadZipperTracked<'a, 'path, V, A>
@@ -73,13 +83,18 @@ pub trait ZipperCreation<'trie, V: Clone + Send + Sync, A: Allocator = GlobalAll
     where
         'trie: 'a;
 
-    /// Creates a new [write zippers](ZipperWriting) with the specified path from the `ZipperHead`, where the
-    /// caller guarantees that no existing zippers may access the specified path at any time before the
-    /// write zipper is dropped
-    ///
-    /// NOTE: Zippers created by this method are still tracked in debug mode.  `_unchecked` isn't permission to
-    /// break the rules, it's just an optimization that affects when to spend time enforcing them.
-    unsafe fn write_zipper_at_exclusive_path_unchecked<'a, K: AsRef<[u8]>>(
+/// Creates a new [write zippers](ZipperWriting) with the specified path from the `ZipperHead`, where the
+/// caller guarantees that no existing zippers may access the specified path at any time before the
+/// write zipper is dropped
+///
+/// # Safety
+///
+/// The caller must guarantee that no existing zippers may access the specified path at any time before
+/// the write zipper is dropped.
+///
+/// NOTE: Zippers created by this method are still tracked in debug mode. `_unchecked` isn't permission to
+/// break the rules, it's just an optimization that affects when to spend time enforcing them.
+unsafe fn write_zipper_at_exclusive_path_unchecked<'a, K: AsRef<[u8]>>(
         &'a self,
         path: K,
     ) -> WriteZipperTracked<'a, 'static, V, A>
@@ -205,9 +220,9 @@ pub struct ZipperHeadOwned<V: Clone + Send + Sync + 'static, A: Allocator + 'sta
     tracker_paths: SharedTrackerPaths,
 }
 
-impl<'parent, 'trie: 'parent, V: Clone + Send + Sync + Unpin, A: Allocator> ZipperHeadOwned<V, A> {
-    /// Internal method to create a new `ZipperHeadOwned` from a `WriteZipperOwned`
-    pub(crate) fn new(mut z: WriteZipperOwned<V, A>) -> Self {
+impl<V: Clone + Send + Sync + Unpin, A: Allocator> ZipperHeadOwned<V, A> {
+/// Internal method to create a new `ZipperHeadOwned` from a `WriteZipperOwned`
+pub(crate) fn new(mut z: WriteZipperOwned<V, A>) -> Self {
         // Make sure the zipper's path buffers are initialized if the path is non-zero length
         debug_assert!(z.core().key.node_key().is_empty() || z.core().key.prefix_buf.capacity() > 0);
         Self { z: std::sync::Mutex::new(z), tracker_paths: SharedTrackerPaths::default() }

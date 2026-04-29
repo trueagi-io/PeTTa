@@ -748,7 +748,7 @@ impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a>
     ZipperReadOnlyConditionalValues<'a, V> for TrieRefOwned<V, A>
 {
     type WitnessT = TrieRefWitness<V, A>;
-    fn witness<'w>(&self) -> Self::WitnessT {
+    fn witness(&self) -> Self::WitnessT {
         TrieRefWitness(self.clone())
     }
     #[inline]
@@ -936,7 +936,7 @@ impl<'a, V: Clone + Send + Sync + Unpin + 'a, A: Allocator + 'a>
     ZipperReadOnlyConditionalValues<'a, V> for TrieRef<'a, V, A>
 {
     type WitnessT = TrieRefWitness<V, A>;
-    fn witness<'w>(&self) -> Self::WitnessT {
+    fn witness(&self) -> Self::WitnessT {
         match self {
             TrieRef::Borrowed(trie_ref) => {
                 TrieRefWitness(TrieRefOwned::new_invalid_in(trie_ref.alloc.clone()))

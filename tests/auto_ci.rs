@@ -65,7 +65,7 @@ fn auto_ci_orchestrator() {
                 "rustup",
                 &["run", "nightly", "cargo", "test", "--workspace", "--all", "--features", "mork"],
             ) {
-                Ok(()) => return,
+Ok(()) => {}
                 Err((_, msg)) => panic!("auto-ci: nightly run failed: {}", msg),
             }
         }

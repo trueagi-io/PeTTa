@@ -238,7 +238,7 @@ where
     Z: ZipperReadOnlyConditionalValues<'source, V>,
 {
     type WitnessT = Z::WitnessT;
-    fn witness<'w>(&self) -> Self::WitnessT {
+    fn witness(&self) -> Self::WitnessT {
         self.source.witness()
     }
     fn get_val_with_witness<'w>(&self, witness: &'w Self::WitnessT) -> Option<&'w V>
