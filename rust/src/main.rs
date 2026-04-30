@@ -1,267 +1,136 @@
-//! PeTTa CLI — Command-line interface for MeTTa execution
+//! PeTTa CLI — streamlined command-line interface
 
 mod cli;
 mod repl;
 
 use cli::{BackendArg, Cli, OutputFormat};
 use petta::utils::{cyan, green, red, yellow};
-
 use clap::Parser;
 use std::path::Path;
-use std::time::Instant;
-
-#[cfg(feature = "profiling")]
-use petta::profiler::ProfileStats;
 
 fn main() {
-let cli = Cli::parse();
+let args = Cli::parse();
 
-// Show startup banner if no files specified
-if cli.files.is_empty() && !cli.interactive {
+if args.files.is_empty() && !args.interactive {
 print_banner();
-run_demo(&find_project_root(), cli.backend);
+run_demo(&find_project_root(), args.backend);
 return;
 }
 
-if cli.interactive {
-run_repl_mode(&find_project_root(), cli.backend, cli.verbose);
+if args.interactive {
+run_repl_mode(&find_project_root(), args.backend, args.verbose);
 return;
 }
 
-run_files(
-&find_project_root(),
-&cli.files,
-cli.verbose,
-cli.time,
-cli.backend,
-cli.output_format,
-cli.profile,
-cli.trace,
-cli.stats,
-);
+run_files(&args);
 }
 
-/// Print startup banner
 fn print_banner() {
 println!("{} {}", cyan("⚡ PeTTa"), yellow("v0.5.0"));
 println!("{}", cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
 println!("{} {}", green("🧠"), yellow("Production MeTTa Runtime"));
-println!();
 }
 
-/// Find the project root directory
 fn find_project_root() -> std::path::PathBuf {
-    // Check PETTA_PATH environment variable
-    if let Ok(path) = std::env::var("PETTA_PATH") {
-        let p = Path::new(&path);
-        if p.join("prolog").join("metta.pl").exists() {
-            return p.to_path_buf();
-        }
-    }
-
-    // Check current directory
-    let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
-    if cwd.join("prolog").join("metta.pl").exists() {
-        return cwd;
-    }
-
-    // Check executable parent directory
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            if dir.join("prolog").join("metta.pl").exists() {
-                return dir.to_path_buf();
-            }
-            if let Some(parent) = dir.parent() {
-                if parent.join("prolog").join("metta.pl").exists() {
-                    return parent.to_path_buf();
-                }
-            }
-        }
-    }
-
-    // Walk up directory tree
-    let mut current = cwd.clone();
-    loop {
-        if current.join("prolog").join("metta.pl").exists() {
-            return current;
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-
-    // Fallback with warning
-    eprintln!(
-        "{}: Could not locate PeTTa installation (prolog/metta.pl not found).",
-        red("Warning")
-    );
-    eprintln!("Set PETTA_PATH or run from a directory containing prolog/metta.pl.");
-    cwd
+std::env::var("PETTA_PATH")
+.and_then(|p| Ok(Path::new(&p).to_path_buf()))
+.ok()
+.and_then(|p| p.join("prolog").join("metta.pl").exists().then_some(p))
+.or_else(|| std::env::current_dir().ok().filter(|d| d.join("prolog").join("metta.pl").exists()))
+.or_else(|| {
+std::env::current_exe().ok().and_then(|exe| {
+exe.parent()
+.and_then(|d| d.join("prolog").join("metta.pl").exists().then(|| d.to_path_buf()))
+.or_else(|| exe.parent().and_then(|d| d.parent().and_then(|p| p.join("prolog").join("metta.pl").exists().then(|| p.to_path_buf()))))
+})
+})
+.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()))
 }
 
-/// Run demo examples
 fn run_demo(project_root: &Path, backend: BackendArg) {
 use petta::PeTTaEngine;
 
-let config =
-petta::EngineConfig::new(project_root).verbose(false).backend(backend.to_backend());
+let Ok(mut engine) = PeTTaEngine::with_config(
+&petta::EngineConfig::new(project_root).backend(backend.to_backend())
+) else {
+eprintln!("{} Failed to initialize PeTTa engine", red("✗"));
+std::process::exit(1);
+};
 
-match PeTTaEngine::with_config(&config) {
-Ok(mut engine) => {
 println!(
-"{}\n{}\n{}",
+"{}\nBackend: {}\n{}",
 cyan("⚡ PeTTa Demo"),
-yellow(&format!("Backend: {}", backend)),
+yellow(&backend.to_string()),
 cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 );
 
-for (name, code) in &[
-("Identity", "(= (myid $x) $x) !(myid 42)"),
-("Arithmetic", "!(+ 1 2)"),
-("Boolean", "!(and true false)"),
-] {
+for (name, code) in [("Identity", "(= (myid $x) $x) !(myid 42)"), ("Arithmetic", "!(+ 1 2)"), ("Boolean", "!(and true false)")] {
 match engine.process_metta_string(code) {
 Ok(results) => {
 println!("\n{} {}:", green("✓"), cyan(name));
 for r in &results {
-if let Some(t) = r.parsed_value() {
-println!("  {} ({:?})", r.value, t);
-} else {
-println!("  {}", r.value);
+println!(" {} {}", r.value, r.parsed_value().map(|v| format!("({v:?})")).unwrap_or_default());
 }
 }
-}
-Err(e) => eprintln!("  {} {}", red("✗"), red(&e.to_string())),
+Err(e) => eprintln!(" {} {e}", red("✗")),
 }
 }
 println!("\n{}.", green("✓ Done"));
 }
-Err(e) => {
-eprintln!("{} Failed to initialize PeTTa engine: {}", red("✗"), e);
-std::process::exit(1);
-}
-}
-}
 
-/// Filter and validate file paths
-fn filter_valid_paths(files: &[String]) -> Vec<std::path::PathBuf> {
-    files
-        .iter()
-        .map(std::path::PathBuf::from)
-        .filter(|p| {
-            if !p.exists() {
-                eprintln!("Error: file not found: {}", p.display());
-                false
-            } else {
-                true
-            }
-        })
-        .collect()
-}
-
-/// Execute MeTTa files
-fn run_engine_files(
-project_root: &Path,
-paths: &[std::path::PathBuf],
-verbose: bool,
-backend: BackendArg,
-output_format: OutputFormat,
-) -> Result<(), ()> {
+fn run_files(args: &Cli) {
 use petta::PeTTaEngine;
+use std::time::Instant;
 
-let config =
-petta::EngineConfig::new(project_root).verbose(verbose).backend(backend.to_backend());
+let start = args.time.then(Instant::now);
+let paths: Vec<_> = args.files.iter()
+.filter_map(|f| {
+let p = std::path::PathBuf::from(f);
+p.exists().then_some(p)
+}).collect();
 
-let mut engine = match PeTTaEngine::with_config(&config) {
-Ok(e) => e,
-Err(e) => {
-eprintln!("{} {}", red("✗"), red(&e.to_string()));
-return Err(());
-}
+if paths.is_empty() { std::process::exit(1); }
+
+let config = petta::EngineConfig::new(&find_project_root())
+.verbose(args.verbose)
+.backend(args.backend.to_backend());
+
+let Ok(mut engine) = PeTTaEngine::with_config(&config) else {
+eprintln!("{} Failed to initialize engine", red("✗"));
+std::process::exit(1);
 };
 
-let mut had_failure = false;
-for path in paths {
-match engine.load_metta_file(path) {
-Ok(results) => {
-let stderr = engine.stderr_output();
-if !stderr.is_empty() {
-eprintln!("{}:\n{}", red("Prolog stderr"), red(&stderr));
-}
-for r in &results {
-match output_format {
-OutputFormat::Pretty | OutputFormat::Compact => println!("{}", r.value),
-OutputFormat::Json => {
-println!("{}", serde_json::to_string(&r.value).unwrap_or_default());
-}
-OutputFormat::SExpr => println!("{}", r.value),
+let mut failed = false;
+for path in &paths {
+if let Err(e) = process_file(&mut engine, path, args.output_format.clone()) {
+eprintln!("{} {e}", red("✗ Error processing"));
+failed = true;
 }
 }
-}
-Err(e) => {
-let stderr = engine.stderr_output();
-if !stderr.is_empty() {
-eprintln!("{}:\n{}", red("Prolog stderr"), red(&stderr));
-}
-eprintln!("{} {}: {}", red("✗ Error processing"), path.display(), e);
-had_failure = true;
-}
-}
-}
-
-if had_failure { Err(()) } else { Ok(()) }
-}
-
-/// Main file execution function
-fn run_files(
-project_root: &Path,
-files: &[String],
-verbose: bool,
-show_time: bool,
-backend: BackendArg,
-output_format: OutputFormat,
-_profile: bool,
-_trace: bool,
-_stats: bool,
-) {
-let start = show_time.then(Instant::now);
-let paths = filter_valid_paths(files);
-
-if paths.is_empty() {
-std::process::exit(1);
-}
-
-let result = run_engine_files(
-project_root,
-&paths,
-verbose,
-backend.clone(),
-output_format,
-);
 
 if let Some(start) = start {
-let elapsed_ms = start.elapsed().as_millis() as f64;
-eprintln!("\n{} {} backend: {:.3}ms", yellow("⏱ Timing:"), backend, elapsed_ms);
+eprintln!("\n{} {} backend: {:.3}ms", yellow("⏱ Timing:"), args.backend, start.elapsed().as_millis() as f64);
 }
 
-if result.is_err() {
-std::process::exit(1);
-}
+if failed { std::process::exit(1); }
 }
 
-/// Run REPL mode
+fn process_file(engine: &mut petta::PeTTaEngine, path: &std::path::PathBuf, fmt: OutputFormat) -> Result<(), String> {
+let results = engine.load_metta_file(path).map_err(|e| e.to_string())?;
+let stderr = engine.stderr_output();
+
+if !stderr.is_empty() { eprintln!("{}:\n{}", red("Prolog stderr"), red(&stderr)); }
+
+for r in &results {
+println!("{}", match fmt {
+OutputFormat::Json => serde_json::to_string(&r.value).unwrap_or_default(),
+_ => r.value.clone(),
+});
+}
+Ok(())
+}
+
 fn run_repl_mode(project_root: &Path, backend: BackendArg, verbose: bool) {
 let config = repl::ReplConfig::new(project_root).verbose(verbose).backend(backend.to_backend());
 repl::run_repl(&config);
-}
-
-/// Print profiling summary if enabled
-#[cfg(feature = "profiling")]
-fn _print_profiling_summary(stats: &petta::profiler::ProfileStats) {
-println!("\n{} {}", cyan("⏱"), cyan("Profiling Summary"));
-println!("{}", cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
-println!(" Queries: {}", yellow(&stats.query_count.to_string()));
-println!(" Total time: {}", yellow(&format!("{:.2}ms", stats.total_time.as_secs_f64() * 1000.0)));
-println!(" Results: {}", yellow(&stats.total_results.to_string()));
-println!();
 }
