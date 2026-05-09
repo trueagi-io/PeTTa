@@ -1,3 +1,7 @@
+!(import! &self /home/carlo/code/prolog/PeTTa/lib/lib_import.metta)
+!(use-module! aggregate)
+!(import_prolog_function foldall)
+
 (kb 1)
 (kb 2)
 

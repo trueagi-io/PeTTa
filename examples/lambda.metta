@@ -1,5 +1,5 @@
 ;fake lambda (works in H-E MeTTa too):
-(: apply (-> Expression %Undefined% %Undefined%))
+(: apply (-> Atom %Undefined% %Undefined%))
 (= (apply (lambda $var $body) $arg)
    (eval (let $var $arg $body)))
 

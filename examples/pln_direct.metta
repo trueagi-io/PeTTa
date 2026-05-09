@@ -1,13 +1,13 @@
 !(import! &self (library lib_pln))
 
 ;PLN IMPLICATION TO CLAUSE COMPILATION EXTENSION:
-(: => (-> Expression Expression Atom Atom))
+(: => (-> Atom Atom Atom Atom))
 (= (=> (cons , $args) $C $stvImp)
        (progn (cut) (add-atom &self (= $C (Truth_ModusPonens (foldl-atom $args (stv 1.0 1.0) Truth_ModusPonens) $stvImp)))))
 (= (=> $A $C $stvImp)
    (add-atom &self (= $C (Truth_ModusPonens $A $stvImp))))
 
-(: ? (-> Expression Atom))
+(: ? (-> Atom Atom))
 (= (? $term)
    (unique-atom (collapse ($term (progn (reduce $term) ;ensures binding to specific answer, then combines evidence for all derived variants:
                                         (foldl-atom (collapse (reduce $term)) (stv 0.5 0.0) Truth_Revision))))))

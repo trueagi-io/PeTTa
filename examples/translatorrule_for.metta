@@ -1,4 +1,4 @@
-(: for (-> Expression Expression Expression Expression))
+(: for (-> Atom Atom Atom Atom))
 (= (for $var $collection $body)
    (quote (let $var (superpose $collection)
                     $body)))
