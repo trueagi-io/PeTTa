@@ -14,11 +14,7 @@
 
 (= (random-normal-vector $N)
    (random-normal-vector $N ()))
-;(= (random-normal-vector $N $L)
-;   (if (> $N 0)
-;       (random-normal-vector (- $N 1) (cons (random-float 0.0 1.0) $L))
-;       (let $norm (norm $L)
-;            (map-atom $L (|-> ($x) (/ $x $norm))))))
+
 (= (random-normal-vector $N $L)
    (if (> $N 0)
        (random-normal-vector (- $N 1) (cons (random-float 0.0 1.0) $L))

@@ -73,8 +73,8 @@ translate_expr_to_conj(Input, Conj, Out) :- translate_expr(Input, Goals, Out),
 %Special stream operation rewrite rules before main translation
 rewrite_streamops(['trace!', Arg1, Arg2],
                   [progn, ['println!', Arg1], Arg2]).
-rewrite_streamops([unique, [superpose|Args]],
-                  [call, [superpose, ['unique-atom', [collapse, [superpose|Args]]]]]).
+rewrite_streamops([unique, Arg],
+                  [call, [superpose, ['unique-atom', [collapse, Arg]]]]).
 rewrite_streamops([union, [superpose|A], [superpose|B]],
                   [call, [superpose, ['union-atom', [collapse, [superpose|A]],
                                                     [collapse, [superpose|B]]]]]).
@@ -124,8 +124,13 @@ translate_expr([H0|T0], Goals, Out) :-
                                               append(G2, [test(Actual, ExpVal, Out)], Goals)
         ; HV == once, T = [X] -> translate_expr_to_conj(X, Conj, Out),
                                  append(GsH, [once(Conj)], Goals)
-        ; HV == hyperpose, T = [L] -> build_hyperpose_branches(L, Branches),
-                                      append(GsH, [concurrent_and(member((Goal,Res), Branches), (call(Goal), Out = Res))], Goals)
+        ; HV == hyperpose, T = [L]
+          -> ( nonvar(L), is_list(L)
+               -> build_hyperpose_branches(L, Branches),
+                  append(GsH, [concurrent_and(member((Goal,Res), Branches), (call(Goal), Out = Res))], Goals)
+               ; translate_expr(L, GsL, LV),
+                 append(GsH, GsL, Inner),
+                 append(Inner, [hyperpose_runtime(LV, Out)], Goals) )
         ; HV == with_mutex, T = [M,X] -> translate_expr_to_conj(X, Conj, Out),
                                          append(GsH, [with_mutex(M,Conj)], Goals)
         ; HV == transaction, T = [X] -> translate_expr_to_conj(X, Conj, Out),
@@ -301,9 +306,10 @@ translate_expr([H0|T0], Goals, Out) :-
             ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
             ) % Check for type definition [:,HV,TypeChain]
             -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
-               ( TypeChains \= []
+               list_to_set(TypeChains, UniqueTypeChains),
+               ( UniqueTypeChains \= []
                  -> maplist({Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
-                            typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), TypeChains, Branches),
+                            typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), UniqueTypeChains, Branches),
                     disj_list(Branches, Disj),
                     Goals = [Disj]
               ; build_call_or_partial(Fun, AllAVs, Out, Inner, [], Goals))
@@ -410,6 +416,10 @@ build_superpose_branches([E|Es], Out, [B|Bs]) :- translate_expr_to_conj(E, Conj,
 build_hyperpose_branches([], []).
 build_hyperpose_branches([E|Es], [(Goal, Res)|Bs]) :- translate_expr_to_conj(E, Goal, Res),
                                                       build_hyperpose_branches(Es, Bs).
+
+%Runtime hyperpose path for variable/computed list arguments.
+hyperpose_runtime(Exprs, Out) :- is_list(Exprs),
+                                 concurrent_and(member(Expr, Exprs), eval(Expr, Out)).
 
 %Like membercheck but with direct equality rather than unification
 memberchk_eq(V, [H|_]) :- V == H, !.
