@@ -14,6 +14,7 @@ main :- current_prolog_flag(argv, Args),
                            mork_test
         ; Args = [File|_] -> file_directory_name(File, Dir),
                              assertz(working_dir(Dir)),
+                             clear_imported_files,
                              load_metta_file(File,Results),
                              maplist(swrite,Results,ResultsR),
                              maplist(format("~w~n"), ResultsR)
