@@ -4,7 +4,6 @@
 !(test (assertAlphaEqual (h $x $y) (h $a $b)) True)
 !(test (assertAlphaEqual (quote (+ $x $y)) (quote (+ $a $b))) True)
 
-;TODO:
-;!(assertEqualToResult (+ 1 2) 3)
-;(= (adder) $x)
-;!(assertAlphaEqualToResult (adder) ($y))
+!(test (assertEqualToResult (+ 1 2) 3) True)
+(= (adder) ($x))
+!(test (assertAlphaEqualToResult (adder) ($y)) True)

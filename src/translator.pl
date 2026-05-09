@@ -251,9 +251,10 @@ translate_expr([H0|T0], Goals, Out) :-
                                            ( FreeVars == [] -> Out = F
                                                              ; Out = partial(F, FreeVars) )
         %--- Spaces ---:
-        ; ( HV == 'add-atom' ; HV == 'remove-atom' ), T = [_,_] -> append(T, [Out], RawArgs),
-                                                                   Goal =.. [HV|RawArgs],
-                                                                   append(GsH, [Goal], Goals)
+        ; ( HV == 'add-atom' ; HV == 'remove-atom' ), T = [Space,Atom] -> 
+                                                                   translate_expr(Space, G1, S),
+                                                                   Goal =.. [HV,S,Atom,Out],
+                                                                   append([GsH,G1,[Goal]], Goals)
         ; HV == match, T = [Space, Pattern, Body] -> translate_expr(Space, G1, S),
                                                      translate_expr(Body, GsB, Out),
                                                      append(G1, [match(S, Pattern, Out, Out)], G2),
@@ -306,9 +307,10 @@ translate_expr([H0|T0], Goals, Out) :-
             ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
             ) % Check for type definition [:,HV,TypeChain]
             -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
-               ( TypeChains \= []
+               list_to_set(TypeChains, UniqueTypeChains),
+               ( UniqueTypeChains \= []
                  -> maplist({Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
-                            typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), TypeChains, Branches),
+                            typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), UniqueTypeChains, Branches),
                     disj_list(Branches, Disj),
                     Goals = [Disj]
               ; build_call_or_partial(Fun, AllAVs, Out, Inner, [], Goals))
