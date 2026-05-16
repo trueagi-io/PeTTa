@@ -27,3 +27,20 @@ def test_var_out(petta_instance):
     assert (
         var == '$b' or (var.startswith('$_') and var[2:].isdigit())
     ), f"Unexpected variable name '{var}' in result '{result}'"
+
+def test_nested_relative_imports_use_importer_directory(petta_instance, tmp_path):
+    main_dir = tmp_path / "main"
+    libs_dir = tmp_path / "libs"
+    main_dir.mkdir()
+    libs_dir.mkdir()
+
+    root_file = main_dir / "root.metta"
+    parent_file = libs_dir / "parent.metta"
+    sibling_file = libs_dir / "sibling.metta"
+
+    root_file.write_text("!(import! &self ../libs/parent)\n!(from-sibling)\n")
+    parent_file.write_text("!(import! &self sibling)\n")
+    sibling_file.write_text("(= (from-sibling) 42)\n")
+
+    results = petta_instance.load_metta_file(str(root_file))
+    assert any(result == "42" for result in results), f"Expected sibling import to resolve; got {results}"
