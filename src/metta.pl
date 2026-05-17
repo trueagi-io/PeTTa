@@ -169,6 +169,7 @@ get_function_type([F|Args], T) :- nonvar(F), match('&self', [':',F,[->|Ts]], _, 
 
 :- dynamic 'get-type'/2.
 'get-type'(X, T) :- (get_type_candidate(X, T) *-> true ; T = '%Undefined%' ).
+get_type_candidate(X, T) :- ground(X), match('&self', [':',X,T], T, _), !.
 get_type_candidate(X, 'Number')   :- number(X), !.
 get_type_candidate(X, _) :- var(X), !.
 get_type_candidate(X, 'String')   :- string(X), !.
@@ -178,7 +179,6 @@ get_type_candidate(X, T) :- get_function_type(X,T).
 get_type_candidate(X, T) :- \+ get_function_type(X, _),
                             is_list(X),
                             maplist('get-type', X, T).
-get_type_candidate(X, T) :- match('&self', [':',X,T], T, _).
 'get-metatype'(X, 'Variable') :- var(X), !.
 'get-metatype'(X, 'Grounded') :- number(X), !.
 'get-metatype'(X, 'Grounded') :- string(X), !.
