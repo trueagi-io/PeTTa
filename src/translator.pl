@@ -306,9 +306,10 @@ translate_expr([H0|T0], Goals, Out) :-
             ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
             ) % Check for type definition [:,HV,TypeChain]
             -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
-               ( TypeChains \= []
+               list_to_set(TypeChains, UniqueTypeChains),
+               ( UniqueTypeChains \= []
                  -> maplist({Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
-                            typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), TypeChains, Branches),
+                            typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), UniqueTypeChains, Branches),
                     disj_list(Branches, Disj),
                     Goals = [Disj]
               ; build_call_or_partial(Fun, AllAVs, Out, Inner, [], Goals))

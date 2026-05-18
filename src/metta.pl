@@ -145,6 +145,13 @@ cons(H, T, [H|T]).
 member(X, L, true) :- member(X, L).
 'is-member'(X, List, true) :- member(X, List).
 'is-member'(X, List, false) :- \+ member(X, List).
+
+member_alpha(X, [H|_]) :- (var(X) -> var(H) ; true), X = H, !.
+member_alpha(X, [_|T]) :- member_alpha(X, T).
+
+'is-alpha-member'(X, List, true) :- member_alpha(X, List), !.
+'is-alpha-member'(_, _, false).
+
 'exclude-item'(A, L, R) :- exclude(==(A), L, R).
 
 %Multisets:
@@ -182,6 +189,7 @@ get_type_candidate(X, T) :- match('&self', [':',X,T], T, _).
 'get-metatype'(X, 'Symbol') :- atom(X), !.            % e.g., a
 
 'is-var'(A,R) :- var(A) -> R=true ; R=false.
+'is-ground'(A,R) :- ground(A) -> R=true ; R=false.
 'is-expr'(A,R) :- is_list(A) -> R=true ; R=false.
 'is-space'(A,R) :- atom(A), atom_concat('&', _, A) -> R=true ; R=false.
 
@@ -296,8 +304,8 @@ register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
                           '<','>','==', '!=', '=', '=?', '<=', '>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
                           'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom', 'alpha-unique-atom',
                           repr, repra, parse, 'println!', 'readln!', test, assert, 'mm2-exec', atom_concat, atom_chars, copy_term, term_hash,
-                          foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!',
-                          'add-atom', 'remove-atom', 'get-atoms', match, 'is-var', 'is-expr', 'is-space', 'get-mettatype',
+                          foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'is-alpha-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!',
+                          'add-atom', 'remove-atom', 'get-atoms', match, 'is-var', 'is-ground', 'is-expr', 'is-space', 'get-mettatype',
                           decons, 'decons-atom', 'py-call', 'get-type', 'get-metatype', '=alpha', concat, sread, cons, reverse,
                           '#+','#-','#*','#div','#//','#mod','#min','#max','#<','#>','#=','#\\=','set_hook',
                           'union-atom', 'cons-atom', 'intersection-atom', 'subtraction-atom', 'index-atom', id,
