@@ -168,17 +168,17 @@ get_function_type([F|Args], T) :- nonvar(F), match('&self', [':',F,[->|Ts]], _, 
                                   maplist('get-type',Args,As).
 
 :- dynamic 'get-type'/2.
-'get-type'(X, T) :- (get_type_candidate(X, T) *-> true ; T = '%Undefined%' ).
-get_type_candidate(X, T) :- ground(X), match('&self', [':',X,T], T, _), !.
-get_type_candidate(X, 'Number')   :- number(X), !.
-get_type_candidate(X, _) :- var(X), !.
-get_type_candidate(X, 'String')   :- string(X), !.
-get_type_candidate(true, 'Bool')  :- !.
-get_type_candidate(false, 'Bool') :- !.
-get_type_candidate(X, T) :- get_function_type(X,T).
-get_type_candidate(X, T) :- \+ get_function_type(X, _),
-                            is_list(X),
-                            maplist('get-type', X, T).
+'get-type'(X, T) :- ((ground(X), match('&self', [':',X,T], T, _)) *-> true ; get_type_candidate_inferred(X, T)).
+'get-type'(X, '%Undefined%') :- \+ get_type_candidate_inferred(X, _), \+ (ground(X), match('&self', [':',X,_], _, _)).
+get_type_candidate_inferred(X, 'Number')   :- number(X), !.
+get_type_candidate_inferred(X, '%Undefined%') :- var(X), !.
+get_type_candidate_inferred(X, 'String')   :- string(X), !.
+get_type_candidate_inferred(true, 'Bool')  :- !.
+get_type_candidate_inferred(false, 'Bool') :- !.
+get_type_candidate_inferred(X, T) :- get_function_type(X,T).
+get_type_candidate_inferred(X, T) :- \+ get_function_type(X, _), is_list(X), maplist('get-type', X, T).
+
+get_type_candidate(X, T) :- 'get-type'(X, T).
 'get-metatype'(X, 'Variable') :- var(X), !.
 'get-metatype'(X, 'Grounded') :- number(X), !.
 'get-metatype'(X, 'Grounded') :- string(X), !.

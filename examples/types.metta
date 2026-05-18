@@ -6,7 +6,7 @@
 (: x Letter)
 (: x Buchstabe)
 
-!(test (get-type $a) $z)
+!(test (get-type $a) %Undefined%)
 !(test (get-type a) A)
 !(test (get-type b) B)
 !(test (get-type c) %Undefined%)
