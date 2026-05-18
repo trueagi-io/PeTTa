@@ -163,7 +163,7 @@ get_function_type([F|Args], T) :- nonvar(F), match('&self', [':',F,[->|Ts]], _, 
 :- dynamic 'get-type'/2.
 'get-type'(X, T) :- (get_type_candidate(X, T) *-> true ; T = '%Undefined%' ).
 get_type_candidate(X, 'Number')   :- number(X), !.
-get_type_candidate(X, _) :- var(X), !.
+get_type_candidate(X, '%Undefined%') :- var(X), !.
 get_type_candidate(X, 'String')   :- string(X), !.
 get_type_candidate(true, 'Bool')  :- !.
 get_type_candidate(false, 'Bool') :- !.
