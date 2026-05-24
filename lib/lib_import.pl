@@ -18,12 +18,32 @@ convert_stream(In, Out, Space) :- read_line_to_string(In, Line),
 
 %Perform simple transformation from S-Expression to space-rel predicate:
 convert_line(Line0, Space, Out) :- sub_string(Line0, 1, _, 1, Inner0),
-                                   replace_all("(", "[", Inner0, Inner1),
-                                   replace_all(")", "]", Inner1, Inner2),
-                                   replace_all(" ", ",", Inner2, Inner3),
+                                   string_chars(Inner0, Chars),
+                                   transform_chars(Chars, false, NewChars),
+                                   string_chars(Inner3, NewChars),
                                    format(Out, "'~w'(~w).~n", [Space, Inner3]).
 
-%Helper predicate for string repkacement:
+%End of recursion
+transform_chars([], _, []).
+
+%Toggle quote mode ON
+transform_chars(['"'|T], false, ['"'|R]) :- transform_chars(T, true, R).
+
+%Toggle quote mode OFF
+transform_chars(['"'|T], true, ['"'|R]) :- transform_chars(T, false, R).
+
+%Replace ( with [ only outside quotes
+transform_chars(['('|T], false, ['['|R]) :- transform_chars(T, false, R).
+
+%Replace ) with ] only outside quotes
+transform_chars([')'|T], false, [']'|R]) :- transform_chars(T, false, R).
+
+%Replace spaces with commas only outside quotes
+transform_chars([' '|T], false, [','|R]) :- transform_chars(T, false, R).
+
+%Keep all other characters unchanged
+transform_chars([H|T], Q, [H|R]) :- transform_chars(T, Q, R).
+%Helper predicate for string replacement:
 replace_all(P, R, S, O) :- split_string(S, P, "", Parts),
                            atomic_list_concat(Parts, R, O).
 
