@@ -23,6 +23,7 @@ pub fn build_server_source(src_dir: &Path, verbose: bool) -> Result<String, Erro
         "filereader.pl",
         "utils.pl",
         "metta.pl",
+        "omegaclaw_ext.pl",
         "server_loop.pl",
     ] {
         let fpath = src_dir.join(file);

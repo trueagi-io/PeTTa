@@ -1227,16 +1227,16 @@ where
     fn from_tree(tree: &'tree ArenaCompactTree<Storage>) -> Self {
         let (cur_node, node_id) = tree.get_root();
         let stack_frame = StackFrame::from(&cur_node, node_id);
-ACTZipper {
-    tree,
-    cur_node,
-    path: SmallVec::new(),
-    invalid: 0,
-    origin_depth: 0,
-    origin_node_depth: 0,
-    stack: Vec::from([stack_frame]),
-    _marker: PhantomData,
-}
+    ACTZipper {
+        tree,
+        cur_node,
+        path: SmallVec::new(),
+        invalid: 0,
+        origin_depth: 0,
+        origin_node_depth: 0,
+        stack: SmallVec::from([stack_frame]),
+        _marker: PhantomData,
+    }
     }
 
     fn with_root_here(mut self) -> Self {

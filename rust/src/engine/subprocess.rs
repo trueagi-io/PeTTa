@@ -39,8 +39,15 @@ impl SubprocessManager {
         std::fs::write(tmp.path(), &server)
             .map_err(|e| Error::WriteError(e.to_string()))?;
         
-        let mut child = Command::new(&self.config.swipl_path)
-            .args(["-q", "-t", "halt", tmp.path().to_str().unwrap()])
+        let mut cmd = Command::new(&self.config.swipl_path);
+        cmd.args(["-q", "-t", "halt", tmp.path().to_str().unwrap()]);
+
+        #[cfg(feature = "websocket")]
+        if let Some(port) = self.config.ws_port {
+            cmd.env("WS_PORT", port.to_string());
+        }
+
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

@@ -8,7 +8,7 @@ if ! command -v swipl >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "Building petta (Rust)..."
-cargo build --release
+echo "Building petta (Rust) with all features..."
+cargo build --release --all-features
 
 echo "Build successful."

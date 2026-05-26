@@ -98,6 +98,9 @@ pub struct EngineConfig {
     pub max_restarts: u32,
     /// Optional timeout for operations
     pub timeout: Option<Duration>,
+    /// WebSocket extension server port (set at runtime)
+    #[cfg(feature = "websocket")]
+    pub ws_port: Option<u16>,
 }
 
 impl Default for EngineConfig {
@@ -109,6 +112,8 @@ impl Default for EngineConfig {
             verbose: false,
             max_restarts: 3,
             timeout: None,
+            #[cfg(feature = "websocket")]
+            ws_port: None,
         }
     }
 }
@@ -256,6 +261,8 @@ impl EngineConfigBuilder {
             verbose: self.verbose,
             max_restarts: self.max_restarts,
             timeout: self.timeout,
+            #[cfg(feature = "websocket")]
+            ws_port: None,
         }
     }
 }

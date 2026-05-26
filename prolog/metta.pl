@@ -382,7 +382,12 @@ register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
    assertz(fun('add-translator-rule!')), assertz(fun('remove-translator-rule!')),
    assertz(fun(argv)), assertz(fun(lazy_load_library)), assertz(fun(reload_library)),
    assertz(fun(list_loaded_libraries)),
-   assertz(fun(declare_type)), assertz(fun(get_declared_type)), assertz(fun(infer_type)).
+    assertz(fun(declare_type)), assertz(fun(get_declared_type)), assertz(fun(infer_type)),
+    assertz(fun('call-llm')), assertz(fun('call-embedding')),
+    assertz(fun('vector-remember')), assertz(fun('vector-query')),
+    assertz(fun('around-time')),
+    assertz(fun('web-search')), assertz(fun('channel-recv')), assertz(fun('channel-send')),
+    assertz(fun('balance-parens')), assertz(fun('read_file_to_string')).
 
 'get-error-location'(error(_ErrType, context(Location, _)), Location).
 'get-error-location'(_, none).

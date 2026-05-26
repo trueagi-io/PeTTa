@@ -194,6 +194,8 @@ pub struct PeTTaEngine {
     backend: BackendState,
     config: EngineConfig,
     restarts: u32,
+    #[cfg(feature = "websocket")]
+    _ws_server: Option<crate::ws_ext::WsExtensionServer>,
 }
 
 impl PeTTaEngine {
@@ -210,10 +212,31 @@ impl PeTTaEngine {
     /// # Ok::<_, petta::Error>(())
     /// ```
     pub fn with_config(config: &EngineConfig) -> Result<Self, Error> {
+        #[allow(unused_mut)]
+        let mut config = config.clone();
+
+        #[cfg(feature = "websocket")]
+        let ws_server = {
+            match crate::ws_ext::WsExtensionServer::spawn(
+                "repos/OmegaClaw-Core/memory/vector_store.json".into()
+            ) {
+                Ok(server) => {
+                    config.ws_port = Some(server.port);
+                    Some(server)
+                }
+                Err(e) => {
+                    eprintln!("Warning: WS extension server failed to start: {}", e);
+                    None
+                }
+            }
+        };
+
         Ok(Self {
-            backend: BackendState::new(config)?,
-            config: config.clone(),
+            backend: BackendState::new(&config)?,
+            config,
             restarts: 0,
+            #[cfg(feature = "websocket")]
+            _ws_server: ws_server,
         })
     }
 

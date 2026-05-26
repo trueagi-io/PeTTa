@@ -1,5 +1,7 @@
 #![allow(clippy::wrong_self_convention)]
 
+use smallvec::SmallVec;
+
 use core::ptr::NonNull;
 use maybe_dangling::MaybeDangling;
 
@@ -1636,9 +1638,9 @@ pub(crate) struct KeyFields<'path> {
     /// The index into `origin_path` of the start of the root node's key
     pub(crate) root_key_start: usize,
     /// Stores the entire path, including the bytes from origin_path
-    pub(crate) prefix_buf: Vec<u8>,
+    pub(crate) prefix_buf: SmallVec<[u8; 16]>,
     /// Stores the lengths for each successive node's key
-    pub(crate) prefix_idx: Vec<usize>,
+    pub(crate) prefix_idx: SmallVec<[usize; 4]>,
 }
 
 impl<'trie, V: Clone + Send + Sync + Unpin, A: Allocator + 'trie> Zipper

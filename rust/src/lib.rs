@@ -93,6 +93,9 @@ pub mod backends;
 // Internal modules
 mod cli;
 mod repl;
+
+#[cfg(feature = "websocket")]
+pub mod ws_ext;
 mod profiler;
 mod observability;
 mod reliability;

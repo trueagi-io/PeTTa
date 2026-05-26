@@ -410,9 +410,9 @@ where
     Z: Zipper + ZipperReadOnlyConditionalValues<'a, V> + ZipperAbsolutePath + ZipperPathBuffer,
     AlgF: FnMut(&ByteMask, &mut [W], usize, Option<&V>, &[u8], &Z) -> Result<W, Err>,
 {
-    //`stack` holds a "frame" at each forking point above the zipper position.  No frames exist for values
-    let mut stack = Vec::<StackFrame>::with_capacity(12);
-    let mut children = Vec::<W>::new();
+    //`stack` holds a "frame" at each forking point above the zipper position. No frames exist for values
+    let mut stack = SmallVec::<[StackFrame; 12]>::new();
+    let mut children = SmallVec::<[W; 4]>::new();
     let mut frame_idx = 0;
 
     z.reset();
@@ -750,7 +750,7 @@ where
     zipper.prepare_buffers();
 
     let mut stack = Stack::new();
-    let mut children = Vec::<W>::new();
+    let mut children = SmallVec::<[W; 4]>::new();
     let mut cache = HashMap::<u64, W>::new();
     stack.push_state(&zipper);
     'outer: loop {
@@ -856,7 +856,7 @@ where
 {
     let child_mask = ByteMask::from(z.child_mask());
     let child_count = child_mask.count_bits();
-    let mut children = Vec::<W>::with_capacity(child_count);
+    let mut children = SmallVec::<[W; 8]>::with_capacity(child_count);
     let mut cache = HashMap::<u64, W>::new();
     let path = z.path().to_vec();
     for ii in 0..child_count {
@@ -917,7 +917,7 @@ where
     W: Default,
     AlgF: FnMut(W, &mut Option<V>, &mut TrieBuilder<V, W, A>, &[u8]),
 {
-    let mut stack = Vec::<(TrieBuilder<V, W, A>, usize)>::with_capacity(12);
+    let mut stack = SmallVec::<[(TrieBuilder<V, W, A>, usize); 12]>::new();
     let mut frame_idx = 0;
 
     let mut new_map = PathMap::new_in(alloc.clone());
