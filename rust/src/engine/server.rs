@@ -41,6 +41,10 @@ pub fn build_server_source(src_dir: &Path, verbose: bool) -> Result<String, Erro
     // Initialize type lookup cache
     src.push_str(":- nb_setval(fun_types, []).\n");
 
+    // Set working directory after all files are consulted
+    let wd = src_dir.parent().unwrap_or(Path::new(".")).display().to_string().replace('\'', "\\'");
+    src.push_str(&format!(":- assertz(working_dir('{}')).\n", wd));
+
     debug!("Built Prolog server source ({} bytes)", src.len());
     Ok(src)
 }

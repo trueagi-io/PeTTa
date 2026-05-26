@@ -101,6 +101,8 @@ pub struct EngineConfig {
     /// WebSocket extension server port (set at runtime)
     #[cfg(feature = "websocket")]
     pub ws_port: Option<u16>,
+    /// Extra command-line arguments forwarded to the Prolog subprocess
+    pub extra_args: Vec<String>,
 }
 
 impl Default for EngineConfig {
@@ -114,6 +116,7 @@ impl Default for EngineConfig {
             timeout: None,
             #[cfg(feature = "websocket")]
             ws_port: None,
+            extra_args: Vec::new(),
         }
     }
 }
@@ -263,6 +266,7 @@ impl EngineConfigBuilder {
             timeout: self.timeout,
             #[cfg(feature = "websocket")]
             ws_port: None,
+            extra_args: Vec::new(),
         }
     }
 }

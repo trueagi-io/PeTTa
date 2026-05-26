@@ -1,5 +1,5 @@
 :- module(omegaclaw_ext, []).
-:- catch(use_module(library(websocket/client)), _, true).
+:- catch(use_module(library(http/websocket)), _, true).
 :- catch(use_module(library(readutil)), _, true).
 
 :- initialization(init_ws).
@@ -63,3 +63,18 @@ ws_call(_, _, []).
     ), _, Result = "").
 
 'balance-parens'(Str, Str).
+
+'irc-connect'(Server, Port, Nick, Channel, AuthSecret, _) :-
+    ( nonvar(AuthSecret), AuthSecret \== (empty) -> Secret = AuthSecret
+    ; getenv('OMEGACLAW_AUTH_SECRET', Secret) -> true
+    ; Secret = '' ),
+    ws_call("irc_connect", _{server:Server, port:Port, nick:Nick, channel:Channel, auth_secret:Secret}, _).
+
+'irc-recv'(Msg) :-
+    ws_call("irc_recv", _{}, Msg).
+
+'irc-send'(Msg, _) :-
+    ws_call("irc_send", _{msg:Msg}, _).
+
+'irc-stop'(_) :-
+    ws_call("irc_stop", _{}, _).

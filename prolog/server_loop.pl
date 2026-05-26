@@ -29,7 +29,7 @@ handle_cancel :-
 execute_query(70, Query, Results) :-  % 'F' = load_metta_file
     with_output_to(user_error, catch(load_metta_file(Query, Results), _, Results=[])).
 execute_query(83, Query, Results) :-  % 'S' = process_metta_string
-    with_output_to(user_error, catch(process_metta_string(Query, Results), _, Results=[])).
+    with_output_to(user_error, catch(process_metta_string(Query, Results), E, (writeln(user_error, error(E)), Results=[]))).
 execute_query(_, _, Results) :- Results = [].
 
 read_u32(V) :-

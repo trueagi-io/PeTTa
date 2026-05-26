@@ -41,6 +41,9 @@ impl SubprocessManager {
         
         let mut cmd = Command::new(&self.config.swipl_path);
         cmd.args(["-q", "-t", "halt", tmp.path().to_str().unwrap()]);
+        for arg in &self.config.extra_args {
+            cmd.arg(arg);
+        }
 
         #[cfg(feature = "websocket")]
         if let Some(port) = self.config.ws_port {

@@ -1,11 +1,27 @@
 %%%%%%%%%% Dependencies %%%%%%%%%%
-library(X, Path) :- library_path(Base), atomic_list_concat([Base, '/', X], Path).
-library(X, Y, Path) :- library_path(Base), atomic_list_concat([Base, '/../', X, '/', Y], Path).
+library(X, Path) :-
+    library_path(Base),
+    atomic_list_concat([Base, '/', X], Path).
+library(X, Y, Path) :-
+    library_path(Base),
+    atomic_list_concat([Base, '/../', X, '/', Y], Path0),
+    ( exists_file(Path0)
+    -> Path = Path0
+    ; atomic_list_concat([Path0, '.metta'], PathMeta),
+      exists_file(PathMeta)
+    -> Path = Path0
+    ; atomic_list_concat([Path0, '.pl'], PathPl),
+      exists_file(PathPl)
+    -> Path = Path0
+    ; atomic_list_concat([Base, '/../repos/', X, '/', Y], Path)
+    ).
 :- prolog_load_context(directory, Source),
    directory_file_path(Source, '..', Parent),
    directory_file_path(Parent, 'lib', LibPath),
    asserta(library_path(LibPath)).
 :- autoload(library(uuid)).
+:- dynamic working_dir/1.
+:- dynamic loaded_import/2.
 :- use_module(library(random)).
 :- use_module(library(error)).
 :- use_module(library(listing)).
@@ -286,6 +302,16 @@ call_goals([G|Gs]) :- call(G),
 
 %%% Prolog interop: %%%
 argv(K, Arg) :- current_prolog_flag(argv, Argv), nth0(K, Argv, A), ( atom_number(A, N) -> Arg = N ; Arg = A ).
+
+% Scan all argv entries for a key=value pair, ignoring SWI-Prolog flags (starting with -)
+scan_argv(Key, Value) :-
+    current_prolog_flag(argv, Argv),
+    member(Arg, Argv),
+    atom(Arg),
+    \+ sub_atom(Arg, 0, 1, _, '-'),
+    atom_concat(Key, '=', Prefix),
+    atom_concat(Prefix, Value, Arg),
+    !.  % commit to first match
 import_prolog_function(N, true) :- register_fun(N).
 'Predicate'([F|Args], Term) :- Term =.. [F|Args].
 callPredicate(G, true) :- call(G).
@@ -298,18 +324,30 @@ retractPredicate(_, false).
 ensure_metta_ext(Path, Path) :- file_name_extension(_, metta, Path), !.
 ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWithExt).
 
-'import!'(Space, File, true) :- catch(importer_helper(Space, File), _, fail).
+'import!'(Space, File, true) :- 
+                                % Prevent duplicate imports using loaded_imports tracking
+                                (   loaded_import(Space, File) 
+                                ->  true  % Already imported, skip
+                                ;   catch(importer_helper(Space, File), E, fail),
+                                    assertz(loaded_import(Space, File))
+                                ).
 importer_helper(Space, File) :- atom_string(File, SFile),
+                                writeln(user_error, importer_helper_sfile(SFile)),
                                 working_dir(Base),
+                                writeln(user_error, importer_helper_base(Base)),
                                 ( file_name_extension(ModPath, 'py', SFile)
                                   -> absolute_file_name(SFile, Path, [relative_to(Base)]),
+                                     writeln(user_error, importer_helper_py(Path)),
                                      file_directory_name(Path, Dir),
                                      file_base_name(ModPath, ModuleName),
                                      py_call(sys:path:append(Dir), _),
                                      py_call(builtins:'__import__'(ModuleName), _)
                                    ; ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
+                                     writeln(user_error, importer_helper_path(Path)),
                                      ensure_metta_ext(Path, PathWithExt),
+                                     writeln(user_error, importer_helper_path_with_ext(PathWithExt)),
                                      exists_file(PathWithExt), !,
+                                     writeln(user_error, importer_helper_exists_ok),
                                      load_metta_file(PathWithExt, _, Space) ).
 
 :- dynamic translator_rule/1.
@@ -386,7 +424,9 @@ register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
     assertz(fun('call-llm')), assertz(fun('call-embedding')),
     assertz(fun('vector-remember')), assertz(fun('vector-query')),
     assertz(fun('around-time')),
+    assertz(fun('scan_argv')),
     assertz(fun('web-search')), assertz(fun('channel-recv')), assertz(fun('channel-send')),
+    assertz(fun('irc-connect')), assertz(fun('irc-recv')), assertz(fun('irc-send')), assertz(fun('irc-stop')),
     assertz(fun('balance-parens')), assertz(fun('read_file_to_string')).
 
 'get-error-location'(error(_ErrType, context(Location, _)), Location).

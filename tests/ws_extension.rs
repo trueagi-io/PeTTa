@@ -98,3 +98,64 @@ fn test_ws_llm_call_missing_key() {
     let err = resp["error"].as_str().unwrap();
     assert!(err.contains("not configured") || err.contains("OPENAI_API_KEY"));
 }
+
+#[test]
+fn test_ws_llm_call_ollama() {
+    let server = petta::ws_ext::WsExtensionServer::spawn("/tmp/test_vs6.json".into()).unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    let mut ws = connect_ws(server.port);
+
+    let resp = send_req(&mut ws, 1, "llm_call", serde_json::json!({
+        "provider": "Ollama",
+        "prompt": "say hello in one word",
+        "max_tokens": 20
+    }));
+    assert_eq!(resp["id"], 1);
+    if let Some(err) = resp.get("error") {
+        eprintln!("Ollama LLM error (may be expected if env not set): {}", err);
+    } else if let Some(result) = resp.get("result") {
+        eprintln!("Ollama LLM result: {}", result);
+    }
+}
+
+#[test]
+fn test_ws_irc_connect() {
+    let server = petta::ws_ext::WsExtensionServer::spawn("/tmp/test_vs7.json".into()).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    let mut ws = connect_ws(server.port);
+
+    let resp = send_req(&mut ws, 1, "irc_connect", serde_json::json!({
+        "server": "irc.quakenet.org",
+        "port": 6667,
+        "nick": "omegaclaw_test",
+        "channel": "##metta",
+        "auth_secret": ""
+    }));
+    assert_eq!(resp["id"], 1);
+    if let Some(err) = resp.get("error") {
+        eprintln!("IRC connect error: {}", err);
+    } else {
+        eprintln!("IRC connect result: {}", resp["result"]);
+        std::thread::sleep(Duration::from_secs(10));
+        // Check if we got any messages
+        let resp2 = send_req(&mut ws, 2, "irc_recv", serde_json::json!({}));
+        if let Some(err) = resp2.get("error") {
+            eprintln!("IRC recv error: {}", err);
+        } else {
+            eprintln!("IRC recv result: '{}'", resp2["result"]);
+        }
+        // Send a test message
+        let resp3 = send_req(&mut ws, 3, "irc_send", serde_json::json!({"msg": "Hello from OmegaClaw test!"}));
+        if let Some(err) = resp3.get("error") {
+            eprintln!("IRC send error: {}", err);
+        } else {
+            eprintln!("IRC send result: {}", resp3["result"]);
+        }
+        // Receive again after send
+        std::thread::sleep(Duration::from_secs(2));
+        let resp4 = send_req(&mut ws, 4, "irc_recv", serde_json::json!({}));
+        eprintln!("IRC recv after send: '{}'", resp4["result"]);
+        // Stop IRC
+        let _ = send_req(&mut ws, 5, "irc_stop", serde_json::json!({}));
+    }
+}

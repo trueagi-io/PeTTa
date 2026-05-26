@@ -62,9 +62,21 @@ fn run_files(args: &Cli) {
     let timing = args.time.then(std::time::Instant::now);
     let backend = parse_backend(&args.backend.to_string());
 
-    let config = EngineConfig::new(Path::new("."))
+    // Separate actual files from key=value config overrides
+    let mut files = Vec::new();
+    let mut extra_args = Vec::new();
+    for arg in &args.files {
+        if arg.contains('=') && !Path::new(arg).exists() {
+            extra_args.push(arg.clone());
+        } else {
+            files.push(arg.clone());
+        }
+    }
+
+    let mut config = EngineConfig::new(Path::new("."))
         .verbose(args.verbose)
         .backend(backend);
+    config.extra_args = extra_args;
 
     let mut engine = match PeTTaEngine::with_config(&config) {
         Ok(e) => e,
@@ -75,7 +87,7 @@ fn run_files(args: &Cli) {
     };
 
     let mut exit_code = 0;
-    for file in &args.files {
+    for file in &files {
         let path = Path::new(file);
         if !path.exists() {
             eprintln!("{} File not found: {}", red("✗"), file);

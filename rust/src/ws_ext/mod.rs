@@ -4,6 +4,7 @@ mod embed;
 mod vector_store;
 mod search;
 mod channel;
+mod irc;
 
 use protocol::{WsRequest, WsResponse};
 use tokio::net::TcpListener;
@@ -134,6 +135,36 @@ async fn handle_message(text: &str) -> WsResponse {
         }
         "channel_recv" => {
             match channel::recv() {
+                Ok(s) => serde_json::Value::String(s),
+                Err(e) => return WsResponse::err(req.id, e),
+            }
+        }
+        "irc_connect" => {
+            let server = req.params["server"].as_str().unwrap_or("irc.libera.chat");
+            let port = req.params["port"].as_u64().unwrap_or(6667) as u16;
+            let nick = req.params["nick"].as_str().unwrap_or("omegaclaw");
+            let channel = req.params["channel"].as_str().unwrap_or("#omegaclaw");
+            let auth_secret = req.params["auth_secret"].as_str().unwrap_or("");
+            match irc::connect(server, port, nick, channel, auth_secret) {
+                Ok(s) => serde_json::Value::String(s),
+                Err(e) => return WsResponse::err(req.id, e),
+            }
+        }
+        "irc_send" => {
+            let msg = req.params["msg"].as_str().unwrap_or("");
+            match irc::send(msg) {
+                Ok(s) => serde_json::Value::String(s),
+                Err(e) => return WsResponse::err(req.id, e),
+            }
+        }
+        "irc_recv" => {
+            match irc::recv() {
+                Ok(s) => serde_json::Value::String(s),
+                Err(e) => return WsResponse::err(req.id, e),
+            }
+        }
+        "irc_stop" => {
+            match irc::stop() {
                 Ok(s) => serde_json::Value::String(s),
                 Err(e) => return WsResponse::err(req.id, e),
             }

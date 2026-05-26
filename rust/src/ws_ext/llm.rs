@@ -86,9 +86,14 @@ pub async fn call(params: &Value) -> Result<String, String> {
             let key = api_key("ASIONE_API_KEY", "ASIOne")?;
             asi_one_call(&key, prompt, max_tokens).await
         }
-        "Ollama" => {
+        "Ollama" | "Ollama-local" => {
             let key = api_key("OLLAMA_API_KEY", "Ollama")?;
-            openai_compatible("http://localhost:11434/v1", "qwen3.5:9b", &key, prompt, max_tokens).await
+            let base = std::env::var("LLM_SERVER_LOCAL_URL")
+                .unwrap_or_else(|_| "http://localhost:11434".into());
+            let base_url = format!("{}/v1", base.trim_end_matches('/'));
+            let model = std::env::var("OLLAMA_MODEL")
+                .unwrap_or_else(|_| "qwen3.5:9b".into());
+            openai_compatible(&base_url, &model, &key, prompt, max_tokens).await
         }
         "OpenRouter" => {
             let key = api_key("OPENROUTER_API_KEY", "OpenRouter")?;
