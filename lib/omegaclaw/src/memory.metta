@@ -13,7 +13,7 @@
           (configure maxHistory 30000)
           (configure embeddingprovider Local) ;OpenAI or Local
           (if (== (embeddingprovider) Local)
-              (py-call (lib_llm_ext.initLocalEmbedding)) _)))
+              () _)))
 
 (= (getPrompt)
    (read-file (library OmegaClaw-Core ./memory/prompt.txt)))
@@ -32,18 +32,18 @@
 
 (= (embed $str)
    (if (== (embeddingprovider) Local)
-       (py-call (lib_llm_ext.useLocalEmbedding (string-safe $str)))
+       (call-embedding (string-safe $str) (embeddingprovider))
        (useGPTEmbedding (string-safe $str))))
 
 (= (appendToHistory $addition)
    (append-file (library OmegaClaw-Core ./memory/history.metta) (swrite $addition)))
 
 (= (remember $str)
-   (progn (py-call (lib_chromadb.remember $str (embed $str) (get_time_as_string)))
+   (progn (vector-remember $str (embed $str) (get_time_as_string))
           REMEMBER-SUCCESS))
 
 (= (query $str)
-   (py-call (lib_chromadb.query (embed $str) (maxRecallItems))))
+   (vector-query (embed $str) (maxRecallItems)))
 
 (= (episodes $time)
-   (py-call (helper.around_time $time (maxEpisodeRecallLines))))
+   (around-time $time (maxEpisodeRecallLines)))

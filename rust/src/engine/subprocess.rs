@@ -28,7 +28,7 @@ impl SubprocessManager {
 
     pub fn spawn(&self) -> Result<SpawnHandle, Error> {
         eprintln!("[DBG] SubprocessManager::spawn called, swipl_path={:?}", self.config.swipl_path);
-        check_swipl_version(&self.config.swipl_path, (9, 3))?;
+        check_swipl_version(&self.config.swipl_path, (9, 0))?;
         eprintln!("[DBG] swipl version check OK");
 
         let src_dir = &self.config.src_dir;

@@ -79,7 +79,7 @@ impl SwiplBackend {
 
 impl super::backend::BackendImpl for SwiplBackend {
     fn version(&self) -> &'static str {
-        "9.3"
+        "9.0"
     }
 
     fn capabilities(&self) -> BackendCapabilities {
@@ -178,7 +178,7 @@ impl MorkBackend {
 #[cfg(feature = "mork")]
 impl super::backend::BackendImpl for MorkBackend {
     fn version(&self) -> &'static str {
-        "9.3"
+        "9.0"
     }
 
     fn capabilities(&self) -> BackendCapabilities {

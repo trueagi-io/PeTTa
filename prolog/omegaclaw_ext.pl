@@ -60,7 +60,14 @@ ws_call(_, _, []).
 'channel-send'(Msg, _) :-
     ws_call("channel_send", _{msg:Msg}, _).
 
-'balance-parens'(Str, Str).
+'balance-parens'(Str, Result) :-
+    ws_call("helper_balance_parens", _{str:Str}, Result).
+
+'normalize-string'(Str, Result) :-
+    ws_call("helper_normalize_string", _{str:Str}, Result).
+
+'around-time'(Time, K, Result) :-
+    ws_call("helper_around_time", _{time:Time, k:K}, Result).
 
 'irc-connect'(Server, Port, Nick, Channel, AuthSecret, _) :-
     ( nonvar(AuthSecret), AuthSecret \== empty -> Secret = AuthSecret

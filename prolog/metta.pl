@@ -427,7 +427,7 @@ register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
     assertz(fun('scan_argv')),
     assertz(fun('web-search')), assertz(fun('channel-recv')), assertz(fun('channel-send')),
     assertz(fun('irc-connect')), assertz(fun('irc-recv')), assertz(fun('irc-send')), assertz(fun('irc-stop')),
-    assertz(fun('balance-parens')), assertz(fun('read_file_to_string')).
+    assertz(fun('balance-parens')), assertz(fun('normalize-string')), assertz(fun('read_file_to_string')).
 
 'get-error-location'(error(_ErrType, context(Location, _)), Location).
 'get-error-location'(_, none).

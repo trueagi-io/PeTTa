@@ -1,5 +1,6 @@
 mod channel;
 mod embed;
+mod helpers;
 mod irc;
 mod llm;
 mod protocol;
@@ -135,6 +136,18 @@ async fn handle_message(text: &str) -> WsResponse {
             Err(e) => return WsResponse::err(req.id, e),
         },
         "channel_recv" => match channel::recv() {
+            Ok(s) => serde_json::Value::String(s),
+            Err(e) => return WsResponse::err(req.id, e),
+        },
+        "helper_balance_parens" => match helpers::balance_parens(&req.params) {
+            Ok(s) => serde_json::Value::String(s),
+            Err(e) => return WsResponse::err(req.id, e),
+        },
+        "helper_normalize_string" => match helpers::normalize_string(&req.params) {
+            Ok(s) => serde_json::Value::String(s),
+            Err(e) => return WsResponse::err(req.id, e),
+        },
+        "helper_around_time" => match helpers::around_time(&req.params) {
             Ok(s) => serde_json::Value::String(s),
             Err(e) => return WsResponse::err(req.id, e),
         },

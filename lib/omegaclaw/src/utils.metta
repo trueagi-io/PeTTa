@@ -66,3 +66,4 @@
         (if (== $res ())
             $default
             (car-atom $res))))
+(= (string-concat-list $tuple) (atomic_list_concat $tuple ""))
