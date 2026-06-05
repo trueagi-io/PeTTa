@@ -1,3 +1,5 @@
+% Track imported files for cycle detection and order-independence
+:- dynamic imported_file/1.
 :- use_module(library(readutil)). % read_file_to_string/3
 :- use_module(library(pcre)). % re_replace/4
 :- current_prolog_flag(argv, Args), ( (memberchk(silent, Args) ; memberchk('--silent', Args) ; memberchk('-s', Args))
@@ -14,8 +16,42 @@ process_metta_string(S, Results, Space) :- string_codes(S, Cs),
                                            strip(Cs, 0, Codes),
                                            phrase(top_forms(Forms, 1), Codes),
                                            maplist(parse_form, Forms, ParsedForms),
+                                           pre_register_imports(ParsedForms),
                                            maplist(process_form(Space), ParsedForms, ResultsList), !,
                                            append(ResultsList, Results).
+
+% Pre-register all imports before compilation (order-independence)
+pre_register_imports([]).
+pre_register_imports([parsed(runnable, _, ['import!', _, File])|Rest]) :- !,
+    catch(pre_register_from_file(File), _, true),
+    pre_register_imports(Rest).
+pre_register_imports([_|Rest]) :- pre_register_imports(Rest).
+
+% Parse an imported file to register its function names and arities, with cycle detection
+pre_register_from_file(File) :-
+    atom(File),
+    atom_string(File, SFile),
+    working_dir(Base),
+    \+ file_name_extension(_, 'py', SFile),
+    ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
+    ensure_metta_ext(Path, PathWithExt),
+    exists_file(PathWithExt),
+    ( imported_file(PathWithExt) -> true
+    ;   assertz(imported_file(PathWithExt)),
+        read_file_to_string(PathWithExt, S, []),
+        string_codes(S, Cs),
+        strip(Cs, 0, Codes),
+        phrase(top_forms(Forms, 1), Codes),
+        maplist(parse_form, Forms, ParsedForms),
+        pre_register_imports(ParsedForms),
+        forall(member(parsed(function, _, Term), ParsedForms),
+            ( add_sexp('&self', Term),
+              translate_clause(Term, Clause),
+              assertz(Clause, Ref),
+              assertz(translated_from(Ref, Term))
+            )
+        )
+    ).
 
 %First pass to convert MeTTa to Prolog Terms and register functions:
 parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
@@ -28,6 +64,24 @@ process_form(Space, parsed(expression, _, Term), []) :- 'add-atom'(Space, Term, 
                                                         ( silent(true) -> true ; swrite(Term,STerm),
                                                                                  format("\e[33m--> metta sexpr -->~n\e[36m~w~n", [STerm]),
                                                                                  format("\e[33m^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
+% Add runtime cycle detection for import!
+process_form(_, parsed(runnable, FormStr, ['import!', _, File]), Result) :-
+    atom(File),
+    atom_string(File, SFile),
+    working_dir(Base),
+    \+ file_name_extension(_, 'py', SFile),
+    ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
+    ensure_metta_ext(Path, PathWithExt),
+    exists_file(PathWithExt),
+    ( imported_file(PathWithExt) -> Result = []
+    ;   assertz(imported_file(PathWithExt)),
+        translate_expr([collapse, ['import!', _, File]], Goals, Result),
+        ( silent(true) -> true ; format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
+                                 forall(member(G, Goals), portray_clause((:- G))),
+                                 format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ),
+        call_goals(Goals)
+    ).
+% Fallback for other runnables
 process_form(_, parsed(runnable, FormStr, Term), Result) :- translate_expr([collapse, Term], Goals, Result),
                                                             ( silent(true) -> true ; format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
                                                                                      forall(member(G, Goals), portray_clause((:- G))),
