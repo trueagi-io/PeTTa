@@ -137,7 +137,8 @@ alpha_list_to_set_assoc([H|T], SeenIn, R) :-
 
 'sort-atom'(List, Sorted) :- msort(List, Sorted).
 'size-atom'(List, Size) :- length(List, Size).
-'car-atom'([H|_], H).
+'car-atom'([H|_], H) :- !.
+'car-atom'(_, []).
 'cdr-atom'([_|T], T).
 decons([H|T], [H|[T]]).
 cons(H, T, [H|T]).
