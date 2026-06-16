@@ -174,13 +174,6 @@ translate_expr([H0|T0], Goals, Out) :-
                                                      ; translate_expr(KeyExpr, Gk, Kv),
                                                        translate_case(PairsExpr, Kv, Out, IfGoal, KeyGoal),
                                                        append([GsH, Gk, KeyGoal, [IfGoal]], Goals) )
-        %--- Short-circuit boolean operators ---:
-        ; HV == and, T = [A, B] -> translate_expr_to_conj(A, ConjA, Av),
-                                    translate_expr_to_conj(B, ConjB, Bv),
-                                    append(GsH, [(ConjA, bool(Av), (Av == true -> (ConjB, bool(Bv), Out = Bv) ; Out = false))], Goals)
-        ; HV == or, T = [A, B] -> translate_expr_to_conj(A, ConjA, Av),
-                                   translate_expr_to_conj(B, ConjB, Bv),
-                                   append(GsH, [(ConjA, bool(Av), (Av == true -> Out = true ; (ConjB, bool(Bv), Out = Bv)))], Goals)
         %--- Unification constructs ---:
         ; (HV == let ; HV == chain), T = [Pat, Val, In] -> translate_expr(Pat, Gp, Pv),
                                                            translate_expr(Val, Gv, V),
