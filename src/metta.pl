@@ -279,6 +279,8 @@ retractPredicate(_, false).
 ensure_metta_ext(Path, Path) :- file_name_extension(_, metta, Path), !.
 ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWithExt).
 
+:- dynamic imported_metta_file/2.
+
 'import!'(Space, File, true) :- catch(importer_helper(Space, File), _, fail).
 importer_helper(Space, File) :- atom_string(File, SFile),
                                 working_dir(Base),
@@ -291,7 +293,13 @@ importer_helper(Space, File) :- atom_string(File, SFile),
                                    ; ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
                                      ensure_metta_ext(Path, PathWithExt),
                                      exists_file(PathWithExt), !,
-                                     load_metta_file(PathWithExt, _, Space) ).
+                                     absolute_file_name(PathWithExt, CanonPath),
+                                     % import! is idempotent: loading the same file into the same
+                                     % space twice would duplicate every rule (compile -> 2^depth blowup).
+                                     ( imported_metta_file(Space, CanonPath)
+                                       -> true
+                                        ; assertz(imported_metta_file(Space, CanonPath)),
+                                          load_metta_file(PathWithExt, _, Space) ) ).
 
 :- dynamic translator_rule/1.
 'add-translator-rule!'(HV, true) :- ( translator_rule(HV)
