@@ -241,7 +241,16 @@ assert(Goal, true) :- ( call(Goal) -> true
 %%% States: %%%
 'bind!'(A, ['new-state', B], C) :- 'change-state!'(A, B, C).
 'change-state!'(Var, Value, true) :- nb_setval(Var, Value).
-'get-state'(Var, Value) :- nb_getval(Var, Value).
+'get-state'(Var, Value) :-
+    ( atom(Var) ->
+        ( nb_current(Var, Stored) ->
+            true
+        ;   Stored = [],
+            nb_setval(Var, Stored)
+        ),
+        Value = Stored
+    ;   nb_getval(Var, Value)
+    ).
 
 %%% Eval: %%%
 eval(C, Out) :- translate_expr(C, Goals, Out),

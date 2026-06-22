@@ -2,3 +2,4 @@
 !(test (get-state state) rest)
 !(change-state! state active)
 !(test (get-state state) active)
+!(test (get-state fresh-state) ())
