@@ -352,7 +352,7 @@ typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchG
     translate_args_by_type(T, ArgTypes, GsT2, AVsTmp0),
     ( IsPartial -> append(Bound, AVsTmp0, AVsTmp) ; AVsTmp = AVsTmp0 ),
     append(GsH, GsT2, InnerTmp),
-    ( (OutType == '%Undefined%' ; OutType == 'Atom')
+    ( (var(OutType) ; OutType == '%Undefined%' ; OutType == 'Atom')
        -> Extra = [] ; Extra = [('get-type'(Out, OutType) *-> true ; 'get-metatype'(Out, OutType))] ),
     build_call_or_partial(Fun, AVsTmp, Out, InnerTmp, Extra, GoalsList),
     goals_list_to_conj(GoalsList, BranchGoal).
@@ -363,7 +363,7 @@ translate_args_by_type([], _, [], []) :- !.
 translate_args_by_type([A|As], [T|Ts], GsOut, [AV|AVs]) :-
                       ( T == 'Expression' -> AV = A, GsA = []
                                            ; translate_expr(A, GsA1, AV),
-                                             ( (T == '%Undefined%' ; T == 'Atom')
+                                             ( (var(T) ; T == '%Undefined%' ; T == 'Atom')
                                                -> GsA = GsA1
                                                 ; append(GsA1, [('get-type'(AV, T) *-> true ; 'get-metatype'(AV, T))], GsA))),
                                              translate_args_by_type(As, Ts, GsRest, AVs),

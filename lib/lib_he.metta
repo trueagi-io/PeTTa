@@ -82,3 +82,9 @@
 
 (= (match-type-or $value $type1 $type2)
    (match-types $type1 $type2 True $value))
+
+;Type casting
+(= (type-cast $x $t $space)
+   (let* (($removed (remove-atom $space (: $x $_)))
+        ($added (add-atom $space (: $x $t))))
+     $added))
