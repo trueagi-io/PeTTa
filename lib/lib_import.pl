@@ -24,22 +24,27 @@ convert_line(Line0, Space, Out) :- sub_string(Line0, 1, _, 1, Inner0),
                                    format(Out, "'~w'(~w).~n", [Space, Inner3]).
 
 %End of recursion
-transform_chars([], _, []).
+transform_chars([], _, []) :- !.
 
 %Toggle quote mode ON
-transform_chars(['"'|T], false, ['"'|R]) :- transform_chars(T, true, R).
+transform_chars(['"'|T], false, ['"'|R]) :- !, 
+                                            transform_chars(T, true, R).
 
 %Toggle quote mode OFF
-transform_chars(['"'|T], true, ['"'|R]) :- transform_chars(T, false, R).
+transform_chars(['"'|T], true, ['"'|R]) :- !,
+                                           transform_chars(T, false, R).
 
 %Replace ( with [ only outside quotes
-transform_chars(['('|T], false, ['['|R]) :- transform_chars(T, false, R).
+transform_chars(['('|T], false, ['['|R]) :- !, 
+                                            transform_chars(T, false, R).
 
 %Replace ) with ] only outside quotes
-transform_chars([')'|T], false, [']'|R]) :- transform_chars(T, false, R).
+transform_chars([')'|T], false, [']'|R]) :- !,
+                                            transform_chars(T, false, R).
 
 %Replace spaces with commas only outside quotes
-transform_chars([' '|T], false, [','|R]) :- transform_chars(T, false, R).
+transform_chars([' '|T], false, [','|R]) :- !,
+                                            transform_chars(T, false, R).
 
 %Keep all other characters unchanged
 transform_chars([H|T], Q, [H|R]) :- transform_chars(T, Q, R).
