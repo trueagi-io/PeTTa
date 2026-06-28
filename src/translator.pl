@@ -168,7 +168,8 @@ translate_expr([H0|T0], Goals, Out) :-
                                                        translate_case(NormalCases, Kv, Out, CaseGoal, KeyGoal),
                                                        translate_expr_to_conj(DefaultExpr, ConD, DOut),
                                                        build_branch(ConD, DOut, Out, DefaultThen),
-                                                       Combined = ( (GkConj, CaseGoal) ;
+                                                       EmptyMatch = (Kv == [empty] -> DefaultThen),
+                                                       Combined = ( (GkConj, (EmptyMatch ; CaseGoal)) ;
                                                                     \+ GkConj, DefaultThen ),
                                                        append([GsH, KeyGoal, [Combined]], Goals)
                                                      ; translate_expr(KeyExpr, Gk, Kv),
