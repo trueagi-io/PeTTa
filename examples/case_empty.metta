@@ -14,7 +14,7 @@
 
 ;; Case-order behavior: Empty matches the empty value
 ;; regardless of where it appears in the case branches
-
+(: foo2 (-> Atom %Undefined%))
 (= (foo2 $x)
    (case $x
      (($_ Nok)
