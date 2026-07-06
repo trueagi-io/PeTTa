@@ -5,6 +5,7 @@ import importlib
 CONSULTED = False
 CONSULT_LOCK = threading.Lock()
 janus = None
+DEFAULT_STACK_LIMIT = 8_000_000_000
 
 class PeTTa:
     def __init__(self, verbose=False, petta_path=None):
@@ -20,10 +21,12 @@ class PeTTa:
                         orig_dir = os.getcwd()
                         os.chdir(petta_path)
                         janus = importlib.import_module("janus_swi")
+                        janus.query_once(f"set_prolog_flag(stack_limit, {DEFAULT_STACK_LIMIT})")
                         os.chdir(orig_dir)
                         janus.query_once("set_prolog_flag(argv, ['mork'])")
                     else:
                         janus = importlib.import_module("janus_swi")
+                        janus.query_once(f"set_prolog_flag(stack_limit, {DEFAULT_STACK_LIMIT})")
                     main_file = os.path.join(petta_path, "src", "main.pl")
                     helper_file = os.path.join(petta_path, "python", "helper.pl")
                     janus.consult(main_file)
