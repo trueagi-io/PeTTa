@@ -2,6 +2,18 @@
 :- use_module(library(pcre)). % re_replace/4
 :- current_prolog_flag(argv, Args), ( (memberchk(silent, Args) ; memberchk('--silent', Args) ; memberchk('-s', Args))
                                       -> assertz(silent(true)) ; assertz(silent(false)) ).
+:- dynamic working_dir/1.
+
+push_working_dir(Filename) :- file_directory_name(Filename, Dir0),
+                              ( absolute_file_name(Dir0, Dir, [file_type(directory), file_errors(fail)])
+                                -> true
+                                 ; Dir = Dir0 ),
+                              push_working_dir_path(Dir).
+
+push_working_dir_path(Dir) :- asserta(working_dir(Dir)).
+
+pop_working_dir :- retract(working_dir(_)), !.
+pop_working_dir.
 
 %Read Filename into string S and process it (S holds MeTTa code):
 load_metta_file(Filename, Results) :- load_metta_file(Filename, Results, '&self').
@@ -9,8 +21,14 @@ load_metta_file(Filename, Results, Space) :- catch(load_metta_file_impl(Filename
                                                    Error,
                                                    rethrow_metta_file_error(Filename, Error)).
 
-load_metta_file_impl(Filename, Results, Space) :- read_file_to_string(Filename, S, []),
-                                                  process_metta_string(S, Results, Space).
+load_metta_file_impl(Filename, Results, Space) :- setup_call_cleanup(push_working_dir(Filename),
+                                                                     ( read_file_to_string(Filename, S, []),
+                                                                       process_metta_string(S, Results, Space) ),
+                                                                     pop_working_dir).
+
+with_working_dir(Dir, Goal) :- setup_call_cleanup(push_working_dir_path(Dir),
+                                                  once(Goal),
+                                                  pop_working_dir).
 
 rethrow_metta_file_error(_, Error) :- Error = error(_, context(_, _)), !,
                                       throw(Error).
@@ -51,9 +69,11 @@ prescan_metta_file(Path, Visited) :- catch(prescan_metta_file_impl(Path, [Path|V
                                            Error,
                                            rethrow_metta_file_error(Path, Error)).
 
-prescan_metta_file_impl(Path, Visited) :- read_file_to_string(Path, S, []),
-                                          parse_metta_forms(S, ParsedForms),
-                                          prescan_import_signatures(ParsedForms, Visited).
+prescan_metta_file_impl(Path, Visited) :- file_directory_name(Path, Dir),
+                                          with_working_dir(Dir,
+                                                           ( read_file_to_string(Path, S, []),
+                                                             parse_metta_forms(S, ParsedForms),
+                                                             prescan_import_signatures(ParsedForms, Visited) )).
 
 register_function_signature(F, Arity) :- register_fun(F),
                                          ( catch(arity(F, Arity), _, fail) -> true ; assertz(arity(F, Arity)) ).
