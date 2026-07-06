@@ -5,8 +5,18 @@
 
 %Read Filename into string S and process it (S holds MeTTa code):
 load_metta_file(Filename, Results) :- load_metta_file(Filename, Results, '&self').
-load_metta_file(Filename, Results, Space) :- read_file_to_string(Filename, S, []),
-                                             process_metta_string(S, Results, Space).
+load_metta_file(Filename, Results, Space) :- catch(load_metta_file_impl(Filename, Results, Space),
+                                                   Error,
+                                                   rethrow_metta_file_error(Filename, Error)).
+
+load_metta_file_impl(Filename, Results, Space) :- read_file_to_string(Filename, S, []),
+                                                  process_metta_string(S, Results, Space).
+
+rethrow_metta_file_error(_, Error) :- Error = error(_, context(_, _)), !,
+                                      throw(Error).
+rethrow_metta_file_error(Filename, error(Type, _)) :- !,
+                                                      throw(error(Type, context(Filename, 'while loading MeTTa file'))).
+rethrow_metta_file_error(_, Error) :- throw(Error).
 
 %Extract function definitions, call invocations, and S-expressions part of &self space:
 process_metta_string(S, Results) :- process_metta_string(S, Results, '&self').
