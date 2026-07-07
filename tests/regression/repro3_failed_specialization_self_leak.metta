@@ -1,0 +1,10 @@
+(= (myfun $x) $x)
+(: wrap (-> Number Number Number))
+(= (wrap $f $x) (wrap2 $f $x))
+(= (wrap2 $f $x) $x)
+
+!(wrap myfun 1)
+!(wrap myfun 2)
+!(wrap myfun 3)
+!(wrap myfun 4)
+!(collapse (match &self (: $what $type) ($what $type)))
