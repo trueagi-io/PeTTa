@@ -3,12 +3,14 @@
 run_test() {
     f="$1"
     echo "Running $f"
-    output=$(sh run.sh "$f" | grep "is " | grep " should ")
+    output=$(sh run.sh "$f")
+    error=$?
+    output=$(echo "$output"  | grep "is " | grep " should ")
     echo "$output" | grep -q "❌"
     fail=$?
     echo "$output" | grep -q "✅"
     pass=$?
-    if [ $fail -eq 0 ] || [ $pass -ne 0 ]; then
+    if [ $error -ne 0 ] || [ $fail -eq 0 ] || [ $pass -ne 0 ]; then
         echo "FAILURE in $f:"
         echo "$output"
         return 1
