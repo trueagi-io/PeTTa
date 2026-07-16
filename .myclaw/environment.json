@@ -10,8 +10,8 @@
     "uv sync --project python --frozen && uv run --project python pytest -q python/tests && if test -f mork_ffi/Cargo.toml; then cargo build --manifest-path mork_ffi/Cargo.toml --release && gcc -shared -fPIC -o \"${CARGO_TARGET_DIR}/release/morklib.so\" mork_ffi/mork.c $(pkg-config --cflags --libs swipl); else echo 'mork_ffi is not tracked at this revision; skipping optional native build'; fi"
   ],
   "caches": [
-    {"name": "cargo", "target": "/opt/myclaw/cargo"},
-    {"name": "rustup", "target": "/opt/myclaw/rustup"},
+    {"name": "cargo-registry", "target": "/opt/myclaw/cargo-home/registry"},
+    {"name": "cargo-git", "target": "/opt/myclaw/cargo-home/git"},
     {"name": "uv", "target": "/opt/myclaw/uv-cache"},
     {"name": "mork-ffi-target", "target": "/opt/myclaw/mork-ffi-target"}
   ]
