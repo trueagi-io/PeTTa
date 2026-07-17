@@ -10,7 +10,7 @@ DEFAULT_STACK_LIMIT = 8_000_000_000
 class PeTTa:
     def __init__(self, verbose=False, petta_path=None):
         global CONSULTED, janus
-        self.verbose = "true" if verbose else "false"
+        self.verbose = bool(verbose)
         if not CONSULTED:
             with CONSULT_LOCK:
                 if not CONSULTED:
