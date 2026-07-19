@@ -19,3 +19,21 @@
 !(test (first-from-pair (A B)) A)
 
 !(test (second-from-pair (A B)) B)
+
+!(test (index-atom (1 2 3) 5) ())
+
+!(test (index-atom (1 2 3) a) ())
+
+!(test (size-atom 5) ())
+
+!(test (sort-atom 5) ())
+
+!(test (unique-atom 5) ())
+
+!(test (alpha-unique-atom 5) ())
+
+!(test (min-atom 5) ())
+
+!(test (max-atom 5) ())
+
+!(test (intersection-atom 5 (a)) ())

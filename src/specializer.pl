@@ -1,14 +1,20 @@
 :- dynamic ho_specialization/2.
+:- dynamic ho_specialization_failed/3.
 
 %Maybe specializes HV(AVs) if not already ongoing, and if specialization fails, nothing changes and specneeded is restored:
 maybe_specialize_call(HV, AVs, Out, Goal) :- setup_call_cleanup( (catch(nb_getval(specneeded,Prev),_,Prev = []), nb_setval(specneeded,false)),
                                                                  specialize_call(HV, AVs, Out, Goal),
                                                                  (Prev == true -> nb_setval(specneeded,Prev)) ).
 
-% Helper predicate to replace all variables with 'VAR'
-replace_vars_with_var(Var, 'VAR') :- var(Var), !.
-replace_vars_with_var(Term, NewTerm) :- (is_list(Term) -> maplist(replace_vars_with_var, Term, NewTerm)
-                                                        ;  Term = NewTerm).
+% Build a stable, variant-normalized specialization key.
+%
+% This intentionally descends through arbitrary compound terms (including
+% partial/2 closures).  A shallow list-only variable replacement leaves fresh
+% Prolog variable ids inside compound terms, producing unstable specialization
+% names such as app_Spec_[partial(lambda_1,[_17896])].
+normalize_specialization_key(Term, Normalized) :-
+    copy_term(Term, Normalized),
+    numbervars(Normalized, 0, _, [singletons(true)]).
 
 %Specialize a call by creating and translating a specialized version of the MeTTa code:
 specialize_call(HV, AVs, Out, Goal) :- %1. Retrieve a copy of all meta-clauses stored for HV:
@@ -22,15 +28,16 @@ specialize_call(HV, AVs, Out, Goal) :- %1. Retrieve a copy of all meta-clauses s
                                                       member(HoVar, HoBindsPerArg),
                                                       nonvar(HoVar) ), BindSet),
                                        %3. Build the specialization name from the concrete higher-order bind set:
-                                       replace_vars_with_var(BindSet, CleanBindSet),
+                                       normalize_specialization_key(BindSet, CleanBindSet),
+                                       length(AVs, N),
+                                       Arity is N + 1,
+                                       \+ ho_specialization_failed(HV, Arity, CleanBindSet),
                                        format(atom(SpecName), "~w_Spec_~w",[HV, CleanBindSet]),
                                        %4. Specialize, but only if not already specialized:
                                        ( ho_specialization(HV, SpecName)
                                          ; ( %4.1. Otherwise register the specialization:
                                              register_fun(SpecName),
                                              assertz(ho_specialization(HV, SpecName)),
-                                             length(AVs, N),
-                                             Arity is N + 1,
                                              assertz(arity(SpecName, Arity)),
                                              ( %4.2. Re-use the type definition of the parent function for the specialization:
                                                findall(TypeChain, catch(match('&self', [':', HV, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
@@ -49,10 +56,12 @@ specialize_call(HV, AVs, Out, Goal) :- %1. Retrieve a copy of all meta-clauses s
                                                  maybe_print_compiled_clause(Label, Input, Clause) ))
                                                %4.6 Ok specialized, but if we did not succeed ensure the specialization is retracted:
                                                -> true ; format("Not specialized ~w~n", [SpecName/Arity]),
-                                                         retractall(fun(SpecName)),
-                                                         abolish(SpecName, Arity),
-                                                         retractall(arity(SpecName,Arity)),
-                                                         retractall(ho_specialization(HV, SpecName)), fail ))), !,
+                                                         forget_symbol(SpecName),
+                                                         retractall(ho_specialization(HV, SpecName)),
+                                                         ( ho_specialization_failed(HV, Arity, CleanBindSet)
+                                                           -> true
+                                                            ; assertz(ho_specialization_failed(HV, Arity, CleanBindSet)) ),
+                                                         fail ))), !,
                                        %5. Generate call to the specialized function:
                                        append(AVs, [Out], CallArgs),
                                        Goal =.. [SpecName|CallArgs].
@@ -103,6 +112,7 @@ forget_symbol(Name) :- retractall('&self'(=, [Name|_], _)),
 
 %Invalidate all specializations:
 invalidate_specializations(F) :-
+    retractall(ho_specialization_failed(_,_,_)),
     findall(Spec, ho_specialization(F, Spec), Specs),
     forall(member(S, Specs), invalidate_specializations(S)),
     forall(member(S, Specs), forget_symbol(S)),

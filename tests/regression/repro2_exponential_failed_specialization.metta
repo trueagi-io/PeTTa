@@ -1,0 +1,17 @@
+; Exponential specialization cascade repro (gb-scan-item shape): 2^(K-1)-1 failed attempts for ONE call site
+(= (myfun $x) $x)
+
+(= (f1 $f $x) (g (f2 $f $x) (f2 $f $x)))
+(= (f2 $f $x) (g (f3 $f $x) (f3 $f $x)))
+(= (f3 $f $x) (g (f4 $f $x) (f4 $f $x)))
+(= (f4 $f $x) (g (f5 $f $x) (f5 $f $x)))
+(= (f5 $f $x) (g (f6 $f $x) (f6 $f $x)))
+(= (f6 $f $x) (g (f7 $f $x) (f7 $f $x)))
+(= (f7 $f $x) (g (f8 $f $x) (f8 $f $x)))
+(= (f8 $f $x) (g (f9 $f $x) (f9 $f $x)))
+(= (f9 $f $x) (g (f10 $f $x) (f10 $f $x)))
+(= (f10 $f $x) (g (f11 $f $x) (f11 $f $x)))
+(= (f11 $f $x) (g (f12 $f $x) (f12 $f $x)))
+(= (f12 $f $x) $x)
+(= (g $a $b) $a)
+!(f1 myfun 1)
