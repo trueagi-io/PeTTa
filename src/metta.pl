@@ -218,6 +218,11 @@ assert(Goal, true) :- ( call(Goal) -> true
 'format-time'(Format, TimeString) :- get_time(Time), format_time(atom(TimeString), Format, Time).
 
 %%% Python bindings: %%%
+% janus converts Python booleans to @(true)/@(false); normalize them to the
+% language booleans so py-call results compose with if, and, or, ==.
+py_bool_norm('@'(true), true) :- !.
+py_bool_norm('@'(false), false) :- !.
+py_bool_norm(R, R).
 'py-call'(SpecList, Result) :- 'py-call'(SpecList, Result, []).
 'py-call'([Spec|Args], Result, Opts) :- ( string(Spec) -> atom_string(A, Spec) ; A = Spec ),
                                         must_be(atom, A),
@@ -228,19 +233,19 @@ assert(Goal, true) :- ( call(Goal) -> true
                                                -> ( Rest == []
                                                     -> compound_name_arguments(Meth, Fun, [])
                                                      ; Meth =.. [Fun|Rest] ),
-                                                  py_call(Obj:Meth, Result, Opts)
+                                                  py_call(Obj:Meth, R0, Opts), py_bool_norm(R0, Result)
                                                 ; py_call(builtins:type(Obj), Ty), % on a converted value (str, int, ...)
                                                   Call =.. [Fun, Obj|Rest],
-                                                  py_call(Ty:Call, Result, Opts) )
+                                                  py_call(Ty:Call, R0, Opts), py_bool_norm(R0, Result) )
                                            ; atomic_list_concat([M,F], '.', A) % "mod.fun"
                                              -> ( Args == []
                                                   -> compound_name_arguments(Call0, F, [])
                                                    ; Call0 =.. [F|Args] ),
-                                                py_call(M:Call0, Result, Opts)
+                                                py_call(M:Call0, R0, Opts), py_bool_norm(R0, Result)
                                               ; ( Args == []                      % bare "fun"
                                                   -> compound_name_arguments(Call0, A, [])
                                                    ; Call0 =.. [A|Args] ),
-                                                py_call(builtins:Call0, Result, Opts) ).
+                                                py_call(builtins:Call0, R0, Opts), py_bool_norm(R0, Result) ).
 
 %%% States: %%%
 'bind!'(A, ['new-state', B], C) :- 'change-state!'(A, B, C).
