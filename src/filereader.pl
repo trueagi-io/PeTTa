@@ -57,8 +57,9 @@ prescan_import_signature(parsed(runnable, _, ['import!', _, FileExpr]), Visited)
 prescan_import_signature(_, _).
 
 prescan_imported_metta_file(FileExpr, Visited) :- resolve_import_file_expr(FileExpr, File),
-                                                  resolve_metta_import_path(File, PathWithExt), !,
-                                                  prescan_metta_file(PathWithExt, Visited).
+                                                  \+ python_import_file(File),
+                                                  resolve_metta_import_path(File, CanonPath), !,
+                                                  prescan_metta_file(CanonPath, Visited).
 prescan_imported_metta_file(_, _).
 
 resolve_import_file_expr(FileExpr, File) :- translate_expr(FileExpr, Goals, File),

@@ -302,25 +302,77 @@ ensure_metta_ext(Path, Path) :- file_name_extension(_, metta, Path), !.
 ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWithExt).
 
 current_working_dir(Base) :- working_dir(Base), !.
+current_working_dir(Base) :- absolute_file_name('.', Base, [file_type(directory)]).
 
-resolve_metta_import_path(File, PathWithExt) :- atom_string(File, SFile),
-                                                \+ file_name_extension(_, 'py', SFile),
-                                                current_working_dir(Base),
-                                                ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
-                                                ensure_metta_ext(Path, PathWithExt),
-                                                exists_file(PathWithExt), !.
+import_file_string(File, SFile) :- string(File), !, SFile = File.
+import_file_string(File, SFile) :- atom_string(File, SFile).
+
+python_import_file(File) :- import_file_string(File, SFile),
+                            file_name_extension(_, py, SFile).
+
+resolve_existing_import_path(Base, RequestedPath, CanonPath) :-
+    absolute_file_name(RequestedPath, CanonPath,
+                       [relative_to(Base), access(read), file_errors(fail)]), !.
+resolve_existing_import_path(_, RequestedPath, CanonPath) :-
+    absolute_file_name(RequestedPath, CanonPath,
+                       [access(read), file_errors(fail)]), !.
+
+throw_missing_import(File) :-
+    throw(error(existence_error(source_sink, File), context('import!', File))).
+
+resolve_metta_import_path(File, CanonPath) :-
+    import_file_string(File, SFile),
+    \+ python_import_file(SFile),
+    current_working_dir(Base),
+    ensure_metta_ext(SFile, RequestedPath),
+    ( resolve_existing_import_path(Base, RequestedPath, CanonPath)
+      -> true
+       ; throw_missing_import(File) ).
+
+resolve_python_import_path(File, CanonPath) :-
+    import_file_string(File, SFile),
+    python_import_file(SFile),
+    current_working_dir(Base),
+    ( resolve_existing_import_path(Base, SFile, CanonPath)
+      -> true
+       ; throw_missing_import(File) ).
+
+:- dynamic metta_import_state/3.
+
+% A loading entry breaks cycles; a loaded entry makes later imports no-ops.
+% Failed loads remove their entry so callers can repair the source and retry.
+claim_import(Space, CanonPath, skip) :- metta_import_state(Space, CanonPath, loaded), !.
+claim_import(Space, CanonPath, skip) :- metta_import_state(Space, CanonPath, loading), !.
+claim_import(Space, CanonPath, load) :- assertz(metta_import_state(Space, CanonPath, loading)).
+
+clear_import_state(Space, CanonPath) :- retractall(metta_import_state(Space, CanonPath, _)).
+
+mark_import_loaded(Space, CanonPath) :- clear_import_state(Space, CanonPath),
+                                        assertz(metta_import_state(Space, CanonPath, loaded)).
+
+run_new_import(Space, CanonPath, Goal) :-
+    catch(( once(Goal)
+            -> mark_import_loaded(Space, CanonPath)
+             ; clear_import_state(Space, CanonPath), fail ),
+          Error,
+          ( clear_import_state(Space, CanonPath), throw(Error) )).
+
+import_once(Space, CanonPath, Goal) :- claim_import(Space, CanonPath, Action),
+                                       ( Action = skip -> true
+                                                       ; run_new_import(Space, CanonPath, Goal) ).
 
 'import!'(Space, File, true) :- importer_helper(Space, File).
-importer_helper(Space, File) :- atom_string(File, SFile),
-                                current_working_dir(Base),
-                                ( file_name_extension(ModPath, 'py', SFile)
-                                  -> absolute_file_name(SFile, Path, [relative_to(Base)]),
-                                     file_directory_name(Path, Dir),
-                                     file_base_name(ModPath, ModuleName),
-                                     py_call(sys:path:append(Dir), _),
-                                     py_call(builtins:'__import__'(ModuleName), _)
-                                   ; resolve_metta_import_path(File, PathWithExt),
-                                     load_metta_file(PathWithExt, _, Space) ).
+importer_helper(Space, File) :-
+    ( python_import_file(File)
+      -> resolve_python_import_path(File, CanonPath),
+         file_directory_name(CanonPath, Dir),
+         file_base_name(CanonPath, BaseName),
+         file_name_extension(ModuleName, _, BaseName),
+         import_once(Space, CanonPath,
+                     ( py_call(sys:path:append(Dir), _),
+                       py_call(builtins:'__import__'(ModuleName), _) ))
+       ; resolve_metta_import_path(File, CanonPath),
+         import_once(Space, CanonPath, load_metta_file(CanonPath, _, Space)) ).
 
 :- dynamic translator_rule/1.
 'add-translator-rule!'(HV, true) :- ( translator_rule(HV)
