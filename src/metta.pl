@@ -1,6 +1,20 @@
 %%%%%%%%%% Dependencies %%%%%%%%%%
-library(X, Path) :- library_path(Base), atomic_list_concat([Base, '/', X], Path).
-library(X, Y, Path) :- library_path(Base), atomic_list_concat([Base, '/../', X, '/', Y], Path).
+library(X, Path) :- resolve_library_path(library_path_candidate(X), Path).
+library(X, Y, Path) :- resolve_library_path(library_path_candidate(X, Y), Path).
+
+library_path_candidate(X, Path) :- library_path(Base),
+                                   atomic_list_concat([Base, '/', X], Path).
+library_path_candidate(X, Y, Path) :- library_path(Base),
+                                      atomic_list_concat([Base, '/../', X, '/', Y], Path).
+
+resolve_library_path(Candidate, Path) :- ( once((call(Candidate, ExistingPath),
+                                                  library_source_exists(ExistingPath)))
+                                           -> Path = ExistingPath
+                                            ; once(call(Candidate, Path)) ).
+
+library_source_exists(Path) :- exists_file(Path), !.
+library_source_exists(Path) :- file_name_extension(Path, metta, MettaPath),
+                               exists_file(MettaPath).
 :- prolog_load_context(directory, Source),
    directory_file_path(Source, '..', Parent),
    directory_file_path(Parent, 'lib', LibPath),
@@ -374,6 +388,55 @@ importer_helper(Space, File) :-
        ; resolve_metta_import_path(File, CanonPath),
          import_once(Space, CanonPath, load_metta_file(CanonPath, _, Space)) ).
 
+%%% Git Import: %%%
+'git-import!'(GitPath, true) :- 'git-import!'(GitPath, '', './repos', true).
+
+'git-import!'(GitPath, BuildCmd, true) :- 'git-import!'(GitPath, BuildCmd, './repos', true).
+
+'git-import!'(GitPath, BuildCmd, BaseDir, true) :- ( exists_directory(BaseDir)
+                                                     -> true
+                                                      ; make_directory_path(BaseDir) ),
+                                                   repo_name_from_git(GitPath, Name),
+                                                   directory_file_path(BaseDir, Name, LocalDir),
+                                                   ( exists_directory(LocalDir)
+                                                     -> true
+                                                      ; clone_repo(GitPath, LocalDir),
+                                                        run_build_step(LocalDir, BuildCmd) ),
+                                                   register_git_library_path(LocalDir).
+
+% Extract "repo" from ".../repo.git" or "...:repo.git".
+repo_name_from_git(GitPath, Name) :- atom_string(GitPath, S),
+                                     split_string(S, "/:", "/:", Parts),
+                                     last(Parts, Last0),
+                                     ( sub_string(Last0, _, 4, 0, ".git")
+                                       -> sub_string(Last0, 0, _, 4, Last)
+                                        ; Last = Last0 ),
+                                     atom_string(Name, Last).
+
+clone_repo(GitPath, LocalDir) :- format("Cloning ~w into ~w~n", [GitPath, LocalDir]),
+                                 run_git_import_process(path(git),
+                                                        ['clone', '--depth', '1', GitPath, LocalDir],
+                                                        [],
+                                                        clone(GitPath)).
+
+run_build_step(_, BuildCmd) :- (BuildCmd = '' ; BuildCmd = ""), !.
+run_build_step(LocalDir, BuildCmd) :- format("Running build: ~w in ~w~n", [BuildCmd, LocalDir]),
+                                      run_git_import_process(path(sh),
+                                                             [BuildCmd],
+                                                             [cwd(LocalDir)],
+                                                             build(BuildCmd)).
+
+run_git_import_process(Executable, Args, Options, Operation) :-
+    process_create(Executable, Args, [process(PID)|Options]),
+    process_wait(PID, Status),
+    ( Status = exit(0)
+      -> true
+       ; throw(error(process_error(Operation, Status), context('git-import!', Operation))) ).
+
+register_git_library_path(LocalDir) :-
+    absolute_file_name(LocalDir, CanonDir, [file_type(directory), file_errors(fail)]),
+    ( library_path(CanonDir) -> true ; asserta(library_path(CanonDir)) ).
+
 :- dynamic translator_rule/1.
 'add-translator-rule!'(HV, true) :- ( translator_rule(HV)
                                       -> true ; assertz(translator_rule(HV)) ).
@@ -387,7 +450,7 @@ register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
                           '<','>','==', '!=', '=', '=?', '<=', '>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
                           'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom', 'alpha-unique-atom',
                           repr, repra, parse, 'println!', 'readln!', test, assert, 'mm2-exec', atom_concat, atom_chars, copy_term, term_hash,
-                          foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'is-alpha-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!',
+                          foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'is-alpha-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!', 'git-import!',
                           'add-atom', 'remove-atom', 'get-atoms', match, 'is-var', 'is-ground', 'is-expr', 'is-space', 'get-mettatype',
                           decons, 'decons-atom', 'py-call', 'get-type', 'get-metatype', '=alpha', concat, sread, cons, reverse,
                           '#+','#-','#*','#div','#//','#mod','#min','#max','#<','#>','#=','#\\=','set_hook',

@@ -39,6 +39,7 @@ rethrow_metta_file_error(_, Error) :- throw(Error).
 %Extract function definitions, call invocations, and S-expressions part of &self space:
 process_metta_string(S, Results) :- process_metta_string(S, Results, '&self').
 process_metta_string(S, Results, Space) :- parse_metta_forms(S, ParsedForms),
+                                           prepare_core_import_dependencies(ParsedForms),
                                            prescan_import_signatures(ParsedForms, []),
                                            maplist(process_form(Space), ParsedForms, ResultsList), !,
                                            append(ResultsList, Results).
@@ -47,6 +48,18 @@ parse_metta_forms(S, ParsedForms) :- string_codes(S, Cs),
                                      strip(Cs, 0, Codes),
                                      phrase(top_forms(Forms, 1), Codes),
                                      maplist(parse_form, Forms, ParsedForms).
+
+% Core dependency imports must be available before imported files are scanned for
+% function signatures.  Their normal runnable is still processed in the second
+% pass; git-import! is idempotent, so that later execution is harmless.
+prepare_core_import_dependencies([]).
+prepare_core_import_dependencies([Parsed|Rest]) :- prepare_core_import_dependency(Parsed),
+                                                    prepare_core_import_dependencies(Rest).
+
+prepare_core_import_dependency(parsed(runnable, _, ['git-import!'|Args])) :- !,
+                                                                             translate_expr(['git-import!'|Args], Goals, _),
+                                                                             call_goals(Goals).
+prepare_core_import_dependency(_).
 
 prescan_import_signatures([], _).
 prescan_import_signatures([Parsed|Rest], Visited) :- prescan_import_signature(Parsed, Visited),
