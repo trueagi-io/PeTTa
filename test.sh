@@ -1,9 +1,27 @@
 #!/bin/sh
 
+# strict_* and fail_strict_* examples run with the --strict typechecking flag:
+mode_arg_for_test() {
+    base=$(basename "$1")
+    case "$base" in
+        strict_*.metta|fail_strict_*.metta)
+            printf '%s\n' --strict
+            ;;
+        *)
+            printf '%s\n' ''
+            ;;
+    esac
+}
+
 run_test() {
     f="$1"
+    mode_arg=$(mode_arg_for_test "$f")
     echo "Running $f"
-    output=$(sh run.sh "$f")
+    if [ -n "$mode_arg" ]; then
+        output=$(sh run.sh "$f" "$mode_arg")
+    else
+        output=$(sh run.sh "$f")
+    fi
     error=$?
     output=$(echo "$output"  | grep "is " | grep " should ")
     echo "$output" | grep -q "❌"
@@ -21,6 +39,33 @@ run_test() {
     fi
 }
 
+# fail_* examples must be rejected at compile time with a type/determinism error:
+run_expected_fail_test() {
+    f="$1"
+    mode_arg=$(mode_arg_for_test "$f")
+    echo "Running (expected fail) $f"
+    if [ -n "$mode_arg" ]; then
+        output=$(sh run.sh "$f" "$mode_arg" 2>&1)
+    else
+        output=$(sh run.sh "$f" 2>&1)
+    fi
+    status=$?
+    if [ $status -eq 0 ]; then
+        echo "FAILURE in $f:"
+        echo "Expected non-zero exit status, got success"
+        return 1
+    fi
+    echo "$output" | grep -E -q "Type mismatch|Type conflict|Determinism check failed|Conflicting determinism declarations|Deterministic function .* overlapping clauses|Strict mode rejected residual runtime type goal|Strict mode requires a declared or inferable type|No matching typed overload"
+    if [ $? -ne 0 ]; then
+        echo "FAILURE in $f:"
+        echo "Expected type error output"
+        echo "$output"
+        return 1
+    fi
+    echo "OK (failed as expected): $f"
+    return 0
+}
+
 pids=""
 pidfile="/tmp/metta_pid_map.$$"
 : > "$pidfile"
@@ -30,7 +75,13 @@ for f in ./examples/*.metta; do
     case "$base" in repl.metta|llm_cities.metta|torch.metta|greedy_chess.metta|git_import2.metta)
         continue ;;
     esac
-    run_test "$f" &
+    case "$base" in fail_*.metta)
+        run_expected_fail_test "$f" &
+        ;;
+    *)
+        run_test "$f" &
+        ;;
+    esac
     pid=$!
     pids="$pids $pid"
     echo "$pid $f" >> "$pidfile"
@@ -52,4 +103,16 @@ for pid in $pids; do
 done
 
 rm -f "$pidfile"
+
+if [ $status -eq 0 ]; then
+    echo ""
+    echo "Running examples/type_dispatch_matrix.sh"
+    if sh examples/type_dispatch_matrix.sh; then
+        echo "OK: type_dispatch_matrix.sh"
+    else
+        echo "FAILURE in type_dispatch_matrix.sh"
+        status=1
+    fi
+fi
+
 exit $status

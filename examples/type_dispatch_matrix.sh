@@ -73,50 +73,50 @@ assert_tail_contains() {
     fi
 }
 
-run_capture single_monomorphic sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples_typecheck/type_single_monomorphic_resolved.metta"
+run_capture single_monomorphic sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/type_single_monomorphic_resolved.metta"
 assert_status single_monomorphic 0
 assert_not_contains single_monomorphic "typecheck_match"
 assert_not_contains single_monomorphic "typecheck_or_error"
 assert_not_contains single_monomorphic "no_matching_overload"
 
-run_capture single_poly_resolved sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples_typecheck/type_single_poly_resolved.metta"
+run_capture single_poly_resolved sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/type_single_poly_resolved.metta"
 assert_status single_poly_resolved 0
 assert_tail_contains single_poly_resolved "'map-flat'(partial(+, [1]), [1, 2],"
 assert_tail_not_contains single_poly_resolved "typecheck_match"
 assert_tail_not_contains single_poly_resolved "typecheck_or_error"
 assert_tail_not_contains single_poly_resolved "no_matching_overload"
 
-run_capture single_poly_compile_fail sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples_typecheck/fail_single_poly_compile_mismatch.metta"
+run_capture single_poly_compile_fail sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/fail_single_poly_compile_mismatch.metta"
 assert_status single_poly_compile_fail 2
 assert_contains single_poly_compile_fail "Type mismatch: got [\"s\",2] but expected ['List','Number']"
 assert_not_contains single_poly_compile_fail ":- findall(_,"
 assert_not_contains single_poly_compile_fail "(   fail"
 
-run_capture overload_resolved sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples_typecheck/type_overload_resolved.metta"
+run_capture overload_resolved sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/type_overload_resolved.metta"
 assert_status overload_resolved 0
 assert_tail_contains overload_resolved "f(1,"
 
-run_capture overload_unresolved sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples_typecheck/type_overload_runtime_error.metta" -s
+run_capture overload_unresolved sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/type_overload_runtime_error.metta" -s
 assert_status overload_unresolved 0
 assert_contains overload_unresolved "(no_matching_overload f)"
 
-run_capture higher_order_partial sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples_typecheck/type_list_parametric.metta" -s
+run_capture higher_order_partial sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/type_list_parametric.metta" -s
 assert_status higher_order_partial 0
 assert_contains higher_order_partial "is (2 3 4), should (2 3 4)."
 
-run_capture list_mismatch sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples_typecheck/fail_list_type_mismatch.metta" -s
+run_capture list_mismatch sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/fail_list_type_mismatch.metta" -s
 assert_status list_mismatch 2
 assert_contains list_mismatch "Type mismatch: got [1,\"oops\",3] but expected ['List','Number']"
 
-run_capture strict_pass sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples_typecheck/strict_pass_declared.metta" --strict -s
+run_capture strict_pass sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/strict_pass_declared.metta" --strict -s
 assert_status strict_pass 0
 assert_contains strict_pass "3"
 
-run_capture strict_runtime_guard sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples_typecheck/fail_strict_runtime_guard.metta" --strict -s
+run_capture strict_runtime_guard sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/fail_strict_runtime_guard.metta" --strict -s
 assert_status strict_runtime_guard 2
 assert_contains strict_runtime_guard "Strict mode rejected residual runtime type goal"
 
-run_capture strict_missing_type sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples_typecheck/fail_strict_missing_type.metta" --strict -s
+run_capture strict_missing_type sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/fail_strict_missing_type.metta" --strict -s
 assert_status strict_missing_type 2
 assert_contains strict_missing_type "Strict mode requires a declared or inferable type for idish/1"
 
