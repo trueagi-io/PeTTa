@@ -103,6 +103,7 @@ specializable_arg(Arg) :- nonvar(Arg),
 %Forget function symbol:
 forget_symbol(Name) :- retractall('&self'(=, [Name|_], _)),
                        retractall('&self'(:, Name, _)),
+                       forget_symbol_types(Name),
                        findall(Ref, ( current_predicate(Name/A), functor(H, Name, A), clause(H, _, Ref) ), Refs),
                        forall(member(R, Refs), erase(R)),
                        retractall(arity(Name,_)),
