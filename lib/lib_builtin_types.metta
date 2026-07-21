@@ -47,3 +47,25 @@
 (: or (-> Bool Bool Bool))
 (: not (-> Bool Bool))
 (: xor (-> Bool Bool Bool))
+
+;; Type definitions of predicates and reflection helpers
+(: is-var (-> $a Bool))
+(: is-ground (-> $a Bool))
+(: is-expr (-> $a Bool))
+(: is-space (-> $a Bool))
+(: is-member (-> $a $b Bool))
+(: is-alpha-member (-> $a $b Bool))
+(: =alpha (-> $a $b Bool))
+(: =@= (-> $a $b Bool))
+(: =? (-> $a $b Bool))
+
+;; Type definitions of expression helpers with concrete outputs
+(: size-atom (-> $a Number))
+(: length (-> $a Number))
+(: repr (-> $a String))
+(: repra (-> $a String))
+(: println! (-> $a Bool))
+
+;; Type definitions of random generators (3-argument forms)
+(: random-int (-> Number Number Number))
+(: random-float (-> Number Number Number))
