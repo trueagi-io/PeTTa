@@ -25,6 +25,13 @@ arrow_det('-[nondeterministic]->', nondet).
 fn_type_shape(Type, ArgTypes, OutType, unspecified) :- is_list(Type), Type = [Arrow|Xs],
                                                        Arrow == (->), !,
                                                        append(ArgTypes, [OutType], Xs).
+%Juxtaposed infix form (A B -[det]-> C): a single arrow before the output type:
+fn_type_shape(Type, ArgTypes, OutType, Det) :- is_list(Type),
+                                               append(ArgTypes, [Arrow, OutType], Type),
+                                               nonvar(Arrow), arrow_det(Arrow, Det),
+                                               ArgTypes \== [],
+                                               \+ ( member(X, ArgTypes), nonvar(X), arrow_det(X, _) ), !.
+%Chained infix form (A -[det]-> B -[nondet]-> C): arrows between every element:
 fn_type_shape(Type, ArgTypes, OutType, Det) :- is_list(Type), Type = [First, Arrow|_],
                                                nonvar(Arrow), arrow_det(Arrow, _),
                                                \+ (nonvar(First), arrow_det(First, _)),
