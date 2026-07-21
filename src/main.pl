@@ -1,4 +1,27 @@
 :- ensure_loaded(metta).
+:- multifile prolog:error_message//1.
+
+% Typecheck error messages — the spec suite (test_typecheck.sh, examples_typecheck/)
+% asserts on these exact phrasings; keep them in sync with the error terms the
+% translator throws.
+prolog:error_message(literal_type_mismatch(Value, Required)) -->
+    [ 'Type mismatch: got ~p but expected ~p'-[Value, Required] ].
+prolog:error_message(type_conflict(existing(Existing), required(Required))) -->
+    [ 'Type conflict: value is constrained as ~p but also required as ~p'-[Existing, Required] ].
+prolog:error_message(determinism_conflict(Fun, Reason)) -->
+    [ 'Determinism check failed for ~p: ~p'-[Fun, Reason] ].
+prolog:error_message(conflicting_determinism_declarations(Fun)) -->
+    [ 'Conflicting determinism declarations for ~p'-[Fun] ].
+prolog:error_message(overlapping_deterministic_clauses(Fun, ArgsA, ArgsB)) -->
+    [ 'Deterministic function ~p has overlapping clauses with heads ~p and ~p'-[Fun, ArgsA, ArgsB] ].
+prolog:error_message(inferred_type_conflict(Fun, Types)) -->
+    [ 'Inferred type conflict for ~p: incompatible candidates ~p'-[Fun, Types] ].
+prolog:error_message(no_matching_overload(Fun)) -->
+    [ 'No matching typed overload for ~p'-[Fun] ].
+prolog:error_message(strict_runtime_typecheck(Context, Goal)) -->
+    [ 'Strict mode rejected residual runtime type goal in ~p: ~p'-[Context, Goal] ].
+prolog:error_message(strict_missing_function_type(Fun, Arity)) -->
+    [ 'Strict mode requires a declared or inferable type for ~p/~p'-[Fun, Arity] ].
 
 prologfunc(X,Y) :- Y is X+1.
 
