@@ -39,9 +39,22 @@ process_metta_string(S, Results, Space) :- string_codes(S, Cs),
                                            maplist(process_form(Space), ParsedForms, ResultsList), !,
                                            append(ResultsList, Results).
 
+register_function_signature(F, Arity) :- warn_if_used_as_symbol(F),
+                                         register_fun(F),
+                                         ( catch(arity(F, Arity), _, fail) -> true ; assertz(arity(F, Arity)) ).
+
+%A function arriving after expressions already compiled its name as a plain symbol
+%cannot be called by those expressions anymore, which usually means an import came too late:
+warn_if_used_as_symbol(F) :- \+ fun(F), symbol_head(F), !,
+                             format(user_error, "Warning: ~w is defined or imported after already being used; earlier expressions treat it as a plain symbol. Move the import or definition above the first use.~n", [F]).
+warn_if_used_as_symbol(_).
+
 %First pass to convert MeTTa to Prolog Terms and register functions:
 parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
-                                           ( Term = [=, [F|W], _], atom(F) -> register_fun(F), length(W, N), Arity is N + 1, assertz(arity(F,Arity)), T=function
+                                           ( Term = [=, [F|W], _], atom(F) -> length(W, N),
+                                                                              Arity is N + 1,
+                                                                              register_function_signature(F, Arity),
+                                                                              T=function
                                                                             ; T=expression ).
 parse_form(runnable(S), parsed(runnable, S, Term)) :- sread(S, Term).
 
