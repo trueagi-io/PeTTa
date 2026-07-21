@@ -120,6 +120,22 @@ run_capture strict_missing_type sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/fail_s
 assert_status strict_missing_type 2
 assert_contains strict_missing_type "Strict mode requires a declared or inferable type for idish/1"
 
+# Inference + codegen: an untyped fib infers (-> Number Number) and compiles to
+# guard-free native arithmetic with a fused comparison.
+run_capture inferred_fib sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/fib.metta"
+assert_status inferred_fib 0
+assert_not_contains inferred_fib "typecheck_or_error"
+assert_not_contains inferred_fib "typecheck_match"
+assert_contains inferred_fib "A<2"
+assert_contains inferred_fib "B is D+F"
+
+# Inference semantics: knowledge only (never rejects), taint on conflicting
+# use, and the closure fast path from head-use arrow inference.
+run_capture inference sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/type_inference.metta"
+assert_status inference 0
+assert_contains inference "is A+1"
+assert_contains inference "apply_fn1"
+
 printf '%s\n' "[PASS] single monomorphic resolved"
 printf '%s\n' "[PASS] single polymorphic resolved"
 printf '%s\n' "[PASS] single polymorphic compile-time mismatch"
@@ -130,3 +146,5 @@ printf '%s\n' "[PASS] list element mismatch"
 printf '%s\n' "[PASS] strict mode declared pass"
 printf '%s\n' "[PASS] strict mode runtime-guard rejection"
 printf '%s\n' "[PASS] strict mode missing-type rejection"
+printf '%s\n' "[PASS] inferred fib compiles guard-free to native arithmetic"
+printf '%s\n' "[PASS] inference: knowledge-only, taint, closure fast path"
