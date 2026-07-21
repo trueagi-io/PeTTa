@@ -351,10 +351,60 @@ translate_expr([H0|T0], Goals, Out) :-
                          eval_data_term(HV, Gd, HV1),
                          append(Inner, Gd, Goals),
                          Out = [HV1|AVs]
-        %Unknown head (var/compound) => runtime dispatch:
+        %Unknown head (var/compound) => runtime dispatch, with a lean closure
+        %application when the head's arrow type is known or assumed:
         ; translate_args(T, GsT, AVs),
           append(GsH, GsT, Inner),
-          append(Inner, [reduce([HV|AVs], Out)], Goals) ).
+          ( translate_closure_call(HV, AVs, Inner, Goals, Out) -> true
+          ; append(Inner, [reduce([HV|AVs], Out)], Goals) ) ).
+
+%A variable head with a known arrow type of matching arity is a closure call:
+%check the args against the arrow, dispatch through apply_fn (skipping reduce's
+%per-call bookkeeping), and propagate the output type. Applying a parameter
+%whose type is still an unbound assumption tells us it is a function.
+translate_closure_call(HV, AVs, Inner, Goals, Out) :-
+    var(HV), AVs \== [], known_singleton(HV, K),
+    length(AVs, N), N1 is N + 1,
+    ( var(K) -> length(Xs, N1), K = [->|Xs]
+              ; K = [->|Xs], length(Xs, N1) ),
+    append(ArgTs, [OutT], Xs),
+    apply_decl_args(closure, AVs, ArgTs, GuardGs),
+    append(Inner, GuardGs, Inner1),
+    closure_apply_goal(HV, AVs, Out, Goal),
+    append(Inner1, [Goal], Goals),
+    set_out_type(Out, OutT).
+
+closure_apply_goal(HV, [A], Out, apply_fn1(HV, A, Out)) :- !.
+closure_apply_goal(HV, [A, B], Out, apply_fn2(HV, A, B, Out)) :- !.
+closure_apply_goal(HV, [A, B, C], Out, apply_fn3(HV, A, B, C, Out)) :- !.
+closure_apply_goal(HV, AVs, Out, apply_fnN(HV, AVs, Out)).
+
+%Runtime closure application; the last clause preserves reduce/2 semantics for
+%values (including unbound heads used symbolically) that are not callable:
+apply_fn1(F, A, Out) :- atom(F), fun(F), !, catch(call(F, A, Out), _, fail).
+apply_fn1(P, A, Out) :- compound(P), P = partial(F, Bs), !,
+                        append(Bs, [A, Out], CallArgs),
+                        Goal =.. [F|CallArgs], catch(Goal, _, fail).
+apply_fn1(F, A, Out) :- reduce([F, A], Out).
+
+apply_fn2(F, A, B, Out) :- atom(F), fun(F), !, catch(call(F, A, B, Out), _, fail).
+apply_fn2(P, A, B, Out) :- compound(P), P = partial(F, Bs), !,
+                           append(Bs, [A, B, Out], CallArgs),
+                           Goal =.. [F|CallArgs], catch(Goal, _, fail).
+apply_fn2(F, A, B, Out) :- reduce([F, A, B], Out).
+
+apply_fn3(F, A, B, C, Out) :- atom(F), fun(F), !, catch(call(F, A, B, C, Out), _, fail).
+apply_fn3(P, A, B, C, Out) :- compound(P), P = partial(F, Bs), !,
+                              append(Bs, [A, B, C, Out], CallArgs),
+                              Goal =.. [F|CallArgs], catch(Goal, _, fail).
+apply_fn3(F, A, B, C, Out) :- reduce([F, A, B, C], Out).
+
+apply_fnN(F, Args, Out) :- atom(F), fun(F), !, append(Args, [Out], CallArgs),
+                           Goal =.. [F|CallArgs], catch(Goal, _, fail).
+apply_fnN(P, Args, Out) :- compound(P), P = partial(F, Bs), !,
+                           append(Bs, Args, All), append(All, [Out], CallArgs),
+                           Goal =.. [F|CallArgs], catch(Goal, _, fail).
+apply_fnN(F, Args, Out) :- reduce([F|Args], Out).
 
 %Type-directed function call: check declared types at compile time, resolve
 %overloads statically when possible, and emit runtime guards only where types
