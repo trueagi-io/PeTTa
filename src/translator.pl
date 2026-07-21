@@ -354,7 +354,10 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
     length(Args, NProv), length(Bound, NB), NTotal is NProv + NB,
     findall(ft(ATs, OT), fn_decl_arity(Fun, NTotal, ATs, OT), FullDecls),
     ( FullDecls \== []
-      -> eff_arg_modes(FullDecls, NB, NProv, Modes),
+      -> ( FullDecls = [ft(ATs1, _)] -> length(BoundTs, NB), append(BoundTs, ProvTs, ATs1),
+                                        maplist([Ty, M]>>( Ty == 'Expression' -> M = data ; M = translate ),
+                                                ProvTs, Modes)
+                                      ; eff_arg_modes(FullDecls, NB, NProv, Modes) ),
          translate_call_args(Args, Modes, GsT, AVs0),
          append(Bound, AVs0, AVs),
          ( FullDecls = [Single] -> Chosen = Single, MultiDecl = false
@@ -407,13 +410,21 @@ translate_call_args([A|As], [_|Ms], Gs, [V|Vs]) :- translate_expr(A, G1, V),
                                                    append(G1, G2, Gs).
 
 %Expression-typed args stay unevaluated data, except underapplied callable
-%expressions representable as a goal-free closure:
-expression_arg_value(A, AV) :- ( catch(( translate_expr(A, GsExpr, AVExpr),
+%expressions representable as a goal-free closure. Only expressions that can
+%actually become a closure are translated, so plain data is never re-translated:
+expression_arg_value(A, AV) :- ( maybe_closure_expr(A),
+                                 catch(( translate_expr(A, GsExpr, AVExpr),
                                          trivial_goals(GsExpr),
                                          callable_expression_value(AVExpr) ),
                                        error(_, typecheck), fail)
                                  -> AV = AVExpr
                                   ; AV = A ).
+
+%An underapplied call to a known function (would compile to partial(...)):
+maybe_closure_expr([F|Args]) :- atom(F), fun(F), is_list(Args),
+                                length(Args, N), Arity is N + 1,
+                                \+ ( ( current_predicate(F/Arity) ; catch(arity(F, Arity), _, fail) ),
+                                     \+ ( current_op(_, _, F), Arity =< 2 ) ).
 
 trivial_goals([]).
 trivial_goals([true|Gs]) :- trivial_goals(Gs).
@@ -423,10 +434,9 @@ callable_expression_value(partial(Fun, Bound)) :- atom(Fun), ground(Bound).
 
 %Specialize only for higher-order args the declaration leaves untyped (wildcards);
 %arrow-typed args are handled by the typed direct call:
-should_try_specialize(AVs, ATs) :- nth0(I, AVs, AV),
-                                   specializable_arg(AV),
-                                   nth0(I, ATs, Ty),
-                                   \+ is_arrow_type(Ty), !.
+should_try_specialize([AV|_], [Ty|_]) :- specializable_arg(AV),
+                                         \+ is_arrow_type(Ty), !.
+should_try_specialize([_|AVs], [_|ATs]) :- should_try_specialize(AVs, ATs).
 
 %One dispatch branch per surviving overload: non-throwing guards, then the call:
 overload_branch(Fun, AVs, Out, ft(ATs, OT), Branch) :-

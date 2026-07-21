@@ -194,6 +194,17 @@ bound_args_match(B, PTs) :- \+ \+ maplist(arg_soft_ok, B, PTs).
 
 %%% check_value(+Value, ?Type, -Status): Status in {ok, mismatch, unknown}.
 %%% Binds type variables in Type on success (polymorphism resolution).
+%%% Primitive fast paths first: they carry the hot arithmetic call sites.
+check_value(V, T, St) :- number(V), !, ( var(T) -> T = 'Number', St = ok
+                                       ; T == 'Number' -> St = ok
+                                       ; prim_mismatch_status('Number', T, St) ).
+check_value(V, T, St) :- string(V), !, ( var(T) -> T = 'String', St = ok
+                                       ; T == 'String' -> St = ok
+                                       ; prim_mismatch_status('String', T, St) ).
+check_value(V, T, St) :- ( V == true ; V == false ), !,
+                         ( var(T) -> T = 'Bool', St = ok
+                         ; T == 'Bool' -> St = ok
+                         ; prim_mismatch_status('Bool', T, St) ).
 check_value(V, T, St) :- var(T), !, ( value_single_type(V, VT) -> T = VT ; true ), St = ok.
 check_value(_, T, St) :- wildcard_type_t(T), !, St = ok.
 check_value(V, T, St) :- T = [L, ET], L == 'List', !,
@@ -215,6 +226,13 @@ check_value(V, T, St) :- atom(T), !,
                          ; member(C, Cs), refinement_pair(C, T) -> St = unknown
                          ; St = mismatch ).
 check_value(_, _, unknown).
+
+%Slow completion of the primitive fast paths above:
+prim_mismatch_status(P, T, St) :- ( wildcard_type_t(T) -> St = ok
+                                  ; atom(T) -> ( refinement_pair(P, T) -> St = unknown
+                                                                        ; St = mismatch )
+                                  ; ( T = [L|_], L == 'List' ; is_arrow_type(T) ) -> St = mismatch
+                                  ; St = unknown ).
 
 %A primitive/tuple type against a user-defined atom type may be a runtime
 %refinement, but only once get-type has actually been extended by user code:
@@ -278,8 +296,15 @@ check_call_arg(Fun, AV, T, Gs) :-
 type_guard(Fun, AV, T, Gs) :- ( ground(T), \+ wildcard_type_t(T)
                                 -> ( strict_mode(true)
                                      -> throw(error(strict_runtime_typecheck(Fun, typecheck_or_error(AV, T)), typecheck))
-                                      ; Gs = [typecheck_or_error(AV, T)] )
+                                      ; guard_goal(AV, T, G), Gs = [G] )
                                  ; Gs = [] ).
+
+%Inline the primitive fast path into the compiled goal so hot code only pays a
+%native type test; the reflective check runs only when that test fails:
+guard_goal(AV, 'Number', ( number(AV) -> true ; typecheck_or_error(AV, 'Number') )) :- !.
+guard_goal(AV, 'String', ( string(AV) -> true ; typecheck_or_error(AV, 'String') )) :- !.
+guard_goal(AV, 'Bool', ( ( AV == true ; AV == false ) -> true ; typecheck_or_error(AV, 'Bool') )) :- !.
+guard_goal(AV, T, typecheck_or_error(AV, T)).
 
 apply_decl_args(Fun, AVs, ATs, Gs) :- foldl(apply_decl_arg(Fun), AVs, ATs, [], GsR),
                                       reverse(GsR, GsL), append(GsL, Gs).
@@ -296,6 +321,10 @@ typecheck_or_error(V, T) :- ( var(V) -> constrain_var_type(V, T)
 typecheck_match(V, T) :- ( var(V) -> constrain_var_type(V, T)
                                    ; runtime_type_ok(V, T) ).
 
+%Fast paths first: primitive values in hot code must not pay for reflection.
+runtime_type_ok(V, 'Number') :- number(V), !.
+runtime_type_ok(V, 'String') :- string(V), !.
+runtime_type_ok(V, 'Bool') :- ( V == true ; V == false ), !.
 runtime_type_ok(_, T) :- var(T), !.
 runtime_type_ok(_, T) :- wildcard_type_t(T), !.
 runtime_type_ok(V, T) :- T = [L, ET], L == 'List', !,
@@ -359,7 +388,7 @@ clause_output_goals(F, out(OT), ExpOut, BodyExpr, Gs) :-
 output_guard(F, Out, OT, Gs) :- ( ground(OT)
                                   -> ( strict_mode(true)
                                        -> throw(error(strict_runtime_typecheck(F, typecheck_or_error(Out, OT)), typecheck))
-                                        ; Gs = [typecheck_or_error(Out, OT)] )
+                                        ; guard_goal(Out, OT, G), Gs = [G] )
                                    ; Gs = [] ).
 
 %Strict mode: every compiled function needs a declared type (lambdas exempt):
