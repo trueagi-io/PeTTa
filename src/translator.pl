@@ -209,6 +209,8 @@ translate_expr([H0|T0], Goals, Out) :-
         %--- Unification constructs ---:
         ; (HV == let ; HV == chain), T = [Pat, Val, In] -> translate_expr(Pat, Gp, Pv),
                                                            translate_expr(Val, Gv, V),
+                                                           note_value_candidate(Pv, V),   %the bound variable gets the value's type
+                                                           note_var_candidates(Pv, V),
                                                            translate_expr(In,  Gi, Out),
                                                            append([GsH,[(Pv=V)],Gp,Gv,Gi], Goals)
         ; HV == 'let*', T = [Binds, Body] -> letstar_to_rec_let(Binds,Body,RecLet),
@@ -253,12 +255,14 @@ translate_expr([H0|T0], Goals, Out) :-
         ; HV == 'foldl-atom', T = [List, Init, AccVar, XVar, Body]
           -> translate_expr_to_conj(List, ConjList, L),
              translate_expr_to_conj(Init, ConjInit, InitV),
+             note_list_elem_type(XVar, L),
              translate_expr_to_conj(Body, BodyConj, BG),
              exclude(==(true), [ConjList, ConjInit], CleanConjs),
              append(GsH, CleanConjs, GsMid),
              append(GsMid, [foldl([XVar, AccVar, NewAcc]>>(BodyConj, ( number(BG) -> NewAcc is BG ; NewAcc = BG )), L, InitV, Out)], Goals)
         ; HV == 'map-atom', T = [List, XVar, Body]
           -> translate_expr_to_conj(List, ConjList, L),
+             note_list_elem_type(XVar, L),
              translate_expr_to_conj(Body, BodyCallConj, BodyCall),
              ( value_single_type(BodyCall, BT) -> set_out_type(Out, ['List', BT]) ; true ),
              exclude(==(true), [ConjList], CleanConjs),
@@ -266,6 +270,7 @@ translate_expr([H0|T0], Goals, Out) :-
              append(GsMid, [maplist([XVar, Y]>>(BodyCallConj, ( number(BodyCall) -> Y is BodyCall ; Y = BodyCall )), L, Out)], Goals)
         ; HV == 'filter-atom', T = [List, XVar, Cond]
           -> translate_expr_to_conj(List, ConjList, L),
+             note_list_elem_type(XVar, L),
              translate_expr_to_conj(Cond, CondConj, CondGoal),
              exclude(==(true), [ConjList], CleanConjs),
              append(GsH, CleanConjs, GsMid),

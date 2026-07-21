@@ -164,6 +164,15 @@ known_singleton(V, K) :- get_attr(V, tknown, [K]).
 note_value_candidate(Out, Val) :- ( var(Out), nonvar(Val), value_single_type(Val, VT)
                                     -> add_known_type(Out, VT) ; true ).
 
+%Type the element variable of a higher-order construct from its list argument:
+note_list_elem_type(XVar, L) :-
+    ( var(XVar), list_elem_type(L, ET) -> add_known_type(XVar, ET) ; true ).
+
+list_elem_type(L, ET) :- var(L), !, known_singleton(L, ['List', ET0]), ground(ET0), ET = ET0.
+list_elem_type(L, ET) :- is_list(L), L = [E|Es],
+                         value_single_type(E, ET), ground(ET),
+                         forall(member(E2, Es), ( value_single_type(E2, T2), T2 == ET )).
+
 %Merge the known candidates of Val (a different variable) into Out:
 note_var_candidates(Out, Val) :- ( var(Out), var(Val), known_candidates(Val, Cs)
                                    -> add_known_types(Out, Cs) ; true ).
@@ -174,10 +183,10 @@ add_known_types(V, [C|Cs]) :- add_known_type(V, C), add_known_types(V, Cs).
 set_out_type(Out, OT) :- ( var(Out), ground(OT), \+ wildcard_type_t(OT) -> add_known_type(Out, OT)
                                                                          ; true ).
 
-%A call is statically dead when the same unknown variable occupies two argument
+%A call is statically dead when the same variable occupies two argument
 %positions whose required types can never both hold (e.g. (num-str $x $x)):
 same_call_var_conflict([V|Vs], [T|Ts]) :-
-    ( var(V), \+ known_singleton(V, _), nonvar(T), \+ wildcard_type_t(T),
+    ( var(V), nonvar(T), \+ wildcard_type_t(T),
       var_conflict_in_rest(V, T, Vs, Ts) -> true
     ; same_call_var_conflict(Vs, Ts) ).
 
@@ -235,11 +244,27 @@ check_value(V, T, St) :- T = [L, ET], L == 'List', !,
 check_value(V, T, St) :- is_arrow_type(T), !,
                          ( ( atom(V) ; V = partial(_, _) )
                            -> value_candidate_types(V, Cs),
-                              ( Cs == [] -> St = unknown
+                              ( Cs == [] -> ( inferred_value_candidates(V, ICs),
+                                              member(C, ICs), type_unify(C, T)
+                                              -> St = ok       %inferred types are positive evidence only
+                                               ; St = unknown )
                               ; member(C, Cs), type_unify(C, T) -> St = ok
                               ; St = mismatch )
                          ; ( number(V) ; string(V) ) -> St = mismatch
                          ; St = unknown ).
+
+%Arrow types of closures over inferred (undeclared) functions:
+inferred_value_candidates(V, Cs) :- atom(V), !,
+                                    findall([->|Xs], ( inferred_fn_type(V, ATs, OT),
+                                                       append(ATs, [OT], Xs) ), Cs).
+inferred_value_candidates(partial(F, B), Cs) :- !,
+                                    length(B, N),
+                                    findall([->|Xs], ( inferred_fn_type(F, ATs, OT),
+                                                       length(ATs, Total), Total > N,
+                                                       length(PTs, N), append(PTs, RTs, ATs),
+                                                       \+ \+ maplist(arg_soft_ok, B, PTs),
+                                                       append(RTs, [OT], Xs) ), Cs).
+inferred_value_candidates(_, []).
 check_value(V, T, St) :- atom(T), !,
                          value_candidate_types(V, Cs),
                          ( Cs == [] -> St = unknown
