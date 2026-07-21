@@ -362,6 +362,9 @@ clause_param_types(_, _, none).
 
 bind_param_type(Arg, T) :- ( var(Arg) -> ( nonvar(T), \+ wildcard_type_t(T) -> add_known_type(Arg, T)
                                                                              ; true )
+                           ; nonvar(T), T = [L, ET], L == 'List', Arg = [H|Rest]
+                             -> bind_param_type(H, ET),          %type element vars of list patterns
+                                bind_param_type(Rest, ['List', ET])
                            ; check_value(Arg, T, St),
                              ( St == mismatch -> throw(error(literal_type_mismatch(Arg, T), typecheck))
                                                ; true ) ).

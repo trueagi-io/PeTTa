@@ -81,7 +81,7 @@ assert_not_contains single_monomorphic "no_matching_overload"
 
 run_capture single_poly_resolved sh "$ROOT_DIR/run.sh" "$ROOT_DIR/examples/type_single_poly_resolved.metta"
 assert_status single_poly_resolved 0
-assert_tail_contains single_poly_resolved "'map-flat'(partial(+, [1]), [1, 2],"
+assert_tail_contains single_poly_resolved "'map-flat_Spec_[partial(+,[1])]'(partial(+, [1]),"
 assert_tail_not_contains single_poly_resolved "typecheck_match"
 assert_tail_not_contains single_poly_resolved "typecheck_or_error"
 assert_tail_not_contains single_poly_resolved "no_matching_overload"

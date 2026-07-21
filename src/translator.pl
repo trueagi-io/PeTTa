@@ -21,8 +21,12 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                                   flatten(GoalsA,GoalsPrefix)
                                                                 ; Args1 = Args0, GoalsPrefix = [] ),
                                                catch(nb_getval(F, Prev), _, Prev = []),
-                                               validate_function_determinism(F, Args1, BodyExpr, Prev),
-                                               strict_check_function_typed(F, Args1),
+                                               %Specialized clause copies (ConstrainArgs == false) are instances of
+                                               %already-validated clauses: bind their (more specific) param types for
+                                               %guard elimination, but skip the determinism/strict/output checks.
+                                               ( ConstrainArgs == false -> true
+                                                                         ; validate_function_determinism(F, Args1, BodyExpr, Prev),
+                                                                           strict_check_function_typed(F, Args1) ),
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
                                                clause_param_types(F, Args1, DeclOut),
                                                translate_expr(BodyExpr, GoalsBody, ExpOut),
@@ -32,7 +36,8 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                   append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs),
                                                   OutChecks = []
                                                ; FinalGoals= GoalsBody , HeadArgs = Args1, Out = ExpOut,
-                                                 clause_output_goals(F, DeclOut, ExpOut, BodyExpr, OutChecks) ),
+                                                 ( ConstrainArgs == false -> OutChecks = []
+                                                 ; clause_output_goals(F, DeclOut, ExpOut, BodyExpr, OutChecks) ) ),
                                                append(HeadArgs, [Out], FinalArgs),
                                                Head =.. [F|FinalArgs],
                                                append([GoalsPrefix, FinalGoals, OutChecks], Goals),
@@ -372,9 +377,7 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
               %overloaded functions: clauses were not output-checked against a
               %single declaration, so the call filters on the output type:
               overload_out_guard(MultiDecl, Fun, Out, OT, Extra),
-              ( should_try_specialize(AVs, ATs)
-                -> build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals)
-                 ; build_direct_call(Fun, AVs, Out, Inner, Extra, Goals) ),
+              build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals),
               set_out_type(Out, OT)
             ; Chosen = multi(Survs),
               maplist(overload_branch(Fun, AVs, Out), Survs, Branches),
@@ -431,12 +434,6 @@ trivial_goals([true|Gs]) :- trivial_goals(Gs).
 
 callable_expression_value(AV) :- atom(AV), fun(AV).
 callable_expression_value(partial(Fun, Bound)) :- atom(Fun), ground(Bound).
-
-%Specialize only for higher-order args the declaration leaves untyped (wildcards);
-%arrow-typed args are handled by the typed direct call:
-should_try_specialize([AV|_], [Ty|_]) :- specializable_arg(AV),
-                                         \+ is_arrow_type(Ty), !.
-should_try_specialize([_|AVs], [_|ATs]) :- should_try_specialize(AVs, ATs).
 
 %One dispatch branch per surviving overload: non-throwing guards, then the call:
 overload_branch(Fun, AVs, Out, ft(ATs, OT), Branch) :-
