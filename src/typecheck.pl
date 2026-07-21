@@ -52,6 +52,7 @@ maybe_cache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term = 
                                         -> ( nonvar(Type), fn_type_shape(Type, ATs, OT, Det)
                                              -> maplist(normalize_type, ATs, ATN),
                                                 normalize_type(OT, OTN),
+                                                retractall(inferred_fn_type(Name, _, _)),  %declaration supersedes inference
                                                 ( declared_fn_type(Name, A2, O2, D2),
                                                   (A2-O2-D2) =@= (ATN-OTN-Det) -> true
                                                 ; assertz(declared_fn_type(Name, ATN, OTN, Det)) )
@@ -86,7 +87,8 @@ maybe_uncache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term 
                                            ; true ).
 
 forget_symbol_types(Name) :- retractall(declared_fn_type(Name, _, _, _)),
-                             retractall(declared_value_type(Name, _)).
+                             retractall(declared_value_type(Name, _)),
+                             retractall(inferred_fn_type(Name, _, _)).
 
 %%% Store lookup (each retrieval yields a fresh copy of the declaration):
 fn_decl_arity(F, N, ATs, OT) :- declared_fn_type(F, ATs, OT, _), length(ATs, N).
@@ -117,8 +119,6 @@ tknown:attr_unify_hook(Cs, Other) :-
                                                      put_attr(Other, tknown, U)
                                                    ; put_attr(Other, tknown, Cs) )
                   ; true ).
-
-treq:attr_unify_hook(_, _).
 
 mreq:attr_unify_hook(Rs, Other) :-
     ( var(Other) -> ( get_attr(Other, mreq, R2) -> forall(member(A, Rs),
@@ -157,12 +157,16 @@ add_known_types(V, [C|Cs]) :- add_known_type(V, C), add_known_types(V, Cs).
 set_out_type(Out, OT) :- ( var(Out), ground(OT), \+ wildcard_type_t(OT) -> add_known_type(Out, OT)
                                                                          ; true ).
 
-%%% Translation-time requirement accumulation (detects statically dead calls):
-add_required_type(V, T, Status) :- copy_term(T, T2),
-                                   ( get_attr(V, treq, Rs)
-                                     -> ( member(R, Rs), \+ type_compat_soft(R, T2) -> Status = dead
-                                        ; put_attr(V, treq, [T2|Rs]), Status = ok )
-                                      ; put_attr(V, treq, [T2]), Status = ok ).
+%A call is statically dead when the same unknown variable occupies two argument
+%positions whose required types can never both hold (e.g. (num-str $x $x)):
+same_call_var_conflict([V|Vs], [T|Ts]) :-
+    ( var(V), \+ known_singleton(V, _), nonvar(T), \+ wildcard_type_t(T),
+      var_conflict_in_rest(V, T, Vs, Ts) -> true
+    ; same_call_var_conflict(Vs, Ts) ).
+
+var_conflict_in_rest(V, T, [V2|Vs], [T2|Ts]) :-
+    ( V == V2, nonvar(T2), \+ wildcard_type_t(T2), \+ type_compat_soft(T, T2) -> true
+    ; var_conflict_in_rest(V, T, Vs, Ts) ).
 
 %%% Static typing of values (translated call results, literals, closures):
 value_candidate_types(V, ['Number']) :- number(V), !.
@@ -278,19 +282,22 @@ arg_statically_ok(AV, T) :- \+ \+ ( var(AV) -> ( known_singleton(AV, K) -> type_
                                                ; ( var(T) -> true ; wildcard_type_t(T) ) )
                                              ; check_value(AV, T, ok) ).
 
-%%% Effectful call-site argument checking, one arg (throws / emits guards):
-check_call_arg(Fun, AV, T, Gs) :-
+%%% Effectful call-site argument checking, one arg. Mode 'declared' throws on
+%%% literal mismatches; mode 'inferred' only ever adds knowledge and guards:
+check_call_arg(Mode, Fun, AV, T, Gs) :-
     ( var(AV) -> ( known_singleton(AV, K)
-                   -> ( \+ \+ type_unify(K, T) -> type_unify(K, T), Gs = []
-                      ; type_guard(Fun, AV, T, Gs) )              %known conflict: runtime error carries the value
+                   -> ( nonvar(T), wildcard_type_t(T) -> Gs = []  %wildcards carry no knowledge: leave K alone
+                      ; \+ \+ type_unify(K, T) -> type_unify(K, T), Gs = []
+                      ; taint_assumption(AV),                    %known conflict: runtime error carries the value
+                        type_guard(Fun, AV, T, Gs) )
                  ; var(T) -> Gs = []
                  ; wildcard_type_t(T) -> Gs = []
-                 ; add_required_type(AV, T, S),
-                   ( S == dead -> Gs = [fail]                     %requirements can never be met jointly
-                   ; type_guard(Fun, AV, T, Gs) ) )
+                 ; type_guard(Fun, AV, T, Gs) )
     ; check_value(AV, T, St),
       ( St == ok -> Gs = []
-      ; St == mismatch -> throw(error(literal_type_mismatch(AV, T), typecheck))
+      ; St == mismatch -> ( Mode == declared
+                            -> throw(error(literal_type_mismatch(AV, T), typecheck))
+                             ; type_guard(Fun, AV, T, Gs) )
       ; type_guard(Fun, AV, T, Gs) ) ).
 
 type_guard(Fun, AV, T, Gs) :- ( ground(T), \+ wildcard_type_t(T)
@@ -306,9 +313,15 @@ guard_goal(AV, 'String', ( string(AV) -> true ; typecheck_or_error(AV, 'String')
 guard_goal(AV, 'Bool', ( ( AV == true ; AV == false ) -> true ; typecheck_or_error(AV, 'Bool') )) :- !.
 guard_goal(AV, T, typecheck_or_error(AV, T)).
 
-apply_decl_args(Fun, AVs, ATs, Gs) :- foldl(apply_decl_arg(Fun), AVs, ATs, [], GsR),
-                                      reverse(GsR, GsL), append(GsL, Gs).
-apply_decl_arg(Fun, AV, T, Acc, [G|Acc]) :- check_call_arg(Fun, AV, T, G).
+apply_decl_args(Fun, AVs, ATs, Gs) :- ( same_call_var_conflict(AVs, ATs) -> Gs = [fail]
+                                      ; foldl(apply_decl_arg(declared, Fun), AVs, ATs, [], GsR),
+                                        reverse(GsR, GsL), append(GsL, Gs) ).
+
+apply_inferred_args(Fun, AVs, ATs, Gs) :- ( same_call_var_conflict(AVs, ATs) -> Gs = [fail]
+                                          ; foldl(apply_decl_arg(inferred, Fun), AVs, ATs, [], GsR),
+                                            reverse(GsR, GsL), append(GsL, Gs) ).
+
+apply_decl_arg(Mode, Fun, AV, T, Acc, [G|Acc]) :- check_call_arg(Mode, Fun, AV, T, G).
 
 %%% Runtime residual guards (only emitted where types stay unresolved).
 %%% Bound values are checked via the user-extensible get-type reflection, so
@@ -394,13 +407,105 @@ output_guard(F, Out, OT, Gs) :- ( ground(OT)
                                         ; guard_goal(Out, OT, G), Gs = [G] )
                                    ; Gs = [] ).
 
-%Strict mode: every compiled function needs a declared type (lambdas exempt):
+%Strict mode: every compiled function needs a declared or inferred type
+%(lambdas exempt). Checked after clause translation so inference can run first:
 strict_check_function_typed(F, Args) :-
     ( strict_mode(true), \+ sub_atom(F, 0, _, _, 'lambda_')
       -> length(Args, N),
          ( \+ \+ fn_decl_arity(F, N, _, _) -> true
-                                            ; throw(error(strict_missing_function_type(F, N), typecheck)) )
+         ; \+ \+ inferred_decl_arity(F, N, _, _) -> true
+         ; throw(error(strict_missing_function_type(F, N), typecheck)) )
        ; true ).
+
+%%% Local type inference for undeclared functions %%%
+%
+% While an undeclared function's clause is translated, its variable parameters
+% carry fresh assumption type variables; typed call sites in the body bind them
+% by unification. A parameter whose assumption sees conflicting uses is tainted
+% (no knowledge is recorded for it). The harvested types live in an internal
+% store, are never asserted into &self, and are used only to *add* knowledge:
+% eliminating guards, typing call outputs, and satisfying strict mode. Call
+% sites of inferred functions never throw at compile time.
+:- dynamic inferred_fn_type/3.     % inferred_fn_type(F, ArgTypes, OutType)
+
+inferred_decl_arity(F, N, ATs, OT) :- inferred_fn_type(F, ATs, OT), length(ATs, N).
+
+begin_clause_inference(F, Args, Assume, saved(OldA, OldD, OldT)) :-
+    ( catch(b_getval('$assumptions', OldA), _, OldA = []) ),
+    ( catch(b_getval('$assume_decl', OldD), _, OldD = none) ),
+    ( catch(b_getval('$assump_taint', OldT), _, OldT = []) ),
+    length(Args, N),
+    ( \+ \+ fn_decl_arity(F, N, _, _) -> Assume = none, Pairs = [], Decl = none
+                                       ; foldl(assume_param_type, Args, t([], []), t(PairsR, PTsR)),
+                                         reverse(PairsR, Pairs), reverse(PTsR, PTs),
+                                         Assume = assume(Pairs),
+                                         Decl = d(F, N, PTs, _OutTv) ),
+    b_setval('$assumptions', Pairs),
+    b_setval('$assume_decl', Decl),
+    b_setval('$assump_taint', []).
+
+assume_param_type(Arg, t(Ps, Ts), t(Ps1, [T|Ts])) :-
+    ( var(Arg) -> ( known_singleton(Arg, T) -> Ps1 = Ps
+                                             ; add_known_type(Arg, T), Ps1 = [a(Arg, T)|Ps] )
+    ; value_single_type(Arg, T) -> Ps1 = Ps
+    ; Ps1 = Ps ).
+
+taint_assumption(AV) :- ( catch(b_getval('$assumptions', Pairs), _, fail),
+                          member(a(P, _), Pairs), P == AV
+                          -> catch(b_getval('$assump_taint', Ts), _, Ts = []),
+                             b_setval('$assump_taint', [AV|Ts])
+                           ; true ).
+
+end_clause_inference(F, Args, ExpOut, Assume, saved(OldA, OldD, OldT)) :-
+    ( Assume = assume(Pairs) -> store_inferred_type(F, Pairs, Args, ExpOut) ; true ),
+    b_setval('$assumptions', OldA),
+    b_setval('$assume_decl', OldD),
+    b_setval('$assump_taint', OldT).
+
+%The provisional declaration of the clause being translated, for self-recursion:
+assumed_self_decl(F, N, PTs, OutTv) :- catch(b_getval('$assume_decl', D), _, fail),
+                                       D = d(F, N, PTs, OutTv).
+
+store_inferred_type(F, Pairs, Args, ExpOut) :-
+    catch(b_getval('$assump_taint', Taints), _, Taints = []),
+    maplist(infer_param_type(Pairs, Taints), Args, ATs0),
+    infer_out_type(ExpOut, OT0),
+    maplist(normalize_inferred, ATs0, ATs),
+    normalize_inferred(OT0, OT),
+    ( member(T, [OT|ATs]), T \== '%Undefined%' -> merge_inferred(F, ATs, OT) ; true ).
+
+infer_param_type(Pairs, Taints, Arg, T) :-
+    ( var(Arg) -> ( memberchk_eq(Arg, Taints) -> T = '%Undefined%'
+                  ; member(a(P, Tv), Pairs), P == Arg -> T = Tv
+                  ; known_singleton(Arg, K) -> T = K
+                  ; T = '%Undefined%' )
+    ; value_single_type(Arg, T0) -> T = T0
+    ; T = '%Undefined%' ).
+
+infer_out_type(Out, T) :- ( var(Out) -> ( known_singleton(Out, K) -> T = K ; T = '%Undefined%' )
+                          ; value_single_type(Out, T0) -> T = T0
+                          ; T = '%Undefined%' ).
+
+%Only clearly usable shapes are recorded; everything else is no-knowledge:
+normalize_inferred(T, '%Undefined%') :- var(T), !.
+normalize_inferred(T, T) :- atom(T), !.
+normalize_inferred(T, ['List', ETN]) :- ground(T), T = [L, ET], L == 'List', !,
+                                        normalize_inferred(ET, ETN).
+normalize_inferred(T, T) :- ground(T), is_arrow_type(T), !.
+normalize_inferred(_, '%Undefined%').
+
+%Clauses of the same function are joined position-wise; disagreement widens:
+merge_inferred(F, ATs, OT) :-
+    length(ATs, N),
+    ( inferred_decl_arity(F, N, ATs0, OT0)
+      -> retract(inferred_fn_type(F, ATs0, OT0)),
+         maplist(join_inferred, ATs0, ATs, ATs1),
+         join_inferred(OT0, OT, OT1),
+         ( member(T, [OT1|ATs1]), T \== '%Undefined%'
+           -> assertz(inferred_fn_type(F, ATs1, OT1)) ; true )
+       ; assertz(inferred_fn_type(F, ATs, OT)) ).
+
+join_inferred(A, B, J) :- ( A =@= B -> J = A ; J = '%Undefined%' ).
 
 %%% Determinism arrows (-[det]->, -[nondet]->) %%%
 

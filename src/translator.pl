@@ -25,19 +25,23 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                %already-validated clauses: bind their (more specific) param types for
                                                %guard elimination, but skip the determinism/strict/output checks.
                                                ( ConstrainArgs == false -> true
-                                                                         ; validate_function_determinism(F, Args1, BodyExpr, Prev),
-                                                                           strict_check_function_typed(F, Args1) ),
+                                                                         ; validate_function_determinism(F, Args1, BodyExpr, Prev) ),
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
                                                clause_param_types(F, Args1, DeclOut),
+                                               begin_clause_inference(F, Args1, Assume, SavedInf),
                                                translate_expr(BodyExpr, GoalsBody, ExpOut),
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
                                                -> current_predicate(Base/Arity), length(Bound, N), M is (Arity - N) - 1,
                                                   length(ExtraArgs, M), append([Bound,ExtraArgs,[Out]],CallArgs), Goal =.. [Base|CallArgs],
                                                   append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs),
-                                                  OutChecks = []
+                                                  OutChecks = [],
+                                                  end_clause_inference(F, Args1, none, none, SavedInf)
                                                ; FinalGoals= GoalsBody , HeadArgs = Args1, Out = ExpOut,
+                                                 end_clause_inference(F, Args1, ExpOut, Assume, SavedInf),
                                                  ( ConstrainArgs == false -> OutChecks = []
                                                  ; clause_output_goals(F, DeclOut, ExpOut, BodyExpr, OutChecks) ) ),
+                                               ( ConstrainArgs == false -> true
+                                                                         ; strict_check_function_typed(F, Args1) ),
                                                append(HeadArgs, [Out], FinalArgs),
                                                Head =.. [F|FinalArgs],
                                                append([GoalsPrefix, FinalGoals, OutChecks], Goals),
@@ -391,6 +395,20 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
          apply_decl_args(Fun, AVs, PTs, GuardGs),
          append([GsH, GsT, GuardGs], Inner),
          build_direct_call(Fun, AVs, Out, Inner, [], Goals)
+    ; findall(it(IATs, IOT), inferred_decl_arity(Fun, NTotal, IATs, IOT), [it(IATs, IOT)])
+      -> translate_args(Args, GsT, AVs0),                      %inferred type: knowledge only, never rejects
+         append(Bound, AVs0, AVs),
+         apply_inferred_args(Fun, AVs, IATs, GuardGs),
+         append([GsH, GsT, GuardGs], Inner),
+         build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
+         set_out_type(Out, IOT)
+    ; assumed_self_decl(Fun, NTotal, PTs, OutTv)
+      -> translate_args(Args, GsT, AVs0),                      %self-recursion under the provisional type
+         append(Bound, AVs0, AVs),
+         apply_inferred_args(Fun, AVs, PTs, GuardGs),
+         append([GsH, GsT, GuardGs], Inner),
+         build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
+         ( var(Out) -> add_known_type(Out, OutTv) ; true )
     ; translate_args(Args, GsT, AVs0),                         %no type information
       append(Bound, AVs0, AVs),
       append(GsH, GsT, Inner),
