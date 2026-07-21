@@ -62,7 +62,8 @@ maybe_cache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term = 
                                                 retractall(inferred_fn_type(Name, _, _)),  %declaration supersedes inference
                                                 ( declared_fn_type(Name, A2, O2, D2),
                                                   (A2-O2-D2) =@= (ATN-OTN-Det) -> true
-                                                ; assertz(declared_fn_type(Name, ATN, OTN, Det)) )
+                                                ; warn_if_late_declaration(Name),
+                                                  assertz(declared_fn_type(Name, ATN, OTN, Det)) )
                                               ; normalize_type(Type, TN),
                                                 ( declared_value_type(Name, T2), T2 =@= TN -> true
                                                 ; assertz(declared_value_type(Name, TN)) ) )
@@ -75,7 +76,7 @@ seed_builtin_types :- library_path(Base),
                       string_codes(S, Cs),
                       strip(Cs, 0, Codes),
                       phrase(top_forms(Forms, 1), Codes),
-                      forall(member(form(FormStr), Forms),
+                      forall(member(form(FormStr, _), Forms),
                              ( sread(FormStr, Term),
                                maybe_cache_type_decl('&self', Term) )).
 
@@ -92,6 +93,15 @@ maybe_uncache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term 
                                                     T2 =@= TN
                                                     -> erase(Ref) ; true ) )
                                            ; true ).
+
+%Type declarations only affect later forms; warn when one arrives after the
+%function's clauses were already compiled (a silent no-op otherwise):
+warn_if_late_declaration(Name) :-
+    ( catch(nb_getval(Name, [_|_]), _, fail)
+      -> format(user_error,
+                "Warning: type declaration for ~w arrives after its definition; already-compiled clauses and earlier calls are unaffected~n",
+                [Name])
+       ; true ).
 
 forget_symbol_types(Name) :- retractall(declared_fn_type(Name, _, _, _)),
                              retractall(declared_value_type(Name, _)),
