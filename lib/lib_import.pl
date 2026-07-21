@@ -80,13 +80,16 @@ replace_all(P, R, S, O) :- split_string(S, P, "", Parts),
 'git-import!'(GitPath, BuildCmd, true) :- 'git-import!'(GitPath, BuildCmd, './repos', true).
      
 'git-import!'(GitPath, BuildCmd, BaseDir, true) :- ( exists_directory(BaseDir) -> true
-                                                                                 ; format("What ~w~n", [BaseDir]), make_directory_path(BaseDir) ),
+                                                                                 ; make_directory_path(BaseDir) ),
                                                    repo_name_from_git(GitPath, Name),
                                                    directory_file_path(BaseDir, Name, LocalDir),
                                                    ( exists_directory(LocalDir) -> true
                                                                                  ; clone_repo(GitPath, LocalDir),
                                                                                    run_build_step(LocalDir, BuildCmd) ),
-                                                   asserta(library_path(LocalDir)).
+                                                   register_git_library_path(LocalDir).
+
+register_git_library_path(LocalDir) :- absolute_file_name(LocalDir, CanonDir, [file_type(directory), file_errors(fail)]),
+                                       ( library_path(CanonDir) -> true ; asserta(library_path(CanonDir)) ).
 
 %Extract "repo" from ".../repo.git" or "...:repo.git":
 repo_name_from_git(GitPath, Name) :- atom_string(GitPath, S),
@@ -98,19 +101,21 @@ repo_name_from_git(GitPath, Name) :- atom_string(GitPath, S),
                                      atom_string(Name, Last).
 
 clone_repo(GitPath, LocalDir) :- format("Cloning ~w into ~w~n", [GitPath, LocalDir]),
-                                 process_create(path(git),
-                                                ['clone', '--depth', '1', GitPath, LocalDir],
-                                                [stdout(pipe(Out)), stderr(pipe(Err))]),
-                                 read_string(Out, _, _),
-                                 read_string(Err, _, _),
-                                 close(Out), close(Err).
+                                 run_git_import_process(path(git),
+                                                        ['clone', '--depth', '1', GitPath, LocalDir],
+                                                        [],
+                                                        clone(GitPath)).
 
 run_build_step(_, BuildCmd) :- (BuildCmd = '' ; BuildCmd = ""), !.
 run_build_step(LocalDir, BuildCmd) :- format("Running build: ~w in ~w~n", [BuildCmd, LocalDir]),
-                                      process_create(path(sh),
-                                                     [BuildCmd],
-                                                     [cwd(LocalDir),
-                                                      stdout(pipe(Out)), stderr(pipe(Err))]),
-                                      read_string(Out, _, _),
-                                      read_string(Err, _, _),
-                                      close(Out), close(Err).
+                                      run_git_import_process(path(sh),
+                                                             [BuildCmd],
+                                                             [cwd(LocalDir)],
+                                                             build(BuildCmd)).
+
+run_git_import_process(Executable, Args, Options, Operation) :-
+    process_create(Executable, Args, [process(PID)|Options]),
+    process_wait(PID, Status),
+    ( Status = exit(0)
+      -> true
+       ; throw(error(process_error(Operation, Status), context('git-import!', Operation))) ).
