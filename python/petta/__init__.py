@@ -29,7 +29,7 @@ def _resolve_petta_path():
 class PeTTa:
     def __init__(self, verbose=False, petta_path=None):
         global CONSULTED, janus
-        self.verbose = "true" if verbose else "false"
+        self.verbose = bool(verbose)
         if not CONSULTED:
             with CONSULT_LOCK:
                 if not CONSULTED:
