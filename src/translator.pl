@@ -21,6 +21,7 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                                   flatten(GoalsA,GoalsPrefix)
                                                                 ; Args1 = Args0, GoalsPrefix = [] ),
                                                catch(nb_getval(F, Prev), _, Prev = []),
+                                               validate_function_determinism(F, Args1, BodyExpr, Prev),
                                                strict_check_function_typed(F, Args1),
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
                                                clause_param_types(F, Args1, DeclOut),

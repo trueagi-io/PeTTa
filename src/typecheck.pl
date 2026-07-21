@@ -15,10 +15,24 @@
    ( memberchk('--strict', Argv) -> assertz(strict_mode(true))
                                   ; assertz(strict_mode(false)) ).
 
-%%% Arrow shape: prefix (-> A B) form:
+%%% Arrow shapes: prefix (-> A B) and infix determinism arrows (A -[det]-> B):
+arrow_det('->', unspecified).
+arrow_det('-[det]->', det).
+arrow_det('-[deterministic]->', det).
+arrow_det('-[nondet]->', nondet).
+arrow_det('-[nondeterministic]->', nondet).
+
 fn_type_shape(Type, ArgTypes, OutType, unspecified) :- is_list(Type), Type = [Arrow|Xs],
                                                        Arrow == (->), !,
                                                        append(ArgTypes, [OutType], Xs).
+fn_type_shape(Type, ArgTypes, OutType, Det) :- is_list(Type), Type = [First, Arrow|_],
+                                               nonvar(Arrow), arrow_det(Arrow, _),
+                                               \+ (nonvar(First), arrow_det(First, _)),
+                                               infix_fn_parts(Type, ArgTypes, OutType, Det).
+
+infix_fn_parts([A, Arrow, B], [A], B, Det) :- nonvar(Arrow), arrow_det(Arrow, Det), !.
+infix_fn_parts([A, Arrow|Rest], [A|As], Out, Det) :- nonvar(Arrow), arrow_det(Arrow, _),
+                                                     infix_fn_parts(Rest, As, Out, Det).
 
 %Normalize nested arrow types to canonical prefix form:
 normalize_type(T, T) :- var(T), !.
@@ -355,3 +369,101 @@ strict_check_function_typed(F, Args) :-
          ( \+ \+ fn_decl_arity(F, N, _, _) -> true
                                             ; throw(error(strict_missing_function_type(F, N), typecheck)) )
        ; true ).
+
+%%% Determinism arrows (-[det]->, -[nondet]->) %%%
+
+fn_determinism(F, N, Det) :- findall(D, ( declared_fn_type(F, ATs, _, D), length(ATs, N) ), Ds0),
+                             sort(Ds0, Ds),
+                             ( Ds == [] -> Det = unspecified
+                             ; Ds = [D1] -> Det = D1
+                             ; Ds == [det, unspecified] -> Det = unspecified
+                             ; Ds == [nondet, unspecified] -> Det = nondet
+                             ; throw(error(conflicting_determinism_declarations(F), determinism)) ).
+
+validate_function_determinism(F, Args, BodyExpr, PrevClauses) :-
+    length(Args, N),
+    fn_determinism(F, N, Det),
+    ( Det == det -> ensure_deterministic_expr(BodyExpr, F),
+                    ensure_non_overlapping_clause_heads(F, Args, PrevClauses)
+                  ; true ).
+
+ensure_deterministic_expr(Expr, _) :- deterministic_expr(Expr, ok), !.
+ensure_deterministic_expr(Expr, Fun) :- deterministic_expr(Expr, nondeterministic(Reason)), !,
+                                        throw(error(determinism_conflict(Fun, Reason), determinism)).
+ensure_deterministic_expr(Expr, Fun) :- throw(error(determinism_conflict(Fun, unknown(Expr)), determinism)).
+
+ensure_non_overlapping_clause_heads(_, _, []).
+ensure_non_overlapping_clause_heads(F, Args, [fun_meta(PrevArgs, _)|Rest]) :-
+    ( clause_heads_overlap(Args, PrevArgs)
+      -> throw(error(overlapping_deterministic_clauses(F, Args, PrevArgs), determinism))
+       ; ensure_non_overlapping_clause_heads(F, Args, Rest) ).
+
+clause_heads_overlap(ArgsA, ArgsB) :- copy_term((ArgsA, ArgsB), (CA, CB)),
+                                      unifiable(CA, CB, _).
+
+builtin_call_determinism(superpose, 1, nondet).
+builtin_call_determinism(empty, 0, nondet).
+
+function_call_determinism(F, N, Det) :- builtin_call_determinism(F, N, Det), !.
+function_call_determinism(F, N, Det) :- catch(fn_determinism(F, N, Det0), _, fail), !, Det = Det0.
+function_call_determinism(_, _, unspecified).
+
+deterministic_expr(Expr, ok) :- ( var(Expr) ; atomic(Expr) ; Expr = partial(_, _) ), !.
+deterministic_expr([collapse, _], ok) :- !.
+deterministic_expr([once, _], ok) :- !.
+deterministic_expr([quote, _], ok) :- !.
+deterministic_expr([eval, _], unknown(dynamic_eval)) :- !.
+deterministic_expr([reduce, _], unknown(dynamic_reduce)) :- !.
+deterministic_expr([call, Expr], Result) :- !, deterministic_call_expr(Expr, Result).
+deterministic_expr([superpose|_], nondeterministic(superpose)) :- !.
+deterministic_expr([match|_], nondeterministic(match)) :- !.
+deterministic_expr([hyperpose|_], nondeterministic(hyperpose)) :- !.
+deterministic_expr([translatePredicate|_], nondeterministic(translatePredicate)) :- !.
+deterministic_expr([if, Cond, Then], Result) :- !, combine_determinism_list([Cond, Then], Result).
+deterministic_expr([if, Cond, Then, Else], Result) :- !, combine_determinism_list([Cond, Then, Else], Result).
+deterministic_expr([progn|Exprs], Result) :- !, combine_determinism_list(Exprs, Result).
+deterministic_expr([prog1|Exprs], Result) :- !, combine_determinism_list(Exprs, Result).
+deterministic_expr([let, Pat, Val, In], Result) :- !, combine_determinism_list([Pat, Val, In], Result).
+deterministic_expr([chain, Pat, Val, In], Result) :- !, combine_determinism_list([Pat, Val, In], Result).
+deterministic_expr(['let*', Binds, Body], Result) :- !, binds_and_body_determinism(Binds, Body, Result).
+deterministic_expr([sealed, _, Expr], Result) :- !, deterministic_expr(Expr, Result).
+deterministic_expr(['forall', _, _], ok) :- !.
+deterministic_expr(['foldall', _, _, _], ok) :- !.
+deterministic_expr(['foldl-atom', List, Init, _, _, Body], Result) :- !, combine_determinism_list([List, Init, Body], Result).
+deterministic_expr(['map-atom', List, _, Body], Result) :- !, combine_determinism_list([List, Body], Result).
+deterministic_expr(['filter-atom', List, _, Cond], Result) :- !, combine_determinism_list([List, Cond], Result).
+deterministic_expr(['|->', _, _], ok) :- !.
+deterministic_expr([case, KeyExpr, PairsExpr], Result) :- !, case_expr_determinism(KeyExpr, PairsExpr, Result).
+deterministic_expr([Head|Args], Result) :- ( atomic(Head), ( \+ atom(Head) ; \+ fun(Head) )
+                                           ; is_list(Head) ), !,
+                                           combine_determinism_list([Head|Args], Result).
+deterministic_expr([Head|Args], Result) :- atom(Head), !, deterministic_call_expr([Head|Args], Result).
+deterministic_expr([Head|_], unknown(dynamic_head(Head))).
+
+deterministic_call_expr([Fun|Args], Result) :- atom(Fun), !,
+                                               length(Args, N),
+                                               ( function_call_determinism(Fun, N, nondet)
+                                                 -> Result = nondeterministic(call(Fun))
+                                                  ; combine_determinism_list(Args, Result) ).
+deterministic_call_expr(Expr, unknown(dynamic_call(Expr))).
+
+combine_determinism_list([], ok).
+combine_determinism_list([Expr|Exprs], Result) :- deterministic_expr(Expr, First),
+                                                  ( First == ok -> combine_determinism_list(Exprs, Result)
+                                                                 ; Result = First ).
+
+binds_and_body_determinism([], Body, Result) :- deterministic_expr(Body, Result).
+binds_and_body_determinism([[Pat, Val]|Rest], Body, Result) :-
+    combine_determinism_list([Pat, Val], HeadResult),
+    ( HeadResult == ok -> binds_and_body_determinism(Rest, Body, Result)
+                        ; Result = HeadResult ).
+
+case_expr_determinism(KeyExpr, PairsExpr, Result) :- deterministic_expr(KeyExpr, KeyResult),
+                                                     ( KeyResult == ok -> case_pairs_determinism(PairsExpr, Result)
+                                                                        ; Result = KeyResult ).
+
+case_pairs_determinism([], ok).
+case_pairs_determinism([[CaseExpr, BranchExpr]|Rest], Result) :-
+    combine_determinism_list([CaseExpr, BranchExpr], PairResult),
+    ( PairResult == ok -> case_pairs_determinism(Rest, Result)
+                        ; Result = PairResult ).
