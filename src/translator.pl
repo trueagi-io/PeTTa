@@ -164,18 +164,18 @@ translate_expr([H0|T0], Goals, Out) :-
                                     append(GsH, GsF, Tmp1),
                                     append(Tmp1, GsRest, Goals)
         %--- Conditionals ---:
-        ; HV == if, T = [Cond, Then] -> translate_expr_to_conj(Cond, ConC, Cv),
+        ; HV == if, T = [Cond, Then] -> translate_if_cond(Cond, ConC, CondGoal),
                                         translate_expr_to_conj(Then, ConT, Tv),
                                         build_branch(ConT, Tv, Out, BT),
-                                        ( ConC == true -> append(GsH, [ ( Cv == true -> BT ) ], Goals)
-                                                        ; append(GsH, [ ( ConC, ( Cv == true -> BT ) ) ], Goals) )
-        ; HV == if, T = [Cond, Then, Else] -> translate_expr_to_conj(Cond, ConC, Cv),
+                                        ( ConC == true -> append(GsH, [ ( CondGoal -> BT ) ], Goals)
+                                                        ; append(GsH, [ ( ConC, ( CondGoal -> BT ) ) ], Goals) )
+        ; HV == if, T = [Cond, Then, Else] -> translate_if_cond(Cond, ConC, CondGoal),
                                               translate_expr_to_conj(Then, ConT, Tv),
                                               translate_expr_to_conj(Else, ConE, Ev),
                                               build_branch(ConT, Tv, Out, BT),
                                               build_branch(ConE, Ev, Out, BE),
-                                              ( ConC == true -> append(GsH, [ (Cv == true -> BT ; BE) ], Goals)
-                                                              ; append(GsH, [ (ConC, (Cv == true -> BT ; BE)) ], Goals) )
+                                              ( ConC == true -> append(GsH, [ (CondGoal -> BT ; BE) ], Goals)
+                                                              ; append(GsH, [ (ConC, (CondGoal -> BT ; BE)) ], Goals) )
         ; HV == case, T = [KeyExpr, PairsExpr] -> ( select(Found0, PairsExpr, Rest0),
                                                     subsumes_term(['Empty', _], Found0),
                                                     Found0 = ['Empty', DefaultExpr],
@@ -381,7 +381,9 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
               %overloaded functions: clauses were not output-checked against a
               %single declaration, so the call filters on the output type:
               overload_out_guard(MultiDecl, Fun, Out, OT, Extra),
-              build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals),
+              ( MultiDecl == false, arith_inline(Fun, AVs, Out, ArithGs)
+                -> append(Inner, ArithGs, Goals)
+                 ; build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) ),
               set_out_type(Out, OT)
             ; Chosen = multi(Survs),
               maplist(overload_branch(Fun, AVs, Out), Survs, Branches),
@@ -472,6 +474,42 @@ overload_branch_guard(Fun, AV, T, Acc, [G|Acc]) :-
     ( arg_statically_ok(AV, T) -> G = []
     ; strict_mode(true) -> throw(error(strict_runtime_typecheck(Fun, typecheck_match(AV, T)), typecheck))
     ; G = [typecheck_match(AV, T)] ).
+
+%Type-resolved builtin arithmetic compiles to native is/2, constant-folded when
+%both operands are literals. Only while the builtin definition is untouched:
+arith_inline(Fun, [A, B], Out, Gs) :- arith_op(Fun, A, B, Expr),
+                                      builtin_untouched(Fun),
+                                      ( number(A), number(B)
+                                        -> catch((Out is Expr, Gs = []), _, Gs = [Out is Expr])
+                                         ; Gs = [Out is Expr] ).
+
+arith_op('+', A, B, A + B).
+arith_op('-', A, B, A - B).
+arith_op('*', A, B, A * B).
+arith_op('/', A, B, A / B).
+arith_op('%', A, B, A mod B).
+arith_op(min, A, B, min(A, B)).
+arith_op(max, A, B, max(A, B)).
+
+builtin_untouched(F) :- functor(H, F, 3), predicate_property(H, number_of_clauses(1)).
+
+%Reified comparisons whose result only feeds an if-condition compile to the
+%native comparison, skipping the true/false round-trip:
+translate_if_cond(Cond, PreConj, CondGoal) :- translate_expr(Cond, GsC, Cv),
+                                              ( var(Cv), append(Pre, [Last], GsC), reified_cond(Last, Cv, Native)
+                                                -> goals_list_to_conj(Pre, PreConj), CondGoal = Native
+                                                 ; goals_list_to_conj(GsC, PreConj), CondGoal = (Cv == true) ).
+
+reified_cond(G, Cv, Native) :- nonvar(G), G =.. [F, A, B, R], R == Cv,
+                               cmp_native(F, A, B, Native),
+                               builtin_untouched(F).
+
+cmp_native('<', A, B, (A < B)).
+cmp_native('<=', A, B, (A =< B)).
+cmp_native('>', A, B, (A > B)).
+cmp_native('>=', A, B, (A >= B)).
+cmp_native('==', A, B, (A == B)).
+cmp_native('!=', A, B, (A \== B)).
 
 %Generate actual function call or partial if arity not complete:
 build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- ( maybe_specialize_call(Fun, AVs, Out, Goal)
