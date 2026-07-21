@@ -14,10 +14,20 @@ Prolog when all relevant types are fully resolved. Runtime `typecheck_or_error` 
 `typecheck_match` guards remain only where types are genuinely unknown or polymorphic
 at the call site; bound values are then checked through the user-extensible `get-type`
 reflection (so runtime refinement types like `examples/types_dependent.metta` work).
-The `--strict` flag requires every compiled function to have a declared type and
-rejects any residual runtime type goal. Determinism arrows (`-[det]->`, `-[nondet]->`)
-are parsed into the same store and validated (deterministic bodies, non-overlapping
-clause heads).
+The `--strict` flag requires every compiled function to have a declared or inferable
+type and rejects any residual runtime type goal. Determinism arrows (`-[det]->`,
+`-[nondet]->`) are parsed into the same store and validated (deterministic bodies,
+non-overlapping clause heads).
+
+Undeclared functions get local type inference (assumption type variables on the
+clause parameters, bound by unification at typed call sites, with a provisional
+arrow for self-recursion). Inferred types live in an internal store
+(`inferred_fn_type/3`, never asserted into `&self`) and are used only to *add*
+knowledge — eliminating guards, typing call outputs, satisfying strict mode —
+never to reject a program: a static mismatch against an inferred type degrades to
+the runtime guard the call would have had anyway. Conflicting uses taint the
+assumption (recorded as `%Undefined%`); clause joins widen position-wise;
+declarations supersede inference.
 
 ## Implementation map
 
