@@ -351,6 +351,30 @@ resolve_python_import_path(File, CanonPath) :-
       -> true
        ; throw_missing_import(File) ).
 
+:- dynamic metta_import_state/3.
+
+% A loading entry breaks cycles; a loaded entry makes later imports no-ops.
+% Failed loads remove their entry so callers can repair the source and retry.
+claim_import(Space, CanonPath, skip) :- metta_import_state(Space, CanonPath, loaded), !.
+claim_import(Space, CanonPath, skip) :- metta_import_state(Space, CanonPath, loading), !.
+claim_import(Space, CanonPath, load) :- assertz(metta_import_state(Space, CanonPath, loading)).
+
+clear_import_state(Space, CanonPath) :- retractall(metta_import_state(Space, CanonPath, _)).
+
+mark_import_loaded(Space, CanonPath) :- clear_import_state(Space, CanonPath),
+                                        assertz(metta_import_state(Space, CanonPath, loaded)).
+
+run_new_import(Space, CanonPath, Goal) :-
+    catch(( once(Goal)
+            -> mark_import_loaded(Space, CanonPath)
+             ; clear_import_state(Space, CanonPath), fail ),
+          Error,
+          ( clear_import_state(Space, CanonPath), throw(Error) )).
+
+import_once(Space, CanonPath, Goal) :- claim_import(Space, CanonPath, Action),
+                                       ( Action = skip -> true
+                                                       ; run_new_import(Space, CanonPath, Goal) ).
+
 'import!'(Space, File, true) :- importer_helper(Space, File).
 importer_helper(Space, File) :-
     ( python_import_file(File)
@@ -358,10 +382,11 @@ importer_helper(Space, File) :-
          file_directory_name(CanonPath, Dir),
          file_base_name(CanonPath, BaseName),
          file_name_extension(ModuleName, _, BaseName),
-         py_call(sys:path:append(Dir), _),
-         py_call(builtins:'__import__'(ModuleName), _)
+         import_once(Space, CanonPath,
+                     ( py_call(sys:path:append(Dir), _),
+                       py_call(builtins:'__import__'(ModuleName), _) ))
        ; resolve_metta_import_path(File, CanonPath),
-         load_metta_file(CanonPath, _, Space) ).
+         import_once(Space, CanonPath, load_metta_file(CanonPath, _, Space)) ).
 
 :- dynamic translator_rule/1.
 'add-translator-rule!'(HV, true) :- ( translator_rule(HV)
