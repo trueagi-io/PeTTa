@@ -9,15 +9,19 @@
 (= (if-equal2 $A $B $Then $Else)
    (if (== $A $B) $Then $Else))
 
+(: assertEqual (-> $a $b Bool))
 (= (assertEqual $A $B)
    (assert (== $A $B)))
 
+(: assertAlphaEqual (-> $a $b Bool))
 (= (assertAlphaEqual $A $B)
    (assert (=alpha $A $B)))
 
+(: assertEqualToResult (-> $a $b Bool))
 (= (assertEqualToResult $A $B)
    (assertEqual $A $B))
 
+(: assertAlphaEqualToResult (-> $a $b Bool))
 (= (assertAlphaEqualToResult $A $B)
    (assertAlphaEqual $A $B))
 
@@ -71,6 +75,7 @@
    (== $A $B))
 
 ;Types
+(: is-function (-> $a Bool))
 (= (is-function (-> $A $B)) (let $temp (cut) True))
 (= (is-function $X) False)
 
