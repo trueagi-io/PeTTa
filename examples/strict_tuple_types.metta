@@ -67,3 +67,18 @@
 (= (half-conf (STV $s $c)) (STV $s (/ $c 2)))
 
 !(test (tv-conf (half-conf (STV 0.9 0.8))) 0.4)
+
+; cons is contextually typed without a global declaration: when the head fits
+; the tail's list type, the result is that list type. Heterogeneous cons
+; remains legal (it just stays dynamically typed).
+(: prepend-number (-> Number (List Number) (List Number)))
+(= (prepend-number $head $tail)
+   (cons $head $tail))
+
+!(test (prepend-number 1 (2 3)) (1 2 3))
+
+(: upto (-> Number (List Number)))
+(= (upto $n)
+   (if (== $n 0) () (cons $n (upto (- $n 1)))))
+
+!(test (upto 3) (3 2 1))

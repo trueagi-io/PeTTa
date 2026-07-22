@@ -487,7 +487,9 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
     ; translate_args(Args, GsT, AVs0),                         %no type information
       append(Bound, AVs0, AVs),
       append(GsH, GsT, Inner),
-      build_call_or_partial(Fun, AVs, Out, Inner, [], Goals) ).
+      build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
+      ( ( Fun == cons ; Fun == 'cons-atom' ), AVs = [Hd, Tl]
+        -> cons_out_type(Hd, Tl, Out) ; true ) ).
 
 %A provided arg position stays untranslated data iff every declaration types it Expression:
 eff_arg_modes(FullDecls, NB, NProv, Modes) :- NEnd is NB + NProv - 1,

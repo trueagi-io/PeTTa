@@ -560,6 +560,19 @@ structural_pattern_fields(Arg, T, Fields, FieldTs) :-
       findall(ATs-OT, fn_decl_arity(Tag, N, ATs, OT), [FieldTs-OT1]),
       type_compat_soft(OT1, T) ).
 
+%cons stays undeclared (a global (List $a) signature would reject legal
+%heterogeneous expressions), but when the head provably fits the tail's list
+%type the result is known to be that list type:
+cons_out_type(H, Tl, Out) :-
+    ( var(Out),
+      ( var(Tl) -> known_singleton(Tl, TT), nonvar(TT), TT = ['List', T]
+      ; Tl == [] -> true
+      ; list_elem_type(Tl, T) ),
+      ( var(H) -> known_singleton(H, K), \+ \+ type_unify(K, T), type_unify(K, T)
+                ; check_value(H, T, St), St == ok )
+      -> set_out_type(Out, ['List', T])
+       ; true ).
+
 %Destructuring bindings: type a pattern's variables from the bound value's
 %known type, e.g. (let (Stats $sum $sq $n) (make-stats) ...):
 bind_pattern_from(Pat, Val) :- ( nonvar(Pat),
