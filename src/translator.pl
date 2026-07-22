@@ -375,11 +375,20 @@ translate_expr([H0|T0], Goals, Out) :-
                          append(Inner, Gd, Goals),
                          Out = [HV1|AVs]
         %Unknown head (var/compound) => runtime dispatch, with a lean closure
-        %application when the head's arrow type is known or assumed:
+        %application when the head's arrow type is known or assumed. A head
+        %whose known type is provably not a function (e.g. Number) makes the
+        %expression data construction, compiled and typed as such:
         ; translate_args(T, GsT, AVs),
           append(GsH, GsT, Inner),
           ( translate_closure_call(HV, AVs, Inner, Goals, Out) -> true
+          ; var(HV), known_singleton(HV, K), nonfunction_type(K)
+            -> Out = [HV|AVs],
+               Goals = Inner
           ; append(Inner, [reduce([HV|AVs], Out)], Goals) ) ).
+
+%Values of these types can never dispatch as functions in reduce/2:
+nonfunction_type(K) :- nonvar(K), ( primitive_type(K)
+                                  ; is_list(K), \+ is_arrow_type(K) ).
 
 %A variable head with a known arrow type of matching arity is a closure call:
 %check the args against the arrow, dispatch through apply_fn (skipping reduce's

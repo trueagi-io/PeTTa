@@ -82,3 +82,13 @@
    (if (== $n 0) () (cons $n (upto (- $n 1)))))
 
 !(test (upto 3) (3 2 1))
+
+; A computed tuple with a variable head types bottom-up: the head's Number
+; type proves the expression is data, so ((+ $v 1.0) $w) : (Number Number)
+; and the cons chain closes.
+(: prepend-weighted-number
+   (-> Number Number (List (Number Number)) (List (Number Number))))
+(= (prepend-weighted-number $value $weight $tail)
+   (cons ((+ $value 1.0) $weight) $tail))
+
+!(test (prepend-weighted-number 1.0 5 ((3.0 4))) ((2.0 5) (3.0 4)))
