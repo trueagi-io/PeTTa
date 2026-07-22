@@ -34,48 +34,48 @@
 ;Set operations on Expressions
 
 ;Intersection
-(: (/?\) (-> Expression (List $a) (List $b) (List $a)))
+(: /?\ (-> Expression (List $a) (List $b) (List $a)))
 (= (/?\ $pred () $b) ())
 (= (/?\ $pred (cons $a $as) $bs)
       (if (fold-flat or False (map-flat ($pred $a) $bs))
          (cons $a (/?\ $pred $as $bs))
          (/?\ $pred $as $bs)))
 
-(: (/=\) (-> (List $a) (List $a) (List $a)))
+(: /=\ (-> (List $a) (List $a) (List $a)))
 (= (/=\ $a $b) (/?\ = $a $b))
-(: (/==\) (-> (List $a) (List $a) (List $a)))
+(: /==\ (-> (List $a) (List $a) (List $a)))
 (= (/==\ $a $b) (/?\ == $a $b))
-(: (/=a\) (-> (List $a) (List $a) (List $a)))
+(: /=a\ (-> (List $a) (List $a) (List $a)))
 (= (/=a\ $a $b) (/?\ =alpha $a $b))
 
 ;Subtraction
-(: (\?) (-> Expression (List $a) (List $b) (List $a)))
+(: \? (-> Expression (List $a) (List $b) (List $a)))
 (= (\? $pred () $bs) ())
 (= (\? $pred (cons $a $as) $bs)
   (if (fold-flat or False (map-flat ($pred $a) $bs))
     (\? $pred $as $bs)
     (cons $a (\? $pred $as $bs))))
 
-(: (\=) (-> (List $a) (List $a) (List $a)))
+(: \= (-> (List $a) (List $a) (List $a)))
 (= (\= $a $b) (\? = $a $b))
-(: (\==) (-> (List $a) (List $a) (List $a)))
+(: \== (-> (List $a) (List $a) (List $a)))
 (= (\== $a $b) (\? == $a $b))
-(: (\=a) (-> (List $a) (List $a) (List $a)))
+(: \=a (-> (List $a) (List $a) (List $a)))
 (= (\=a $a $b) (\? =alpha $a $b))
 
 ;Unification
-(: (\?/) (-> Expression (List $a) (List $b) (List $a)))
+(: \?/ (-> Expression (List $a) (List $b) (List $a)))
 (= (\?/ $pred () $bs) $bs)
 (= (\?/ $pred (cons $a $as) $bs)
   (if (fold-flat or False (map-flat ($pred $a) $bs))
     (\?/ $pred $as $bs)
     (cons $a (\?/ $pred $as $bs))))
 
-(: (\=/) (-> (List $a) (List $a) (List $a)))
+(: \=/ (-> (List $a) (List $a) (List $a)))
 (= (\=/ $a $b) (\?/ = $a $b))
-(: (\==/) (-> (List $a) (List $a) (List $a)))
+(: \==/ (-> (List $a) (List $a) (List $a)))
 (= (\==/ $a $b) (\?/ == $a $b))
-(: (\=a/) (-> (List $a) (List $a) (List $a)))
+(: \=a/ (-> (List $a) (List $a) (List $a)))
 (= (\=a/ $a $b) (\?/ =alpha $a $b))
 
 ;Function Composition

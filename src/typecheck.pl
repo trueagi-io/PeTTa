@@ -153,8 +153,9 @@ variant_union([X|Xs], Ys, U) :- ( variant_member(X, Ys) -> variant_union(Xs, Ys,
                                                          ; variant_union(Xs, [X|Ys], U) ).
 
 %%% Translation-time known types of variables:
-add_known_type(V, T) :- ( get_attr(V, tknown, Cs) -> ( variant_member(T, Cs) -> true
-                                                                              ; put_attr(V, tknown, [T|Cs]) )
+add_known_type(V, T) :- ( get_attr(V, tknown, Cs) -> ( Cs = [K], var(K) -> K = T
+                                                      ; variant_member(T, Cs) -> true
+                                                      ; put_attr(V, tknown, [T|Cs]) )
                                                    ; put_attr(V, tknown, [T]) ).
 
 known_candidates(V, Cs) :- get_attr(V, tknown, Cs).
@@ -197,8 +198,8 @@ note_var_candidates(Out, Val) :- ( var(Out), var(Val), known_candidates(Val, Cs)
 add_known_types(_, []).
 add_known_types(V, [C|Cs]) :- add_known_type(V, C), add_known_types(V, Cs).
 
-set_out_type(Out, OT) :- ( var(Out), ground(OT), \+ wildcard_type_t(OT) -> add_known_type(Out, OT)
-                                                                         ; true ).
+set_out_type(Out, OT) :- ( var(Out), nonvar(OT), \+ wildcard_type_t(OT) -> add_known_type(Out, OT)
+                                                                          ; true ).
 
 %A call is statically dead when the same variable occupies two argument
 %positions whose required types can never both hold (e.g. (num-str $x $x)):
@@ -229,6 +230,7 @@ value_candidate_types(partial(F, B), Cs) :- !,
                                 findall([->|Xs], ( fn_decl_partial(F, N, PTs, RTs, OT),
                                                    bound_args_match(B, PTs),
                                                    append(RTs, [OT], Xs) ), Cs).
+value_candidate_types([], [['List', _]]) :- !.
 value_candidate_types([H|Args], Cs) :- atom(H), length(Args, N), fn_decl_arity(H, N, _, _), !,
                                 findall(OT, fn_decl_arity(H, N, _, OT), Cs).
 value_candidate_types(V, Cs) :- is_list(V), maplist(value_single_type, V, Ts), !, Cs = [Ts].
@@ -270,6 +272,14 @@ check_value(V, T, St) :- is_arrow_type(T), !,
                          ; ( number(V) ; string(V) ) -> St = mismatch
                          ; St = unknown ).
 
+check_value(V, T, St) :- atom(T), !,
+                         value_candidate_types(V, Cs),
+                         ( Cs == [] -> St = unknown
+                         ; member(C, Cs), type_unify(C, T) -> St = ok
+                         ; member(C, Cs), refinement_pair(C, T) -> St = unknown
+                         ; St = mismatch ).
+check_value(_, _, unknown).
+
 %Arrow types of closures over inferred (undeclared) functions:
 inferred_value_candidates(V, Cs) :- atom(V), !,
                                     findall([->|Xs], ( inferred_fn_type(V, ATs, OT),
@@ -282,13 +292,6 @@ inferred_value_candidates(partial(F, B), Cs) :- !,
                                                        \+ \+ maplist(arg_soft_ok, B, PTs),
                                                        append(RTs, [OT], Xs) ), Cs).
 inferred_value_candidates(_, []).
-check_value(V, T, St) :- atom(T), !,
-                         value_candidate_types(V, Cs),
-                         ( Cs == [] -> St = unknown
-                         ; member(C, Cs), type_unify(C, T) -> St = ok
-                         ; member(C, Cs), refinement_pair(C, T) -> St = unknown
-                         ; St = mismatch ).
-check_value(_, _, unknown).
 
 %Slow completion of the primitive fast paths above:
 prim_mismatch_status(P, T, St) :- ( wildcard_type_t(T) -> St = ok

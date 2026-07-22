@@ -133,7 +133,8 @@ translate_expr([H0|T0], Goals, Out) :-
                                                         disj_list(Branches, Disj),
                                                         append(GsH, [Disj], Goals)
         ; HV == collapse, T = [E] -> translate_expr_to_conj(E, Conj, EV),
-                                     ( value_single_type(EV, ET) -> set_out_type(Out, ['List', ET]) ; true ),
+                                     ( value_single_type(EV, ET) -> true ; ET = 'Expression' ),
+                                     set_out_type(Out, ['List', ET]),
                                      append(GsH, [findall(EV, Conj, Out)], Goals)
         ; HV == cut, T = [] -> append(GsH, [(!)], Goals),
                                Out = true
@@ -296,6 +297,7 @@ translate_expr([H0|T0], Goals, Out) :-
         %--- Spaces ---:
         ; ( HV == 'add-atom' ; HV == 'remove-atom' ), T = [_,_] -> append(T, [Out], RawArgs),
                                                                    Goal =.. [HV|RawArgs],
+                                                                   set_out_type(Out, 'Bool'),
                                                                    append(GsH, [Goal], Goals)
         ; HV == match, T = [Space, Pattern, Body] -> translate_expr(Space, G1, S),
                                                      type_match_pattern(Pattern),
