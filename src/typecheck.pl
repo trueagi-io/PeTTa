@@ -165,6 +165,26 @@ known_singleton(V, K) :- get_attr(V, tknown, [K]).
 note_value_candidate(Out, Val) :- ( var(Out), nonvar(Val), value_single_type(Val, VT)
                                     -> add_known_type(Out, VT) ; true ).
 
+%Explicit type ascription (the Type Expr): the author states the type of a
+%dynamically typed value. The type becomes knowledge for the checker, and a
+%runtime check is emitted even under --strict: strict mode forbids *implicit*
+%residual checks, while an ascription is an explicit, visible boundary.
+%An ascription that contradicts static knowledge is a compile-time error.
+ascribe_type(V, T, Gs) :-
+    ( var(T) -> Gs = []
+    ; wildcard_type_t(T) -> Gs = []
+    ; var(V) ->
+        ( known_singleton(V, K)
+          -> ( \+ \+ type_unify(K, T) -> type_unify(K, T), Gs = []
+             ; throw(error(type_conflict(existing(K), required(T)), typecheck)) )
+           ; add_known_type(V, T),
+             ( ground(T) -> guard_goal(V, T, G), Gs = [G] ; Gs = [] ) )
+    ; check_value(V, T, St),
+      ( St == ok -> Gs = []
+      ; St == mismatch -> throw(error(literal_type_mismatch(V, T), typecheck))
+      ; ground(T) -> guard_goal(V, T, G), Gs = [G]
+      ; Gs = [] ) ).
+
 %Derive match-pattern variable types from declared relation schemas: atoms
 %matched by (F ...) conform to F's declared argument types, and a pattern
 %(: $x T) binds $x : T directly. Conjunctive patterns type each conjunct.

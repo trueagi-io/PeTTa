@@ -66,7 +66,19 @@ queries like `(match &self (: $x Fruit) $x)` bind `$x : Fruit` directly.
 **Strict mode.** `sh run.sh file.metta --strict` additionally requires every
 compiled function to have a declared or inferable type and rejects compilation
 if any residual runtime type guard would be emitted — a machine-checked
-guarantee that the compiled program contains no runtime type checks.
+guarantee that the compiled program contains no *implicit* runtime type checks.
+
+**Type ascription.** Genuinely dynamic values (reads from schema-less
+relations, `catch` results, `eval`) can be given an author-stated type with
+`(the Type Expr)`: the checker treats the type as knowledge for everything
+downstream and emits one explicit, visible runtime check at the boundary —
+permitted even under `--strict`. An ascription that contradicts what the
+checker already knows is a compile-time error.
+
+```metta
+(: greet (-> String))
+(= (greet) (the String (match &self (name $n) $n)))
+```
 
 **Determinism arrows.** `(: f (A B -[det]-> C))` (or the chained form
 `(A -[det]-> B)`) declares a deterministic function: the compiler validates

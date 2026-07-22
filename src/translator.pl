@@ -337,6 +337,11 @@ translate_expr([H0|T0], Goals, Out) :-
                                      -> translate_expr(Quoted, GsQ, Out),           %(eval (quote E)) == E
                                         append(GsH, GsQ, Goals)
                                       ; append(GsH, [eval(Arg, Out)], Goals) )
+        %Explicit type ascription for dynamically typed values:
+        ; HV == the, T = [TypeExpr, Expr] -> translate_expr(Expr, GsE, Out),
+                                             normalize_type(TypeExpr, TN),
+                                             ascribe_type(Out, TN, GsA),
+                                             append([GsH, GsE, GsA], Goals)
         %Force arg to remain data/list:
         ; HV == quote, T = [Expr] -> append(GsH, [], Inner),
                                      Out = Expr,
