@@ -487,11 +487,25 @@ goal_or_throw(Goal, Error) :- \+ once(Goal), throw(Error).
 
 %%% Clause-level helpers %%%
 
-%Bind declared parameter types onto clause-head variables (single decl only):
-clause_param_types(F, Args, out(OT)) :- length(Args, N),
-                                        findall(ATs-OTx, fn_decl_arity(F, N, ATs, OTx), [ATs1-OT]), !,
-                                        maplist(bind_param_type, Args, ATs1).
-clause_param_types(_, _, none).
+%Bind declared parameter types onto clause-head variables. For an overloaded
+%function, the clause's head patterns filter the declarations: a clause whose
+%head selects exactly one overload is checked against it, a clause no overload
+%can produce is rejected, and a genuinely ambiguous clause (e.g. all-variable
+%head serving every overload) stays unchecked as before.
+clause_param_types(F, Args, DeclOut) :-
+    length(Args, N),
+    findall(ATs-OTx, fn_decl_arity(F, N, ATs, OTx), Decls),
+    ( Decls == [] -> DeclOut = none
+    ; Decls = [ATs1-OT] -> maplist(bind_param_type, Args, ATs1), DeclOut = out(OT)
+    ; include(clause_head_survives(Args), Decls, Survivors),
+      ( Survivors == [] -> throw(error(no_matching_overload(F), typecheck))
+      ; Survivors = [ATs1-OT] -> maplist(bind_param_type, Args, ATs1), DeclOut = out(OT)
+      ; DeclOut = none ) ).
+
+clause_head_survives(Args, ATs-_) :- \+ \+ maplist(head_arg_soft, Args, ATs).
+head_arg_soft(A, T) :- ( var(A) -> true
+                       ; check_value(A, T, St) -> St \== mismatch
+                       ; true ).
 
 bind_param_type(Arg, T) :- ( var(Arg) -> ( nonvar(T), \+ wildcard_type_t(T) -> add_known_type(Arg, T)
                                                                              ; true )
