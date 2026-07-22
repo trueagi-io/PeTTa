@@ -600,6 +600,14 @@ structural_pattern_fields(Arg, T, Fields, FieldTs) :- is_list(Arg), Arg = [Tag|F
 untyped_call_out(cons, [H, Tl], Out) :- cons_out_type(H, Tl, Out).
 untyped_call_out('cons-atom', [H, Tl], Out) :- cons_out_type(H, Tl, Out).
 untyped_call_out('union-atom', [A, B], Out) :- union_atom_out_type(A, B, Out).
+untyped_call_out(append, [A, B], Out) :- union_atom_out_type(A, B, Out).
+untyped_call_out('subtraction-atom', [A, _], Out) :- first_list_out_type(A, Out).
+untyped_call_out(list_to_set, [A], Out) :- first_list_out_type(A, Out).
+
+%Element-filtering builtins preserve their first argument's list type; the
+%other operand may be any expression:
+first_list_out_type(A, Out) :- ( var(Out), union_side_elem(A, T)
+                                 -> set_out_type(Out, ['List', T]) ; true ).
 
 %cons stays undeclared (a global (List $a) signature would reject legal
 %heterogeneous expressions), but when the head provably fits the tail's list

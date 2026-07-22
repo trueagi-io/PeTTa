@@ -74,14 +74,13 @@
 (: cdr-atom (-> $expression (List %Undefined%)))
 
 ;; Collection operators always return sequences.  `collapse` may collect
-;; heterogeneous alternatives.  `union-atom` remains undeclared because the
-;; checker has a contextual rule that preserves compatible list element types
-;; without rejecting legal heterogeneous expressions.
+;; heterogeneous alternatives.  `union-atom`, `append`, `subtraction-atom` and
+;; `list_to_set` stay undeclared: a global (List $item) signature would reject
+;; legal heterogeneous expressions (e.g. appending a number list to a string
+;; list), so the checker types them contextually instead, preserving
+;; compatible list element types without rejecting anything.
 (: collapse (-> $value (List %Undefined%)))
 (: superpose (-> (List $item) $item))
-(: append (-> (List $item) (List $item) (List $item)))
-(: list_to_set (-> (List $item) (List $item)))
-(: subtraction-atom (-> (List $item) (List $item) (List $item)))
 
 ;; State mutation stores any value and reports success.
 (: change-state! (-> $key $value Bool))
