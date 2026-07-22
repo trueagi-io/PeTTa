@@ -37,6 +37,9 @@ process_metta_string(S, Results, Space) :- string_codes(S, Cs),
                                            strip(Cs, 0, Codes),
                                            phrase(top_forms(Forms, 1), Codes),
                                            maplist(parse_form, Forms, ParsedForms),
+                                           %Pinned git dependencies declared in this file are
+                                           %fetched before any of its forms run (gitimport.pl):
+                                           acquire_declared_dependencies(ParsedForms),
                                            maplist(process_form(Space), ParsedForms, ResultsList), !,
                                            append(ResultsList, Results).
 

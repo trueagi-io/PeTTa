@@ -33,8 +33,8 @@ library_source_exists(Path) :- file_name_extension(Path, metta, MettaPath),
 :- use_module(library(process)).
 :- use_module(library(filesex)).
 :- current_prolog_flag(argv, Argv),
-   ( member(mork, Argv) -> ensure_loaded([parser, translator, specializer, filereader, '../mork_ffi/morkspaces', spaces])
-                         ; ensure_loaded([parser, translator, specializer, filereader, spaces])).
+   ( member(mork, Argv) -> ensure_loaded([parser, translator, specializer, filereader, gitimport, '../mork_ffi/morkspaces', spaces])
+                         ; ensure_loaded([parser, translator, specializer, filereader, gitimport, spaces])).
 
 %%%%%%%%%% Standard Library for MeTTa %%%%%%%%%%
 
