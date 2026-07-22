@@ -608,7 +608,8 @@ cons_out_type(H, Tl, Out) :-
       ( var(Tl) -> known_singleton(Tl, TT), nonvar(TT), TT = ['List', T]
       ; Tl == [] -> true
       ; list_elem_type(Tl, T) ),
-      ( var(H) -> known_singleton(H, K), \+ \+ type_unify(K, T), type_unify(K, T)
+      ( wildcard_type_t(T) -> true                 %(List %Undefined%): any head fits
+      ; var(H) -> known_singleton(H, K), \+ \+ type_unify(K, T), type_unify(K, T)
                 ; check_value(H, T, St), St == ok )
       -> set_out_type(Out, ['List', T])
        ; true ).
