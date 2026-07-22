@@ -627,13 +627,16 @@ translate_pattern([H|T], [P|Ps]) :- !, translate_pattern(H, P),
                                        translate_pattern(T, Ps).
 
 % Constructs the goal for a single branch of an if-then-else/case.
-build_branch(true, Val, Out, (Out = Val)) :- !, note_value_candidate(Out, Val).
+build_branch(true, Val, Out, (Out = Val)) :- !, note_value_candidate(Out, Val),
+                                                note_var_candidates(Out, Val).
 build_branch(Con, Val, Out, Goal) :- var(Val) -> Val = Out, Goal = Con
                                                ; note_value_candidate(Out, Val),
                                                  Goal = (Val = Out, Con).
 
 %Translate case expression recursively into nested if:
-translate_case([[K,VExpr]|Rs], Kv, Out, Goal, KGo) :- translate_expr_to_conj(VExpr, ConV, VOut),
+translate_case([[K,VExpr]|Rs], Kv, Out, Goal, KGo) :- ( var(Kv), known_singleton(Kv, KT)
+                                                        -> bind_pattern_typed(K, KT) ; true ),
+                                                      translate_expr_to_conj(VExpr, ConV, VOut),
                                                       constrain_args(K, Kc, Gc),
                                                       build_branch(ConV, VOut, Out, Then),
                                                       ( Rs == [] -> Goal = ((Kv = Kc) -> Then), KGi=[]

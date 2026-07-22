@@ -302,6 +302,18 @@ check_value(V, T, St) :- is_arrow_type(T), !,
                          ; ( number(V) ; string(V) ) -> St = mismatch
                          ; St = unknown ).
 
+%Structural tuple types (Tag T1 ... Tn): the value must carry the same tag
+%and arity, and its fields check recursively:
+check_value(V, T, St) :- T = [Tag|FieldTs], atom(Tag), !,
+                         ( is_list(V) -> ( V = [VTag|Fields], VTag == Tag, same_length(Fields, FieldTs)
+                                           -> tuple_fields_status(Fields, FieldTs, St)
+                                            ; St = mismatch )
+                         ; atom(V) -> value_candidate_types(V, Cs),
+                                      ( Cs == [] -> St = unknown
+                                      ; member(C, Cs), type_unify(C, T) -> St = ok
+                                      ; St = mismatch )
+                         ; non_list(V) -> St = mismatch
+                         ; St = unknown ).
 check_value(V, T, St) :- atom(T), !,
                          value_candidate_types(V, Cs),
                          ( Cs == [] -> St = unknown
@@ -309,6 +321,14 @@ check_value(V, T, St) :- atom(T), !,
                          ; member(C, Cs), refinement_pair(C, T) -> St = unknown
                          ; St = mismatch ).
 check_value(_, _, unknown).
+
+tuple_fields_status([], [], ok).
+tuple_fields_status([F|Fs], [T|Ts], St) :- elem_status(F, T, S1),
+                                           ( S1 == mismatch -> St = mismatch
+                                           ; tuple_fields_status(Fs, Ts, S2),
+                                             ( S2 == mismatch -> St = mismatch
+                                             ; S1 == unknown -> St = unknown
+                                             ; St = S2 ) ).
 
 %Arrow types of closures over inferred (undeclared) functions:
 inferred_value_candidates(V, Cs) :- atom(V), !,
@@ -436,6 +456,10 @@ runtime_type_ok(V, T) :- T = [L, ET], L == 'List', !,
                          is_list(V),
                          runtime_list_ok(V, ET).
 runtime_type_ok(V, T) :- is_arrow_type(T), !, \+ value_definitely_mismatch(V, T).
+runtime_type_ok(V, T) :- T = [Tag|FieldTs], atom(Tag), \+ wildcard_type(Tag), !,
+                         is_list(V), V = [VTag|Fields], VTag == Tag,
+                         same_length(Fields, FieldTs),
+                         runtime_tuple_ok(Fields, FieldTs).
 %get-type is user-extensible and extensions may call typechecked code, so a
 %guard reached from within a get-type call must not recurse into get-type:
 runtime_type_ok(_, _) :- catch(nb_getval('$in_typecheck', true), _, fail), !.
@@ -446,6 +470,10 @@ runtime_type_ok(V, T) :- setup_call_cleanup(nb_setval('$in_typecheck', true),
 runtime_list_ok([], _).
 runtime_list_ok([E|Es], ET) :- ( var(E) -> true ; runtime_type_ok(E, ET) ),
                                runtime_list_ok(Es, ET).
+
+runtime_tuple_ok([], []).
+runtime_tuple_ok([F|Fs], [T|Ts]) :- ( var(F) -> true ; runtime_type_ok(F, T) ),
+                                    runtime_tuple_ok(Fs, Ts).
 
 constrain_var_type(V, T) :- ( get_attr(V, mreq, Rs)
                               -> ( member(R, Rs), \+ type_compat_soft(R, T) -> fail
@@ -470,9 +498,30 @@ bind_param_type(Arg, T) :- ( var(Arg) -> ( nonvar(T), \+ wildcard_type_t(T) -> a
                            ; nonvar(T), T = [L, ET], L == 'List', Arg = [H|Rest]
                              -> bind_param_type(H, ET),          %type element vars of list patterns
                                 bind_param_type(Rest, ['List', ET])
+                           ; structural_pattern_fields(Arg, T, Fields, FieldTs)
+                             -> maplist(bind_param_type, Fields, FieldTs)
                            ; check_value(Arg, T, St),
                              ( St == mismatch -> throw(error(literal_type_mismatch(Arg, T), typecheck))
                                                ; true ) ).
+
+%A tagged pattern (Tag P1 ... Pn) against either the structural tuple type
+%(Tag T1 ... Tn) or a nominal type produced by Tag's constructor declaration:
+structural_pattern_fields(Arg, T, Fields, FieldTs) :-
+    is_list(Arg), Arg = [Tag|Fields], atom(Tag), nonvar(T),
+    ( T = [Tag2|FieldTs], Tag2 == Tag, same_length(Fields, FieldTs) -> true
+    ; atom(T), length(Fields, N),
+      findall(ATs-OT, fn_decl_arity(Tag, N, ATs, OT), [FieldTs-OT1]),
+      type_compat_soft(OT1, T) ).
+
+%Tolerant variant used where a non-matching pattern must not fail or throw
+%(case branches: a wrong pattern just never matches at runtime):
+bind_pattern_typed(P, T) :- ( var(P) -> ( nonvar(T), \+ wildcard_type_t(T) -> add_known_type(P, T) ; true )
+                            ; nonvar(T), T = [L, ET], L == 'List', P = [H|Rest]
+                              -> bind_pattern_typed(H, ET),
+                                 bind_pattern_typed(Rest, ['List', ET])
+                            ; structural_pattern_fields(P, T, Fields, FieldTs)
+                              -> maplist(bind_pattern_typed, Fields, FieldTs)
+                            ; true ).
 
 %Check the clause body's inferred output type against the declared output type:
 clause_output_goals(_, none, _, _, []) :- !.
