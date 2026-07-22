@@ -16,15 +16,15 @@
          (cons (map-nested $f $x) (map-nested $f $xs))
          (cons ($f $x) (map-nested $f $xs))))
 
-(: fold-flat (-> Expression $a (List $b) $a))
+(: fold-flat (-> (-> $acc $item $acc) $acc (List $item) $acc))
 (= (fold-flat $f $init ()) $init)
 (= (fold-flat $f $init (cons $x $xs)) (fold-flat $f ($f $init $x) $xs))
 
-(: foldr-flat (-> Expression $b (List $a) $b))
+(: foldr-flat (-> (-> $item $acc $acc) $acc (List $item) $acc))
 (= (foldr-flat $f $init ()) $init)
 (= (foldr-flat $f $init (cons $x $xs)) ($f $x (foldr-flat $f $init $xs)))
 
-(: fold-nested (-> Expression $a Expression $a))
+(: fold-nested (-> (-> $acc $item $acc) $acc Expression $acc))
 (= (fold-nested $f $init ()) $init)
 (= (fold-nested $f $init (cons $x $xs))
       (if (is-expr $x)
@@ -95,6 +95,26 @@
 (: &^& (-> (-> $a $b) (-> $a $b) $a $b))
 (= (&^& $f1 $f2 $arg) (superpose (($f1 $arg) ($f2 $arg))))
 
+;Error handling
+
+(: if-error (-> $value $result $result $result))
+(= (if-error $value $then $else)
+   (if (= $value (cons Error $_)) $then $else))
+
+(: checked-number (-> %Undefined% Number))
+(= (checked-number $value) (the Number $value))
+
+(: checked-bool (-> %Undefined% Bool))
+(= (checked-bool $value) (the Bool $value))
+
+(: if-error-number (-> %Undefined% Number Number))
+(= (if-error-number $value $fallback)
+   (if (= $value (cons Error $_)) $fallback (checked-number $value)))
+
+(: if-error-bool (-> %Undefined% Bool Bool))
+(= (if-error-bool $value $fallback)
+   (if (= $value (cons Error $_)) $fallback (checked-bool $value)))
+
 ;Reverse Function Matching
 (: @ (-> $a $b $a))
 (= (@ $a $b) (let $a $b $a))
@@ -114,9 +134,9 @@
 
 ;Utils
 
-(: fst (-> Expression Expression))
+(: fst (-> ($a $b) $a))
 (= (fst ($a $b)) $a)
-(: snd (-> Expression Expression))
+(: snd (-> ($a $b) $b))
 (= (snd ($a $b)) $b)
 
 ;(= (prog1 (cons $x $xs)) $x)

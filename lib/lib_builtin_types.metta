@@ -14,6 +14,7 @@
 (: >= (-> Number Number Bool))
 
 ;; Type definitions of equality and negated equality operators
+(: = (-> $a $b Bool))
 (: == (-> $a $b Bool))
 (: != (-> $a $b Bool))
 
@@ -62,9 +63,28 @@
 ;; Type definitions of expression helpers with concrete outputs
 (: size-atom (-> $a Number))
 (: length (-> $a Number))
+(: heap_size (-> $heap Number))
 (: repr (-> $a String))
 (: repra (-> $a String))
+(: copy_term (-> $a $a))
 (: println! (-> $a Bool))
+
+;; Expression tails are always sequences, but their elements may be
+;; heterogeneous source atoms.
+(: cdr-atom (-> $expression (List %Undefined%)))
+
+;; Collection operators always return sequences.  `collapse` may collect
+;; heterogeneous alternatives.  `union-atom` remains undeclared because the
+;; checker has a contextual rule that preserves compatible list element types
+;; without rejecting legal heterogeneous expressions.
+(: collapse (-> $value (List %Undefined%)))
+(: superpose (-> (List $item) $item))
+(: append (-> (List $item) (List $item) (List $item)))
+(: list_to_set (-> (List $item) (List $item)))
+(: subtraction-atom (-> (List $item) (List $item) (List $item)))
+
+;; State mutation stores any value and reports success.
+(: change-state! (-> $key $value Bool))
 
 ;; assert calls its (already evaluated) argument goal and yields true
 (: assert (-> %Undefined% Bool))
