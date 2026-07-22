@@ -298,6 +298,7 @@ translate_expr([H0|T0], Goals, Out) :-
                                                                    Goal =.. [HV|RawArgs],
                                                                    append(GsH, [Goal], Goals)
         ; HV == match, T = [Space, Pattern, Body] -> translate_expr(Space, G1, S),
+                                                     type_match_pattern(Pattern),
                                                      translate_expr(Body, GsB, Out),
                                                      append(G1, [match(S, Pattern, Out, Out)], G2),
                                                      append(G2, GsB, Goals)

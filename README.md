@@ -57,6 +57,12 @@ outputs, and enable the fused code generation — but never reject a program:
 a call that statically mismatches an inferred type fails at run time exactly
 as it would have without inference.
 
+**Match schemas.** Space reads are typed through declared relation schemas:
+with `(: age (-> String Number Atom))` declared, the pattern variables of
+`(match &self (age $who $n) ...)` acquire `String` and `Number`, so match
+results are fully typed and guard-free code is generated for the body. Type
+queries like `(match &self (: $x Fruit) $x)` bind `$x : Fruit` directly.
+
 **Strict mode.** `sh run.sh file.metta --strict` additionally requires every
 compiled function to have a declared or inferable type and rejects compilation
 if any residual runtime type guard would be emitted — a machine-checked

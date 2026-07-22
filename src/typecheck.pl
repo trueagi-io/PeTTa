@@ -164,6 +164,23 @@ known_singleton(V, K) :- get_attr(V, tknown, [K]).
 note_value_candidate(Out, Val) :- ( var(Out), nonvar(Val), value_single_type(Val, VT)
                                     -> add_known_type(Out, VT) ; true ).
 
+%Derive match-pattern variable types from declared relation schemas: atoms
+%matched by (F ...) conform to F's declared argument types, and a pattern
+%(: $x T) binds $x : T directly. Conjunctive patterns type each conjunct.
+type_match_pattern(P) :- ( is_list(P) -> type_match_pattern_list(P) ; true ).
+
+type_match_pattern_list([C, V, Ty]) :- C == (:), var(V), nonvar(Ty), !,
+                                       normalize_type(Ty, TN),
+                                       ( \+ wildcard_type_t(TN) -> add_known_type(V, TN) ; true ).
+type_match_pattern_list([C|Ps]) :- C == ',', !, maplist(type_match_pattern, Ps).
+type_match_pattern_list([F|Args]) :- atom(F), length(Args, N),
+                                     findall(ATs, fn_decl_arity(F, N, ATs, _), [ATs1]), !,
+                                     maplist(bind_pattern_arg, Args, ATs1).
+type_match_pattern_list(_).
+
+bind_pattern_arg(V, T) :- var(V), !, ( nonvar(T), \+ wildcard_type_t(T) -> add_known_type(V, T) ; true ).
+bind_pattern_arg(A, _) :- type_match_pattern(A).
+
 %Type the element variable of a higher-order construct from its list argument:
 note_list_elem_type(XVar, L) :-
     ( var(XVar), list_elem_type(L, ET) -> add_known_type(XVar, ET) ; true ).
