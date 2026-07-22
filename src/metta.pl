@@ -302,7 +302,12 @@ retractPredicate(_, false).
 ensure_metta_ext(Path, Path) :- file_name_extension(_, metta, Path), !.
 ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWithExt).
 
-'import!'(Space, File, true) :- catch(importer_helper(Space, File), _, fail).
+%Recoverable import problems (missing file, ...) fail quietly, but a static
+%type/determinism error in the imported module is a compile error of the
+%importing program and must not be swallowed:
+'import!'(Space, File, true) :- catch(importer_helper(Space, File), E,
+                                      ( E = error(_, Ctx), ( Ctx == typecheck ; Ctx == determinism )
+                                        -> throw(E) ; fail )).
 importer_helper(Space, File) :- atom_string(File, SFile),
                                 working_dir(Base),
                                 ( file_name_extension(ModPath, 'py', SFile)
