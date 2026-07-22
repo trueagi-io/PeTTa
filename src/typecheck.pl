@@ -202,6 +202,9 @@ ascribe_type(V, T, Gs) :-
     ; var(V) ->
         ( known_singleton(V, K)
           -> ( \+ \+ type_unify(K, T) -> type_unify(K, T), Gs = []
+             ; \+ \+ type_unify(T, K)                %the ascribed type fits the known type
+               -> put_attr(V, tknown, [T]),          %(e.g. a union member): narrow to it, checked
+                  ( ground(T) -> guard_goal(V, T, G), Gs = [G] ; Gs = [] )
              ; throw(error(type_conflict(existing(K), required(T)), typecheck)) )
            ; add_known_type(V, T),
              ( ground(T) -> guard_goal(V, T, G), Gs = [G] ; Gs = [] ) )
@@ -392,6 +395,8 @@ inferred_value_candidates(_, []).
 
 %Slow completion of the primitive fast paths above:
 prim_mismatch_status(P, T, St) :- ( wildcard_type_t(T) -> St = ok
+                                  ; is_union(T) -> ( T = ['|'|Ms], member(M, Ms), type_compat_soft(P, M)
+                                                     -> St = ok ; St = mismatch )
                                   ; atom(T) -> ( refinement_pair(P, T) -> St = unknown
                                                                         ; St = mismatch )
                                   ; ( T = [L|_], L == 'List' ; is_arrow_type(T) ) -> St = mismatch
