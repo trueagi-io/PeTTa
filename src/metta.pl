@@ -306,7 +306,7 @@ ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWith
 %type/determinism error in the imported module is a compile error of the
 %importing program and must not be swallowed:
 'import!'(Space, File, true) :- catch(importer_helper(Space, File), E,
-                                      ( E = error(_, Ctx), ( Ctx == typecheck ; Ctx == determinism )
+                                      ( E = error(_, Ctx), nonvar(Ctx), static_error_ctx(Ctx)
                                         -> throw(E) ; fail )).
 importer_helper(Space, File) :- atom_string(File, SFile),
                                 working_dir(Base),

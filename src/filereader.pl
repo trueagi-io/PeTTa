@@ -6,16 +6,21 @@
 %Read Filename into string S and process it (S holds MeTTa code):
 load_metta_file(Filename, Results) :- load_metta_file(Filename, Results, '&self').
 load_metta_file(Filename, Results, Space) :- read_file_to_string(Filename, S, []),
-                                             ( catch(nb_getval('$metta_file', Prev), _, Prev = '<string>') ),
+                                             current_metta_file(Prev),
                                              setup_call_cleanup(nb_setval('$metta_file', Filename),
                                                                 process_metta_string(S, Results, Space),
                                                                 nb_setval('$metta_file', Prev)).
 
+current_metta_file(File) :- catch(nb_getval('$metta_file', File), _, File = '<string>').
+
+%Parse MeTTa source into its balanced top-level forms:
+metta_string_forms(S, Forms) :- string_codes(S, Cs),
+                                strip(Cs, 0, Codes),
+                                phrase(top_forms(Forms, 1), Codes).
+
 %Extract function definitions, call invocations, and S-expressions part of &self space:
 process_metta_string(S, Results) :- process_metta_string(S, Results, '&self').
-process_metta_string(S, Results, Space) :- string_codes(S, Cs),
-                                           strip(Cs, 0, Codes),
-                                           phrase(top_forms(Forms, 1), Codes),
+process_metta_string(S, Results, Space) :- metta_string_forms(S, Forms),
                                            maplist(parse_form, Forms, ParsedForms),
                                            %declaration prepass: every function type declaration in the
                                            %file is visible to every definition in it, independent of order
@@ -33,11 +38,14 @@ parse_form(runnable(S, L), parsed(runnable, S, L, Term)) :- sread(S, Term).
 %Report where a static type/determinism error was raised before rethrowing it:
 with_form_location(Line, FormStr, Goal) :-
     catch(Goal, error(E, Ctx),
-          ( ( Ctx == typecheck ; Ctx == determinism )
-            -> ( catch(nb_getval('$metta_file', File), _, File = '<string>') ),
-               format(user_error, "Type error at ~w:~w in:~n  ~w~n", [File, Line, FormStr]),
-               throw(error(E, Ctx))
-             ; throw(error(E, Ctx)) )).
+          ( ( nonvar(Ctx), static_error_ctx(Ctx)
+              -> current_metta_file(File),
+                 format(user_error, "Type error at ~w:~w in:~n  ~w~n", [File, Line, FormStr])
+               ; true ),
+            throw(error(E, Ctx)) )).
+
+static_error_ctx(typecheck).
+static_error_ctx(determinism).
 
 %Second pass to compile / run / add the Terms:
 process_form(Space, parsed(expression, _, _, Term), []) :- 'add-atom'(Space, Term, true),

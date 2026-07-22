@@ -134,7 +134,7 @@ translate_expr([H0|T0], Goals, Out) :-
                                                         append(GsH, [Disj], Goals)
         ; HV == collapse, T = [E] -> translate_expr_to_conj(E, Conj, EV),
                                      %always a list; the element type stays open until known
-                                     ( value_single_type(EV, ET) -> true ; true ),
+                                     ignore(value_single_type(EV, ET)),
                                      set_out_type(Out, ['List', ET]),
                                      append(GsH, [findall(EV, Conj, Out)], Goals)
         ; HV == cut, T = [] -> append(GsH, [(!)], Goals),
@@ -152,8 +152,7 @@ translate_expr([H0|T0], Goals, Out) :-
         ; HV == hyperpose, T = [L]
           -> ( nonvar(L), is_list(L)
                -> build_hyperpose_branches(L, Branches),
-                  maplist({Out}/[(_,Res)]>>( note_value_candidate(Out, Res),
-                                             note_var_candidates(Out, Res) ), Branches),
+                  maplist({Out}/[(_,Res)]>>note_candidates(Out, Res), Branches),
                   append(GsH, [concurrent_and(member((Goal,Res), Branches), (call(Goal), Out = Res))], Goals)
                ; translate_expr(L, GsL, LV),
                  append(GsH, GsL, Inner),
@@ -211,16 +210,14 @@ translate_expr([H0|T0], Goals, Out) :-
         %--- Unification constructs ---:
         ; (HV == let ; HV == chain), T = [Pat, Val, In] -> translate_expr(Pat, Gp, Pv),
                                                            translate_expr(Val, Gv, V),
-                                                           note_value_candidate(Pv, V),   %the bound variable gets the value's type
-                                                           note_var_candidates(Pv, V),
+                                                           note_candidates(Pv, V),        %the bound variable gets the value's type
                                                            bind_pattern_from(Pat, V),     %destructuring patterns type their fields
                                                            translate_expr(In,  Gi, Out),
                                                            append([GsH,[(Pv=V)],Gp,Gv,Gi], Goals)
         ; HV == 'let*', T = [Binds, Body] -> letstar_to_rec_let(Binds,Body,RecLet),
                                              translate_expr(RecLet,  Goals, Out)
         ; HV == sealed, T = [Vars, Expr] -> translate_expr_to_conj(Expr, Con, Val),
-                                            note_value_candidate(Out, Val),
-                                            note_var_candidates(Out, Val),
+                                            note_candidates(Out, Val),
                                             Goals = [copy_term(Vars,[Con,Val],_,[Ncon,Out]),Ncon]
         %--- Iterating over non-deterministic generators without reification ---:
         ; HV == 'forall', T = [GF, TF]
@@ -321,8 +318,7 @@ translate_expr([H0|T0], Goals, Out) :-
                                      append(ArgsOut, [Out], CallArgs),
                                      Goal =.. [F|CallArgs],
                                      length(Args, NC),
-                                     ( atom(F), findall(OTc, fn_decl_arity(F, NC, _, OTc), [OT1])
-                                       -> set_out_type(Out, OT1) ; true ),
+                                     set_unique_decl_out(F, NC, Out),
                                      append(Inner, [Goal], Goals)
         %Produce a dynamic dispatch, translating Args for nesting:
         ; HV == reduce, T = [Expr] -> ( var(Expr) -> translate_expr(Expr, GsH, ExprOut),
@@ -332,8 +328,7 @@ translate_expr([H0|T0], Goals, Out) :-
                                                      append(GsH, GsArgs, Inner),
                                                      ExprOut = [F|ArgsOut],
                                                      length(Args, NR),
-                                                     ( atom(F), findall(OTr, fn_decl_arity(F, NR, _, OTr), [OT2])
-                                                       -> set_out_type(Out, OT2) ; true ),
+                                                     set_unique_decl_out(F, NR, Out),
                                                      append(Inner, [reduce(ExprOut, Out)], Goals) )
         %Invoke translator to evaluate MeTTa code as data/list:
         ; HV == eval, T = [Arg] -> ( nonvar(Arg), Arg = [Q, Quoted], Q == quote
@@ -401,17 +396,15 @@ nonfunction_type(K) :- nonvar(K), ( primitive_type(K)
 %check the args against the arrow, dispatch through apply_fn (skipping reduce's
 %per-call bookkeeping), and propagate the output type. Applying a parameter
 %whose type is still an unbound assumption tells us it is a function.
-translate_closure_call(HV, AVs, Inner, Goals, Out) :-
-    var(HV), AVs \== [], known_singleton(HV, K),
-    length(AVs, N), N1 is N + 1,
-    ( var(K) -> length(Xs, N1), K = [->|Xs]
-              ; K = [->|Xs], length(Xs, N1) ),
-    append(ArgTs, [OutT], Xs),
-    apply_decl_args(closure, AVs, ArgTs, GuardGs),
-    append(Inner, GuardGs, Inner1),
-    closure_apply_goal(HV, AVs, Out, Goal),
-    append(Inner1, [Goal], Goals),
-    set_out_type(Out, OutT).
+translate_closure_call(HV, AVs, Inner, Goals, Out) :- var(HV), AVs \== [], known_singleton(HV, K),
+                                                      length(AVs, N), N1 is N + 1,
+                                                      length(Xs, N1), K = [->|Xs],
+                                                      append(ArgTs, [OutT], Xs),
+                                                      apply_call_args(declared, closure, AVs, ArgTs, GuardGs),
+                                                      append(Inner, GuardGs, Inner1),
+                                                      closure_apply_goal(HV, AVs, Out, Goal),
+                                                      append(Inner1, [Goal], Goals),
+                                                      set_out_type(Out, OutT).
 
 closure_apply_goal(HV, [A], Out, apply_fn1(HV, A, Out)) :- !.
 closure_apply_goal(HV, [A, B], Out, apply_fn2(HV, A, B, Out)) :- !.
@@ -419,31 +412,35 @@ closure_apply_goal(HV, [A, B, C], Out, apply_fn3(HV, A, B, C, Out)) :- !.
 closure_apply_goal(HV, AVs, Out, apply_fnN(HV, AVs, Out)).
 
 %Runtime closure application; the last clause preserves reduce/2 semantics for
-%values (including unbound heads used symbolically) that are not callable:
-apply_fn1(F, A, Out) :- atom(F), fun(F), !, catch(call(F, A, Out), _, fail).
+%values (including unbound heads used symbolically) that are not callable.
+%Only a missing predicate (e.g. an arity the arrow type did not predict) falls
+%back to reduce - errors raised inside the callee propagate:
+apply_fn1(F, A, Out) :- atom(F), fun(F), !, safe_apply(call(F, A, Out)).
 apply_fn1(P, A, Out) :- compound(P), P = partial(F, Bs), !,
                         append(Bs, [A, Out], CallArgs),
-                        Goal =.. [F|CallArgs], catch(Goal, _, fail).
+                        Goal =.. [F|CallArgs], safe_apply(Goal).
 apply_fn1(F, A, Out) :- reduce([F, A], Out).
 
-apply_fn2(F, A, B, Out) :- atom(F), fun(F), !, catch(call(F, A, B, Out), _, fail).
+apply_fn2(F, A, B, Out) :- atom(F), fun(F), !, safe_apply(call(F, A, B, Out)).
 apply_fn2(P, A, B, Out) :- compound(P), P = partial(F, Bs), !,
                            append(Bs, [A, B, Out], CallArgs),
-                           Goal =.. [F|CallArgs], catch(Goal, _, fail).
+                           Goal =.. [F|CallArgs], safe_apply(Goal).
 apply_fn2(F, A, B, Out) :- reduce([F, A, B], Out).
 
-apply_fn3(F, A, B, C, Out) :- atom(F), fun(F), !, catch(call(F, A, B, C, Out), _, fail).
+apply_fn3(F, A, B, C, Out) :- atom(F), fun(F), !, safe_apply(call(F, A, B, C, Out)).
 apply_fn3(P, A, B, C, Out) :- compound(P), P = partial(F, Bs), !,
                               append(Bs, [A, B, C, Out], CallArgs),
-                              Goal =.. [F|CallArgs], catch(Goal, _, fail).
+                              Goal =.. [F|CallArgs], safe_apply(Goal).
 apply_fn3(F, A, B, C, Out) :- reduce([F, A, B, C], Out).
 
 apply_fnN(F, Args, Out) :- atom(F), fun(F), !, append(Args, [Out], CallArgs),
-                           Goal =.. [F|CallArgs], catch(Goal, _, fail).
+                           Goal =.. [F|CallArgs], safe_apply(Goal).
 apply_fnN(P, Args, Out) :- compound(P), P = partial(F, Bs), !,
                            append(Bs, Args, All), append(All, [Out], CallArgs),
-                           Goal =.. [F|CallArgs], catch(Goal, _, fail).
+                           Goal =.. [F|CallArgs], safe_apply(Goal).
 apply_fnN(F, Args, Out) :- reduce([F|Args], Out).
+
+safe_apply(Goal) :- catch(Goal, error(existence_error(procedure, _), _), fail).
 
 %Type-directed function call: check declared types at compile time, resolve
 %overloads statically when possible, and emit runtime guards only where types
@@ -452,11 +449,8 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
     length(Args, NProv), length(Bound, NB), NTotal is NProv + NB,
     findall(ft(ATs, OT), fn_decl_arity(Fun, NTotal, ATs, OT), FullDecls),
     ( FullDecls \== []
-      -> ( FullDecls = [ft(ATs1, _)] -> length(BoundTs, NB), append(BoundTs, ProvTs, ATs1),
-                                        maplist([Ty, M]>>( Ty == 'Expression' -> M = data ; M = translate ),
-                                                ProvTs, Modes)
-                                      ; eff_arg_modes(FullDecls, NB, NProv, Modes) ),
-         translate_call_args(Args, Modes, GsT, AVs0),
+      -> eff_arg_types(FullDecls, NB, NProv, EffTs),
+         translate_args_by_type(Args, EffTs, GsT, AVs0),
          append(Bound, AVs0, AVs),
          ( FullDecls = [Single] -> Chosen = Single, MultiDecl = false
          ; MultiDecl = true,
@@ -465,7 +459,7 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
            ; Survivors = [OneLeft] -> Chosen = OneLeft
            ; Chosen = multi(Survivors) ) ),
          ( Chosen = ft(ATs, OT)
-           -> apply_decl_args(Fun, AVs, ATs, GuardGs),
+           -> apply_call_args(declared, Fun, AVs, ATs, GuardGs),
               append([GsH, GsT, GuardGs], Inner),
               %overloaded functions: clauses were not output-checked against a
               %single declaration, so the call filters on the output type:
@@ -483,20 +477,20 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
       PartDecls = [pt(PTs, _, _)]
       -> translate_args(Args, GsT, AVs0),                      %typed partial application
          append(Bound, AVs0, AVs),
-         apply_decl_args(Fun, AVs, PTs, GuardGs),
+         apply_call_args(declared, Fun, AVs, PTs, GuardGs),
          append([GsH, GsT, GuardGs], Inner),
          build_direct_call(Fun, AVs, Out, Inner, [], Goals)
     ; findall(it(IATs, IOT), inferred_decl_arity(Fun, NTotal, IATs, IOT), [it(IATs, IOT)])
       -> translate_args(Args, GsT, AVs0),                      %inferred type: knowledge only, never rejects
          append(Bound, AVs0, AVs),
-         apply_inferred_args(Fun, AVs, IATs, GuardGs),
+         apply_call_args(inferred, Fun, AVs, IATs, GuardGs),
          append([GsH, GsT, GuardGs], Inner),
          build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
          set_out_type(Out, IOT)
     ; assumed_self_decl(Fun, NTotal, PTs, OutTv)
       -> translate_args(Args, GsT, AVs0),                      %self-recursion under the provisional type
          append(Bound, AVs0, AVs),
-         apply_inferred_args(Fun, AVs, PTs, GuardGs),
+         apply_call_args(inferred, Fun, AVs, PTs, GuardGs),
          append([GsH, GsT, GuardGs], Inner),
          build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
          ( var(Out) -> add_known_type(Out, OutTv) ; true )
@@ -504,27 +498,18 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
       append(Bound, AVs0, AVs),
       append(GsH, GsT, Inner),
       build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
-      ( ( Fun == cons ; Fun == 'cons-atom' ), AVs = [Hd, Tl]
-        -> cons_out_type(Hd, Tl, Out)
-      ; Fun == 'union-atom', AVs = [L, R]
-        -> union_atom_out_type(L, R, Out)
-      ; true ) ).
+      ( untyped_call_out(Fun, AVs, Out) -> true ; true ) ).
 
-%A provided arg position stays untranslated data iff every declaration types it Expression:
-eff_arg_modes(FullDecls, NB, NProv, Modes) :- NEnd is NB + NProv - 1,
-                                              ( NProv =:= 0 -> Modes = []
-                                              ; numlist(NB, NEnd, Is),
-                                                maplist(eff_arg_mode(FullDecls), Is, Modes) ).
-eff_arg_mode(FullDecls, I, Mode) :- ( forall(member(ft(ATs, _), FullDecls),
-                                             ( nth0(I, ATs, Ty), Ty == 'Expression' ))
-                                      -> Mode = data ; Mode = translate ).
-
-translate_call_args([], [], [], []).
-translate_call_args([A|As], [data|Ms], Gs, [V|Vs]) :- !, expression_arg_value(A, V),
-                                                      translate_call_args(As, Ms, Gs, Vs).
-translate_call_args([A|As], [_|Ms], Gs, [V|Vs]) :- translate_expr(A, G1, V),
-                                                   translate_call_args(As, Ms, G2, Vs),
-                                                   append(G1, G2, Gs).
+%A provided arg position stays untranslated data iff every declaration types it
+%Expression; the effective type feeds translate_args_by_type, which only ever
+%distinguishes 'Expression' from everything else:
+eff_arg_types(FullDecls, NB, NProv, Ts) :- NEnd is NB + NProv - 1,
+                                           ( NProv =:= 0 -> Ts = []
+                                           ; numlist(NB, NEnd, Is),
+                                             maplist(eff_arg_type(FullDecls), Is, Ts) ).
+eff_arg_type(FullDecls, I, T) :- ( forall(member(ft(ATs, _), FullDecls),
+                                          ( nth0(I, ATs, Ty), Ty == 'Expression' ))
+                                   -> T = 'Expression' ; true ).
 
 %Expression-typed args stay unevaluated data, except underapplied callable
 %expressions representable as a goal-free closure. Only expressions that can
@@ -550,24 +535,22 @@ callable_expression_value(AV) :- atom(AV), fun(AV).
 callable_expression_value(partial(Fun, Bound)) :- atom(Fun), ground(Bound).
 
 %One dispatch branch per surviving overload: non-throwing guards, then the call:
-overload_branch(Fun, AVs, Out, ft(ATs, OT), Branch) :-
-    foldl(overload_branch_guard(Fun), AVs, ATs, [], GsR),
-    reverse(GsR, GuardGs0), append(GuardGs0, GuardGs),
-    overload_out_guard(true, Fun, Out, OT, Extra),
-    build_direct_call(Fun, AVs, Out, GuardGs, Extra, BranchGoals),
-    goals_list_to_conj(BranchGoals, Branch).
+overload_branch(Fun, AVs, Out, ft(ATs, OT), Branch) :- maplist(overload_branch_guard(Fun), AVs, ATs, Gss),
+                                                       append(Gss, GuardGs),
+                                                       overload_out_guard(true, Fun, Out, OT, Extra),
+                                                       build_direct_call(Fun, AVs, Out, GuardGs, Extra, BranchGoals),
+                                                       goals_list_to_conj(BranchGoals, Branch).
 
-overload_out_guard(MultiDecl, Fun, Out, OT, Extra) :-
-    ( MultiDecl == true, ground(OT), \+ wildcard_type_t(OT)
-      -> ( strict_mode(true)
-           -> throw(error(strict_runtime_typecheck(Fun, typecheck_match(Out, OT)), typecheck))
-            ; Extra = [typecheck_match(Out, OT)] )
-       ; Extra = [] ).
+overload_out_guard(MultiDecl, Fun, Out, OT, Extra) :- ( MultiDecl == true, ground(OT), \+ wildcard_type_t(OT)
+                                                        -> ( strict_mode(true)
+                                                             -> throw(error(strict_runtime_typecheck(Fun, typecheck_match(Out, OT)), typecheck))
+                                                              ; Extra = [typecheck_match(Out, OT)] )
+                                                         ; Extra = [] ).
 
-overload_branch_guard(Fun, AV, T, Acc, [G|Acc]) :-
-    ( arg_statically_ok(AV, T) -> G = []
-    ; strict_mode(true) -> throw(error(strict_runtime_typecheck(Fun, typecheck_match(AV, T)), typecheck))
-    ; G = [typecheck_match(AV, T)] ).
+overload_branch_guard(Fun, AV, T, G) :- ( arg_statically_ok(AV, T) -> G = []
+                                        ; strict_mode(true)
+                                          -> throw(error(strict_runtime_typecheck(Fun, typecheck_match(AV, T)), typecheck))
+                                           ; G = [typecheck_match(AV, T)] ).
 
 %Type-resolved builtin arithmetic compiles to native is/2, constant-folded when
 %both operands are literals. Only while the builtin definition is untouched:
@@ -651,10 +634,9 @@ translate_pattern([H|T], [P|Ps]) :- !, translate_pattern(H, P),
                                        translate_pattern(T, Ps).
 
 % Constructs the goal for a single branch of an if-then-else/case.
-build_branch(true, Val, Out, (Out = Val)) :- !, note_value_candidate(Out, Val),
-                                                note_var_candidates(Out, Val).
+build_branch(true, Val, Out, (Out = Val)) :- !, note_candidates(Out, Val).
 build_branch(Con, Val, Out, Goal) :- var(Val) -> Val = Out, Goal = Con
-                                               ; note_value_candidate(Out, Val),
+                                               ; note_candidates(Out, Val),
                                                  Goal = (Val = Out, Con).
 
 %Translate case expression recursively into nested if:
