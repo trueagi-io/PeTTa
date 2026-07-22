@@ -9,3 +9,10 @@
 (= (later $x) (+ $x 1))
 
 !(test (caller 41) 42)
+
+; foldall over a typed accumulator is fully typed (no residual guards):
+(: sum-generated (-> Number))
+(= (sum-generated)
+   (foldall + (superpose (1 2 3)) 0))
+
+!(test (sum-generated) 6)

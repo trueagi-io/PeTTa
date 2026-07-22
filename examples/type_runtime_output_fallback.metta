@@ -16,8 +16,11 @@
 (: bad-foldl (-> A B))
 (= (bad-foldl $x) (foldl-atom (1) b $acc $y (aa $x)))
 
+; the accumulator function is unknown here, so the output stays a runtime check
+; (foldall with a known accumulator is typed statically - see
+; fail_foldall_output_mismatch.metta)
 (: bad-foldall (-> A B))
-(= (bad-foldall $x) (foldall + (superpose (1 2)) 0))
+(= (bad-foldall $x) (foldall $x (superpose (1 2)) 0))
 
 !(test
    (let* (($expr (quote (bad-catch a)))

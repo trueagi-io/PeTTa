@@ -133,7 +133,8 @@ translate_expr([H0|T0], Goals, Out) :-
                                                         disj_list(Branches, Disj),
                                                         append(GsH, [Disj], Goals)
         ; HV == collapse, T = [E] -> translate_expr_to_conj(E, Conj, EV),
-                                     ( value_single_type(EV, ET) -> true ; ET = 'Expression' ),
+                                     %always a list; the element type stays open until known
+                                     ( value_single_type(EV, ET) -> true ; true ),
                                      set_out_type(Out, ['List', ET]),
                                      append(GsH, [findall(EV, Conj, Out)], Goals)
         ; HV == cut, T = [] -> append(GsH, [(!)], Goals),
@@ -251,6 +252,7 @@ translate_expr([H0|T0], Goals, Out) :-
                               GenList = [GFHV] ),
              append(GsH, GsAF, Tmp1),
              append(Tmp1, GsGF, Tmp2),
+             foldall_out_type(AFV, Init, Out),
              append(Tmp2, [ConjInit, foldall(agg_reduce(AFV, V), reduce(GenList, V), Init, Out)], Goals)
         %--- Higher-order functions with pseudo-lambdas and lambdas ---:
         ; HV == 'foldl-atom', T = [List, Init, AccVar, XVar, Body]
@@ -649,6 +651,16 @@ translate_args([], [], []).
 translate_args([X|Xs], Goals, [V|Vs]) :- translate_expr(X, G1, V),
                                          translate_args(Xs, G2, Vs),
                                          append(G1, G2, Goals).
+
+%foldall's result type is the accumulator function's output type when that is
+%uniquely declared or inferred. The initial value's type is deliberately NOT
+%used as a fallback: the result comes from the accumulator function, and the
+%init only surfaces when the generator is empty.
+foldall_out_type(AFV, _Init, Out) :-
+    ( atom(AFV),
+      findall(OT, ( fn_decl_arity(AFV, 2, _, OT) ; inferred_decl_arity(AFV, 2, _, OT) ), [OT1])
+      -> set_out_type(Out, OT1)
+       ; true ).
 
 %Build A ; B ; C ... from a list:
 disj_list([G], G).
