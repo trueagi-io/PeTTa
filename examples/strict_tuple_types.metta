@@ -45,3 +45,11 @@
       (+ $sum 1.0)))
 
 !(test (stats-total) 2.0)
+
+; A type variable in tuple head position unified to a primitive stays an
+; untagged pair: ($first Number) -> (Number Number) is not a tag named Number.
+(: numeric-pairs (-> (List ($first Number))))
+(= (numeric-pairs)
+   ((1.0 2.0) (3.0 4.0)))
+
+!(test (numeric-pairs) ((1.0 2.0) (3.0 4.0)))

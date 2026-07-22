@@ -311,8 +311,11 @@ check_value(V, T, St) :- is_arrow_type(T), !,
                          ; St = unknown ).
 
 %Structural tuple types (Tag T1 ... Tn): the value must carry the same tag
-%and arity, and its fields check recursively:
-check_value(V, T, St) :- T = [Tag|FieldTs], atom(Tag), !,
+%and arity, and its fields check recursively. A primitive or wildcard atom in
+%head position is a type, not a tag - ($a Number) unified to (Number Number)
+%is an untagged pair, handled by the next clause:
+check_value(V, T, St) :- T = [Tag|FieldTs], atom(Tag),
+                         \+ primitive_type(Tag), \+ wildcard_type(Tag), !,
                          ( is_list(V) -> ( V = [VTag|Fields], VTag == Tag, same_length(Fields, FieldTs)
                                            -> tuple_fields_status(Fields, FieldTs, St)
                                             ; St = mismatch )
@@ -475,7 +478,8 @@ runtime_type_ok(V, T) :- T = [L, ET], L == 'List', !,
                          is_list(V),
                          runtime_list_ok(V, ET).
 runtime_type_ok(V, T) :- is_arrow_type(T), !, \+ value_definitely_mismatch(V, T).
-runtime_type_ok(V, T) :- T = [Tag|FieldTs], atom(Tag), \+ wildcard_type(Tag), !,
+runtime_type_ok(V, T) :- T = [Tag|FieldTs], atom(Tag),
+                         \+ primitive_type(Tag), \+ wildcard_type(Tag), !,
                          is_list(V), V = [VTag|Fields], VTag == Tag,
                          same_length(Fields, FieldTs),
                          runtime_tuple_ok(Fields, FieldTs).
