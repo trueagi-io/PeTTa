@@ -140,9 +140,17 @@ wildcard_type_t(T) :- atom(T), wildcard_type(T).
 
 type_unify(A, B) :- ( var(A) ; var(B) ), !, A = B.
 type_unify(A, B) :- ( wildcard_type_t(A) ; wildcard_type_t(B) ), !.
+%Union types (| T1 T2 ...): a union value must fit every context member-wise;
+%a value fits a required union if it fits some member:
+type_unify(A, B) :- is_union(A), !, A = ['|'|As],
+                    \+ ( member(MA, As), \+ type_compat_soft(MA, B) ).
+type_unify(A, B) :- is_union(B), !, B = ['|'|Ms],
+                    member(M, Ms), type_unify(A, M), !.
 type_unify(A, B) :- atom(A), !, A == B.
 type_unify(A, B) :- is_list(A), !, is_list(B), same_length(A, B), maplist(type_unify, A, B).
 type_unify(A, B) :- A == B.
+
+is_union(T) :- nonvar(T), T = [P|_], P == '|'.
 
 type_compat_soft(A, B) :- \+ \+ type_unify(A, B).
 
@@ -307,6 +315,10 @@ check_value(V, T, St) :- ( V == true ; V == false ), !,
                          ; prim_mismatch_status('Bool', T, St) ).
 check_value(V, T, St) :- var(T), !, ( value_single_type(V, VT) -> T = VT ; true ), St = ok.
 check_value(_, T, St) :- wildcard_type_t(T), !, St = ok.
+check_value(V, T, St) :- is_union(T), !, T = ['|'|Ms],
+                         ( member(M, Ms), check_value(V, M, SM), SM == ok -> St = ok
+                         ; forall(member(M, Ms), check_value(V, M, mismatch)) -> St = mismatch
+                         ; St = unknown ).
 check_value(V, T, St) :- T = [L, ET], L == 'List', !,
                          ( is_list(V) -> list_elems_status(V, ET, St)
                          ; non_list(V) -> St = mismatch
@@ -491,6 +503,8 @@ runtime_type_ok(V, T) :- T = [L, ET], L == 'List', !,
                          is_list(V),
                          runtime_list_ok(V, ET).
 runtime_type_ok(V, T) :- is_arrow_type(T), !, \+ value_definitely_mismatch(V, T).
+runtime_type_ok(V, T) :- is_union(T), !, T = ['|'|Ms],
+                         member(M, Ms), runtime_type_ok(V, M), !.
 runtime_type_ok(V, T) :- T = [Tag|FieldTs], atom(Tag),
                          \+ primitive_type(Tag), \+ wildcard_type(Tag), !,
                          is_list(V), V = [VTag|Fields], VTag == Tag,
@@ -551,6 +565,8 @@ bind_param_type(Arg, T) :- ( var(Arg) -> ( nonvar(T), \+ wildcard_type_t(T) -> a
                            ; nonvar(T), T = [L, ET], L == 'List', Arg = [H|Rest]
                              -> bind_param_type(H, ET),          %type element vars of list patterns
                                 bind_param_type(Rest, ['List', ET])
+                           ; is_union(T)                        %clause heads narrow union params
+                             -> bind_pattern_typed(Arg, T)
                            ; structural_pattern_fields(Arg, T, Fields, FieldTs)
                              -> maplist(bind_param_type, Fields, FieldTs)
                            ; is_list(Arg), is_list(T), same_length(Arg, T),
@@ -559,6 +575,16 @@ bind_param_type(Arg, T) :- ( var(Arg) -> ( nonvar(T), \+ wildcard_type_t(T) -> a
                            ; check_value(Arg, T, St),
                              ( St == mismatch -> throw(error(literal_type_mismatch(Arg, T), typecheck))
                                                ; true ) ).
+
+%Which union member does a pattern's shape select?
+pattern_selects_member(P, M) :- nonvar(M), nonvar(P),
+    ( M = [L, _], L == 'List' -> ( P == [] ; P = [C|_], C == cons ; is_list(P) )
+    ; atom(M) -> \+ \+ structural_pattern_fields(P, M, _, _)
+    ; is_list(M), is_list(P) ->
+        ( M = [Tag|FTs], atom(Tag), \+ primitive_type(Tag), \+ wildcard_type(Tag)
+          -> P = [Tag2|Fs], Tag2 == Tag, same_length(Fs, FTs)
+           ; same_length(P, M) )
+    ; fail ).
 
 %A tagged pattern (Tag P1 ... Pn) against either the structural tuple type
 %(Tag T1 ... Tn) or a nominal type produced by Tag's constructor declaration:
@@ -593,6 +619,9 @@ bind_pattern_from(Pat, Val) :- ( nonvar(Pat),
 %Tolerant variant used where a non-matching pattern must not fail or throw
 %(case branches: a wrong pattern just never matches at runtime):
 bind_pattern_typed(P, T) :- ( var(P) -> ( nonvar(T), \+ wildcard_type_t(T) -> add_known_type(P, T) ; true )
+                            ; is_union(T), T = ['|'|Ms]        %a pattern narrows to the member it selects
+                              -> ( findall(M, ( member(M, Ms), pattern_selects_member(P, M) ), [M1])
+                                   -> bind_pattern_typed(P, M1) ; true )
                             ; nonvar(T), T = [L, ET], L == 'List', P = [C, H, R], C == cons
                               -> bind_pattern_typed(H, ET),    %source-form (cons H R) destructuring
                                  bind_pattern_typed(R, ['List', ET])

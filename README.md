@@ -80,6 +80,13 @@ checker already knows is a compile-time error.
 (= (greet) (the String (match &self (name $n) $n)))
 ```
 
+**Union types.** A heterogeneous position can declare its alternatives with
+`(| T1 T2 ...)` — for example `(List (| (CPU %Undefined% %Undefined%
+%Undefined%) (: %Undefined% %Undefined% %Undefined% TV)))` for a mixed
+execution list. A value fits a union if it fits some member, and `case` or
+clause-head patterns narrow to the member their shape selects, typing the
+pattern's variables. Unions are declared, never inferred.
+
 **Determinism arrows.** `(: f (A B -[det]-> C))` (or the chained form
 `(A -[det]-> B)`) declares a deterministic function: the compiler validates
 that its clauses cannot overlap and its body is deterministic, then commits to
