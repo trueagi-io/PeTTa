@@ -466,7 +466,7 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
               ( MultiDecl == false, arith_inline(Fun, AVs, Out, ArithGs)
                 -> append(Inner, ArithGs, Goals)
                  ; build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) ),
-              set_out_type(Out, OT)
+              set_call_out_type(Out, ATs, OT)
             ; Chosen = multi(Survs),
               maplist(overload_branch(Fun, AVs, Out), Survs, Branches),
               disj_list(Branches, Disj),

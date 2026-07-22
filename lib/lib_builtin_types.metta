@@ -69,6 +69,9 @@
 ;; assert calls its (already evaluated) argument goal and yields true
 (: assert (-> %Undefined% Bool))
 
+;; empty is bottom: it produces no value, so its result fits every type
+(: empty (-> $a))
+
 ;; Type definitions of random generators (3-argument forms)
 (: random-int (-> Number Number Number))
 (: random-float (-> Number Number Number))

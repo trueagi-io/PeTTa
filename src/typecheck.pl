@@ -239,6 +239,15 @@ add_known_types(V, [C|Cs]) :- add_known_type(V, C), add_known_types(V, Cs).
 set_out_type(Out, OT) :- ( var(Out), nonvar(OT), \+ wildcard_type_t(OT) -> add_known_type(Out, OT)
                                                                           ; true ).
 
+%Call-site output typing. An output type variable that occurs in no argument
+%type is universally quantified - by parametricity only a bottom function
+%like (: empty (-> $a)) can implement it - so the result is compatible with
+%every requirement, without assigning a concrete type or emitting a guard:
+set_call_out_type(Out, ATs, OT) :- ( nonvar(OT) -> set_out_type(Out, OT)
+                                   ; var(Out), term_variables(ATs, Vs), \+ memberchk_eq(OT, Vs)
+                                     -> add_known_type(Out, OT)
+                                      ; true ).
+
 %A call is statically dead when the same variable occupies two argument
 %positions whose required types can never both hold (e.g. (num-str $x $x)):
 same_call_var_conflict([V|Vs], [T|Ts]) :-

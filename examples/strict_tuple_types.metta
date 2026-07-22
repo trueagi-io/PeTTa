@@ -92,3 +92,12 @@
    (cons ((+ $value 1.0) $weight) $tail))
 
 !(test (prepend-weighted-number 1.0 5 ((3.0 4))) ((2.0 5) (3.0 4)))
+
+; empty is bottom: its universally quantified output fits every declared
+; output type without a guard.
+(: maybe-number (-> Bool Number))
+(= (maybe-number True) 1)
+(= (maybe-number False) (empty))
+
+!(test (maybe-number True) 1)
+!(test (collapse (maybe-number False)) ())
