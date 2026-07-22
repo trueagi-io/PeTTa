@@ -322,6 +322,17 @@ check_value(V, T, St) :- T = [Tag|FieldTs], atom(Tag), !,
                                       ; St = mismatch )
                          ; non_list(V) -> St = mismatch
                          ; St = unknown ).
+%Untagged tuple types like ($v Number): element-wise, the head position may
+%be a type variable:
+check_value(V, T, St) :- is_list(T), !,
+                         ( is_list(V) -> ( same_length(V, T) -> tuple_fields_status(V, T, St)
+                                                              ; St = mismatch )
+                         ; atom(V) -> value_candidate_types(V, Cs),
+                                      ( Cs == [] -> St = unknown
+                                      ; member(C, Cs), type_unify(C, T) -> St = ok
+                                      ; St = mismatch )
+                         ; non_list(V) -> St = mismatch
+                         ; St = unknown ).
 check_value(V, T, St) :- atom(T), !,
                          value_candidate_types(V, Cs),
                          ( Cs == [] -> St = unknown
@@ -468,6 +479,9 @@ runtime_type_ok(V, T) :- T = [Tag|FieldTs], atom(Tag), \+ wildcard_type(Tag), !,
                          is_list(V), V = [VTag|Fields], VTag == Tag,
                          same_length(Fields, FieldTs),
                          runtime_tuple_ok(Fields, FieldTs).
+runtime_type_ok(V, T) :- is_list(T), !,
+                         is_list(V), same_length(V, T),
+                         runtime_tuple_ok(V, T).
 %get-type is user-extensible and extensions may call typechecked code, so a
 %guard reached from within a get-type call must not recurse into get-type:
 runtime_type_ok(_, _) :- catch(nb_getval('$in_typecheck', true), _, fail), !.
@@ -522,6 +536,9 @@ bind_param_type(Arg, T) :- ( var(Arg) -> ( nonvar(T), \+ wildcard_type_t(T) -> a
                                 bind_param_type(Rest, ['List', ET])
                            ; structural_pattern_fields(Arg, T, Fields, FieldTs)
                              -> maplist(bind_param_type, Fields, FieldTs)
+                           ; is_list(Arg), is_list(T), same_length(Arg, T),
+                             \+ is_arrow_type(T)                 %untagged tuple types: ($v Number)
+                             -> maplist(bind_param_type, Arg, T)
                            ; check_value(Arg, T, St),
                              ( St == mismatch -> throw(error(literal_type_mismatch(Arg, T), typecheck))
                                                ; true ) ).
@@ -543,6 +560,9 @@ bind_pattern_typed(P, T) :- ( var(P) -> ( nonvar(T), \+ wildcard_type_t(T) -> ad
                                  bind_pattern_typed(Rest, ['List', ET])
                             ; structural_pattern_fields(P, T, Fields, FieldTs)
                               -> maplist(bind_pattern_typed, Fields, FieldTs)
+                            ; is_list(P), is_list(T), same_length(P, T),
+                              \+ is_arrow_type(T)
+                              -> maplist(bind_pattern_typed, P, T)
                             ; true ).
 
 %Check the clause body's inferred output type against the declared output type:

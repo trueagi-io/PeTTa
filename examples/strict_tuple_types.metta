@@ -26,3 +26,11 @@
       (((ParticleDist $id $scale) $id))))
 
 !(test (particle-id (ParticleDist 7 0.5)) 7)
+
+; Untagged tuple element types propagate through cons patterns in heads:
+(: pair-weight-sum (-> (List ($value Number)) Number))
+(= (pair-weight-sum ()) 0.0)
+(= (pair-weight-sum (cons ($val $weight) $tail))
+   (+ $weight (pair-weight-sum $tail)))
+
+!(test (pair-weight-sum ((a 1.5) (b 2.5))) 4.0)

@@ -66,6 +66,9 @@
 (: repra (-> $a String))
 (: println! (-> $a Bool))
 
+;; assert calls its (already evaluated) argument goal and yields true
+(: assert (-> %Undefined% Bool))
+
 ;; Type definitions of random generators (3-argument forms)
 (: random-int (-> Number Number Number))
 (: random-float (-> Number Number Number))
