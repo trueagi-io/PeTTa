@@ -552,6 +552,14 @@ structural_pattern_fields(Arg, T, Fields, FieldTs) :-
       findall(ATs-OT, fn_decl_arity(Tag, N, ATs, OT), [FieldTs-OT1]),
       type_compat_soft(OT1, T) ).
 
+%Destructuring bindings: type a pattern's variables from the bound value's
+%known type, e.g. (let (Stats $sum $sq $n) (make-stats) ...):
+bind_pattern_from(Pat, Val) :- ( nonvar(Pat),
+                                 ( var(Val) -> known_singleton(Val, KT)
+                                             ; value_single_type(Val, KT) )
+                                 -> bind_pattern_typed(Pat, KT)
+                                  ; true ).
+
 %Tolerant variant used where a non-matching pattern must not fail or throw
 %(case branches: a wrong pattern just never matches at runtime):
 bind_pattern_typed(P, T) :- ( var(P) -> ( nonvar(T), \+ wildcard_type_t(T) -> add_known_type(P, T) ; true )

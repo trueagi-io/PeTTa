@@ -34,3 +34,14 @@
    (+ $weight (pair-weight-sum $tail)))
 
 !(test (pair-weight-sum ((a 1.5) (b 2.5))) 4.0)
+
+; Destructuring let binds pattern fields from the value's known type:
+(: make-stats (-> (Stats Number Number Number)))
+(= (make-stats) (Stats 1.0 2.0 3))
+
+(: stats-total (-> Number))
+(= (stats-total)
+   (let (Stats $sum $sumsq $count) (make-stats)
+      (+ $sum 1.0)))
+
+!(test (stats-total) 2.0)

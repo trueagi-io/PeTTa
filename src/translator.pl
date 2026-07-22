@@ -213,6 +213,7 @@ translate_expr([H0|T0], Goals, Out) :-
                                                            translate_expr(Val, Gv, V),
                                                            note_value_candidate(Pv, V),   %the bound variable gets the value's type
                                                            note_var_candidates(Pv, V),
+                                                           bind_pattern_from(Pv, V),      %destructuring patterns type their fields
                                                            translate_expr(In,  Gi, Out),
                                                            append([GsH,[(Pv=V)],Gp,Gv,Gi], Goals)
         ; HV == 'let*', T = [Binds, Body] -> letstar_to_rec_let(Binds,Body,RecLet),
