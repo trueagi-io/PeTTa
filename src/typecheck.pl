@@ -613,6 +613,21 @@ cons_out_type(H, Tl, Out) :-
       -> set_out_type(Out, ['List', T])
        ; true ).
 
+%union-atom likewise stays undeclared, but concatenating two provably
+%compatible lists yields that list type:
+union_atom_out_type(A, B, Out) :-
+    ( var(Out),
+      union_side_elem(A, TA),
+      union_side_elem(B, TB),
+      \+ \+ type_unify(TA, TB)
+      -> type_unify(TA, TB),
+         set_out_type(Out, ['List', TA])
+       ; true ).
+
+union_side_elem(X, T) :- ( var(X) -> known_singleton(X, K), nonvar(K), K = ['List', T]
+                         ; X == [] -> true
+                         ; list_elem_type(X, T) ).
+
 %Destructuring bindings: type a pattern's variables from the bound value's
 %known type, e.g. (let (Stats $sum $sq $n) (make-stats) ...):
 bind_pattern_from(Pat, Val) :- ( nonvar(Pat),

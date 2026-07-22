@@ -341,10 +341,17 @@ translate_expr([H0|T0], Goals, Out) :-
                                         append(GsH, GsQ, Goals)
                                       ; append(GsH, [eval(Arg, Out)], Goals) )
         %Explicit type ascription for dynamically typed values:
-        ; HV == the, T = [TypeExpr, Expr] -> translate_expr(Expr, GsE, Out),
+        ; HV == the, T = [TypeExpr, Expr] -> translate_expr(Expr, GsE, Out0),
                                              normalize_type(TypeExpr, TN),
-                                             ascribe_type(Out, TN, GsA),
-                                             append([GsH, GsE, GsA], Goals)
+                                             ascribe_type(Out0, TN, GsA),
+                                             %An ascribed literal keeps the author's type when it is
+                                             %more specific than the value's own (e.g. (the (List Item) ())):
+                                             ( nonvar(Out0), nonvar(TN), \+ wildcard_type_t(TN),
+                                               \+ ( value_single_type(Out0, VT), VT == TN )
+                                               -> add_known_type(Out, TN),
+                                                  append([GsH, GsE, GsA, [Out = Out0]], Goals)
+                                                ; Out = Out0,
+                                                  append([GsH, GsE, GsA], Goals) )
         %Force arg to remain data/list:
         ; HV == quote, T = [Expr] -> append(GsH, [], Inner),
                                      Out = Expr,
@@ -498,7 +505,10 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
       append(GsH, GsT, Inner),
       build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
       ( ( Fun == cons ; Fun == 'cons-atom' ), AVs = [Hd, Tl]
-        -> cons_out_type(Hd, Tl, Out) ; true ) ).
+        -> cons_out_type(Hd, Tl, Out)
+      ; Fun == 'union-atom', AVs = [L, R]
+        -> union_atom_out_type(L, R, Out)
+      ; true ) ).
 
 %A provided arg position stays untranslated data iff every declaration types it Expression:
 eff_arg_modes(FullDecls, NB, NProv, Modes) :- NEnd is NB + NProv - 1,
