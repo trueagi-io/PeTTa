@@ -90,9 +90,12 @@ nondeterminism.
 
 Notes and caveats:
 
-- Type declarations must precede the definitions and calls they should affect;
-  a declaration arriving after its function is compiled warns and has no
-  retroactive effect.
+- Function type declarations are pre-cached per file, so helpers may be
+  declared and defined after their callers within the same file. Across files,
+  imports must still precede use. Value declarations like `(: a A)` stay
+  order-sensitive (they are knowledge atoms), and a function declaration
+  arriving after its function was already compiled in an earlier file warns
+  and has no retroactive effect.
 - `Expression`-typed arguments are passed unevaluated (as data), except
   underapplied closures like `(+ 1)`.
 - Interpreters that call `eval` per iteration pay for a (typed) translation

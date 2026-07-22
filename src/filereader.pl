@@ -17,6 +17,10 @@ process_metta_string(S, Results, Space) :- string_codes(S, Cs),
                                            strip(Cs, 0, Codes),
                                            phrase(top_forms(Forms, 1), Codes),
                                            maplist(parse_form, Forms, ParsedForms),
+                                           %declaration prepass: every function type declaration in the
+                                           %file is visible to every definition in it, independent of order
+                                           forall(member(parsed(expression, _, _, Decl), ParsedForms),
+                                                  precache_fn_type_decl(Space, Decl)),
                                            maplist(process_form(Space), ParsedForms, ResultsList), !,
                                            append(ResultsList, Results).
 

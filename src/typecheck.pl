@@ -69,6 +69,16 @@ maybe_cache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term = 
                                                 ; assertz(declared_value_type(Name, TN)) ) )
                                          ; true ).
 
+%Declaration prepass: only function (arrow) declarations are hoisted, so
+%definitions may call helpers declared later in the same file. Value
+%declarations stay order-sensitive - they are knowledge atoms whose position
+%is meaningful (see examples/types_nondet.metta):
+precache_fn_type_decl(Space, Term) :- ( is_list(Term), Term = [C, Name, Type],
+                                        C == (:), atom(Name), nonvar(Type),
+                                        fn_type_shape(Type, _, _, _)
+                                        -> maybe_cache_type_decl(Space, Term)
+                                         ; true ).
+
 %Seed the store with the builtin operator types (called once after loading):
 seed_builtin_types :- library_path(Base),
                       atomic_list_concat([Base, '/lib_builtin_types.metta'], Path),
