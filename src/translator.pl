@@ -33,10 +33,22 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                append(GoalsPrefix, FinalGoals, Goals),
                                                goals_list_to_conj(Goals, BodyConj).
 
-%Record atoms compiled as plain symbol heads, so late function registrations can be flagged:
-:- dynamic symbol_head/1.
-note_symbol_head(HV) :- atom(HV), \+ symbol_head(HV), !, assertz(symbol_head(HV)).
+%Record atoms compiled as plain symbol heads together with where they were compiled:
+%a stored definition can be recompiled when the function arrives late, an already
+%executed expression cannot, so late registration repairs the former and warns on the latter.
+:- dynamic symbol_head/2.
+:- dynamic translating_runnable/0.
+note_symbol_head(HV) :- atom(HV), !,
+                        ( translating_runnable -> Ctx = runnable ; Ctx = clause ),
+                        ( symbol_head(HV, Ctx) -> true ; assertz(symbol_head(HV, Ctx)) ).
 note_symbol_head(_).
+
+%Translate an expression that executes immediately, marking its data uses as unrepairable.
+%once/1 closes the translation before the goals run, so nested imports triggered by the
+%execution compile their definitions under the clause context again:
+translate_runnable_expr(C, Goals, Out) :- setup_call_cleanup(assertz(translating_runnable),
+                                                             once(translate_expr(C, Goals, Out)),
+                                                             retractall(translating_runnable)).
 
 %Print compiled clause:
 maybe_print_compiled_clause(_, _, _) :- silent(true), !.
