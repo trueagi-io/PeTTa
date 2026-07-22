@@ -1,10 +1,17 @@
 :- dynamic ho_specialization/2.
 :- dynamic ho_specialization_failed/3.
 
-%Maybe specializes HV(AVs) if not already ongoing, and if specialization fails, nothing changes and specneeded is restored:
-maybe_specialize_call(HV, AVs, Out, Goal) :- setup_call_cleanup( (catch(nb_getval(specneeded,Prev),_,Prev = []), nb_setval(specneeded,false)),
+%Maybe specializes HV(AVs) if not already ongoing, and if specialization fails, nothing changes and specneeded is restored.
+%Re-specializing a function already being specialized is refused: its key must differ from the ongoing one
+%(same keys are memoized via ho_specialization), and ever-growing keys - e.g. a recursive call wrapping its
+%higher-order argument, (= (evolve $r $g) (evolve (twice $r) $g)) - would otherwise diverge at compile time:
+maybe_specialize_call(HV, AVs, Out, Goal) :- catch(nb_getval('$spec_stack', Stack), _, Stack = []),
+                                             \+ memberchk(HV, Stack),
+                                             setup_call_cleanup( (catch(nb_getval(specneeded,Prev),_,Prev = []), nb_setval(specneeded,false),
+                                                                  nb_setval('$spec_stack', [HV|Stack])),
                                                                  specialize_call(HV, AVs, Out, Goal),
-                                                                 (Prev == true -> nb_setval(specneeded,Prev)) ).
+                                                                 (nb_setval('$spec_stack', Stack),
+                                                                  (Prev == true -> nb_setval(specneeded,Prev) ; true)) ).
 
 % Build a stable, variant-normalized specialization key.
 %
