@@ -1,7 +1,7 @@
 :- ensure_loaded(metta).
 :- multifile prolog:error_message//1.
 
-% Typecheck error messages — the spec suite (test_typecheck.sh, examples_typecheck/)
+% Typecheck error messages — the spec suite (test.sh, examples/fail_*.metta)
 % asserts on these exact phrasings; keep them in sync with the error terms the
 % translator throws.
 prolog:error_message(literal_type_mismatch(Value, Required)) -->

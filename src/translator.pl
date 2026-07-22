@@ -446,59 +446,59 @@ safe_apply(Goal) :- catch(Goal, error(existence_error(procedure, _), _), fail).
 %overloads statically when possible, and emit runtime guards only where types
 %stay unresolved (see AGENTS.md).
 translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
-    length(Args, NProv), length(Bound, NB), NTotal is NProv + NB,
-    findall(ft(ATs, OT), fn_decl_arity(Fun, NTotal, ATs, OT), FullDecls),
-    ( FullDecls \== []
-      -> eff_arg_types(FullDecls, NB, NProv, EffTs),
-         translate_args_by_type(Args, EffTs, GsT, AVs0),
-         append(Bound, AVs0, AVs),
-         ( FullDecls = [Single] -> Chosen = Single, MultiDecl = false
-         ; MultiDecl = true,
-           include(decl_survives(AVs), FullDecls, Survivors),
-           ( Survivors == [] -> throw(error(no_matching_overload(Fun), typecheck))
-           ; Survivors = [OneLeft] -> Chosen = OneLeft
-           ; Chosen = multi(Survivors) ) ),
-         ( Chosen = ft(ATs, OT)
-           -> apply_call_args(declared, Fun, AVs, ATs, GuardGs),
-              append([GsH, GsT, GuardGs], Inner),
-              %overloaded functions: clauses were not output-checked against a
-              %single declaration, so the call filters on the output type:
-              overload_out_guard(MultiDecl, Fun, Out, OT, Extra),
-              ( MultiDecl == false, arith_inline(Fun, AVs, Out, ArithGs)
-                -> append(Inner, ArithGs, Goals)
-                 ; build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) ),
-              set_call_out_type(Out, ATs, OT)
-            ; Chosen = multi(Survs),
-              maplist(overload_branch(Fun, AVs, Out), Survs, Branches),
-              disj_list(Branches, Disj),
-              append(GsH, GsT, Pre),
-              append(Pre, [goal_or_throw(Disj, error(no_matching_overload(Fun), typecheck))], Goals) )
-    ; findall(pt(PTs, RTs, OT), fn_decl_partial(Fun, NTotal, PTs, RTs, OT), PartDecls),
-      PartDecls = [pt(PTs, _, _)]
-      -> translate_args(Args, GsT, AVs0),                      %typed partial application
-         append(Bound, AVs0, AVs),
-         apply_call_args(declared, Fun, AVs, PTs, GuardGs),
-         append([GsH, GsT, GuardGs], Inner),
-         build_direct_call(Fun, AVs, Out, Inner, [], Goals)
-    ; findall(it(IATs, IOT), inferred_decl_arity(Fun, NTotal, IATs, IOT), [it(IATs, IOT)])
-      -> translate_args(Args, GsT, AVs0),                      %inferred type: knowledge only, never rejects
-         append(Bound, AVs0, AVs),
-         apply_call_args(inferred, Fun, AVs, IATs, GuardGs),
-         append([GsH, GsT, GuardGs], Inner),
-         build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
-         set_out_type(Out, IOT)
-    ; assumed_self_decl(Fun, NTotal, PTs, OutTv)
-      -> translate_args(Args, GsT, AVs0),                      %self-recursion under the provisional type
-         append(Bound, AVs0, AVs),
-         apply_call_args(inferred, Fun, AVs, PTs, GuardGs),
-         append([GsH, GsT, GuardGs], Inner),
-         build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
-         ( var(Out) -> add_known_type(Out, OutTv) ; true )
-    ; translate_args(Args, GsT, AVs0),                         %no type information
-      append(Bound, AVs0, AVs),
-      append(GsH, GsT, Inner),
-      build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
-      ( untyped_call_out(Fun, AVs, Out) -> true ; true ) ).
+        length(Args, NProv), length(Bound, NB), NTotal is NProv + NB,
+        findall(ft(ATs, OT), fn_decl_arity(Fun, NTotal, ATs, OT), FullDecls),
+        ( FullDecls \== []
+          -> eff_arg_types(FullDecls, NB, NProv, EffTs),
+             translate_args_by_type(Args, EffTs, GsT, AVs0),
+             append(Bound, AVs0, AVs),
+             ( FullDecls = [Single] -> Chosen = Single, MultiDecl = false
+             ; MultiDecl = true,
+               include(decl_survives(AVs), FullDecls, Survivors),
+               ( Survivors == [] -> throw(error(no_matching_overload(Fun), typecheck))
+               ; Survivors = [OneLeft] -> Chosen = OneLeft
+               ; Chosen = multi(Survivors) ) ),
+             ( Chosen = ft(ATs, OT)
+               -> apply_call_args(declared, Fun, AVs, ATs, GuardGs),
+                  append([GsH, GsT, GuardGs], Inner),
+                  %overloaded functions: clauses were not output-checked against a
+                  %single declaration, so the call filters on the output type:
+                  overload_out_guard(MultiDecl, Fun, Out, OT, Extra),
+                  ( MultiDecl == false, arith_inline(Fun, AVs, Out, ArithGs)
+                    -> append(Inner, ArithGs, Goals)
+                     ; build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) ),
+                  set_call_out_type(Out, ATs, OT)
+                ; Chosen = multi(Survs),
+                  maplist(overload_branch(Fun, AVs, Out), Survs, Branches),
+                  disj_list(Branches, Disj),
+                  append(GsH, GsT, Pre),
+                  append(Pre, [goal_or_throw(Disj, error(no_matching_overload(Fun), typecheck))], Goals) )
+        ; findall(pt(PTs, RTs, OT), fn_decl_partial(Fun, NTotal, PTs, RTs, OT), PartDecls),
+          PartDecls = [pt(PTs, _, _)]
+          -> translate_args(Args, GsT, AVs0),                      %typed partial application
+             append(Bound, AVs0, AVs),
+             apply_call_args(declared, Fun, AVs, PTs, GuardGs),
+             append([GsH, GsT, GuardGs], Inner),
+             build_direct_call(Fun, AVs, Out, Inner, [], Goals)
+        ; findall(it(IATs, IOT), inferred_decl_arity(Fun, NTotal, IATs, IOT), [it(IATs, IOT)])
+          -> translate_args(Args, GsT, AVs0),                      %inferred type: knowledge only, never rejects
+             append(Bound, AVs0, AVs),
+             apply_call_args(inferred, Fun, AVs, IATs, GuardGs),
+             append([GsH, GsT, GuardGs], Inner),
+             build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
+             set_out_type(Out, IOT)
+        ; assumed_self_decl(Fun, NTotal, PTs, OutTv)
+          -> translate_args(Args, GsT, AVs0),                      %self-recursion under the provisional type
+             append(Bound, AVs0, AVs),
+             apply_call_args(inferred, Fun, AVs, PTs, GuardGs),
+             append([GsH, GsT, GuardGs], Inner),
+             build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
+             ( var(Out) -> add_known_type(Out, OutTv) ; true )
+        ; translate_args(Args, GsT, AVs0),                         %no type information
+          append(Bound, AVs0, AVs),
+          append(GsH, GsT, Inner),
+          build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
+          ( untyped_call_out(Fun, AVs, Out) -> true ; true ) ).
 
 %A provided arg position stays untranslated data iff every declaration types it
 %Expression; the effective type feeds translate_args_by_type, which only ever
@@ -660,11 +660,11 @@ translate_args([X|Xs], Goals, [V|Vs]) :- translate_expr(X, G1, V),
 %uniquely declared or inferred. The initial value's type is deliberately NOT
 %used as a fallback: the result comes from the accumulator function, and the
 %init only surfaces when the generator is empty.
-foldall_out_type(AFV, _Init, Out) :-
-    ( atom(AFV),
-      findall(OT, ( fn_decl_arity(AFV, 2, _, OT) ; inferred_decl_arity(AFV, 2, _, OT) ), [OT1])
-      -> set_out_type(Out, OT1)
-       ; true ).
+foldall_out_type(AFV, _Init, Out) :- ( atom(AFV),
+                                       findall(OT, ( fn_decl_arity(AFV, 2, _, OT)
+                                                   ; inferred_decl_arity(AFV, 2, _, OT) ), [OT1])
+                                       -> set_out_type(Out, OT1)
+                                        ; true ).
 
 %Build A ; B ; C ... from a list:
 disj_list([G], G).

@@ -199,23 +199,22 @@ note_candidates(Out, Val) :- ( var(Out)
 %runtime check is emitted even under --strict: strict mode forbids *implicit*
 %residual checks, while an ascription is an explicit, visible boundary.
 %An ascription that contradicts static knowledge is a compile-time error.
-ascribe_type(V, T, Gs) :-
-    ( var(T) -> Gs = []
-    ; wildcard_type_t(T) -> Gs = []
-    ; var(V) ->
-        ( known_singleton(V, K)
-          -> ( type_unify(K, T) -> Gs = []
-             ; \+ \+ type_unify(T, K)                %the ascribed type fits the known type
-               -> put_attr(V, tknown, [T]),          %(e.g. a union member): narrow to it, checked
-                  ( ground(T) -> guard_goal(V, T, G), Gs = [G] ; Gs = [] )
-             ; throw(error(type_conflict(existing(K), required(T)), typecheck)) )
-           ; add_known_type(V, T),
-             ( ground(T) -> guard_goal(V, T, G), Gs = [G] ; Gs = [] ) )
-    ; check_value(V, T, St),
-      ( St == ok -> Gs = []
-      ; St == mismatch -> throw(error(literal_type_mismatch(V, T), typecheck))
-      ; ground(T) -> guard_goal(V, T, G), Gs = [G]
-      ; Gs = [] ) ).
+ascribe_type(V, T, Gs) :- ( var(T) -> Gs = []
+                          ; wildcard_type_t(T) -> Gs = []
+                          ; var(V) ->
+                              ( known_singleton(V, K)
+                                -> ( type_unify(K, T) -> Gs = []
+                                   ; \+ \+ type_unify(T, K)       %the ascribed type fits the known type
+                                     -> put_attr(V, tknown, [T]), %(e.g. a union member): narrow to it, checked
+                                        ( ground(T) -> guard_goal(V, T, G), Gs = [G] ; Gs = [] )
+                                   ; throw(error(type_conflict(existing(K), required(T)), typecheck)) )
+                                 ; add_known_type(V, T),
+                                   ( ground(T) -> guard_goal(V, T, G), Gs = [G] ; Gs = [] ) )
+                          ; check_value(V, T, St),
+                            ( St == ok -> Gs = []
+                            ; St == mismatch -> throw(error(literal_type_mismatch(V, T), typecheck))
+                            ; ground(T) -> guard_goal(V, T, G), Gs = [G]
+                            ; Gs = [] ) ).
 
 %Derive match-pattern variable types from declared relation schemas: atoms
 %matched by (F ...) conform to F's declared argument types, and a pattern
@@ -263,14 +262,13 @@ set_call_out_type(Out, ATs, OT) :- ( nonvar(OT) -> set_out_type(Out, OT)
 
 %A call is statically dead when the same variable occupies two argument
 %positions whose required types can never both hold (e.g. (num-str $x $x)):
-same_call_var_conflict([V|Vs], [T|Ts]) :-
-    ( var(V), nonvar(T), \+ wildcard_type_t(T),
-      var_conflict_in_rest(V, T, Vs, Ts) -> true
-    ; same_call_var_conflict(Vs, Ts) ).
+same_call_var_conflict([V|Vs], [T|Ts]) :- ( var(V), nonvar(T), \+ wildcard_type_t(T),
+                                            var_conflict_in_rest(V, T, Vs, Ts) -> true
+                                          ; same_call_var_conflict(Vs, Ts) ).
 
-var_conflict_in_rest(V, T, [V2|Vs], [T2|Ts]) :-
-    ( V == V2, nonvar(T2), \+ wildcard_type_t(T2), \+ type_compat_soft(T, T2) -> true
-    ; var_conflict_in_rest(V, T, Vs, Ts) ).
+var_conflict_in_rest(V, T, [V2|Vs], [T2|Ts]) :- ( V == V2, nonvar(T2), \+ wildcard_type_t(T2),
+                                                  \+ type_compat_soft(T, T2) -> true
+                                                ; var_conflict_in_rest(V, T, Vs, Ts) ).
 
 %%% Static typing of values (translated call results, literals, closures):
 value_candidate_types(V, ['Number']) :- number(V), !.
@@ -449,21 +447,22 @@ arg_statically_ok(AV, T) :- \+ \+ ( var(AV) -> ( known_singleton(AV, K) -> type_
 
 %%% Effectful call-site argument checking, one arg. Mode 'declared' throws on
 %%% literal mismatches; mode 'inferred' only ever adds knowledge and guards:
-check_call_arg(Mode, Fun, AV, T, Gs) :-
-    ( var(AV) -> ( known_singleton(AV, K)
-                   -> ( nonvar(T), wildcard_type_t(T) -> Gs = []  %wildcards carry no knowledge: leave K alone
-                      ; type_unify(K, T) -> Gs = []
-                      ; taint_assumption(AV),                    %known conflict: runtime error carries the value
-                        type_guard(Fun, AV, T, Gs) )
-                 ; var(T) -> Gs = []
-                 ; wildcard_type_t(T) -> Gs = []
-                 ; type_guard(Fun, AV, T, Gs) )
-    ; check_value(AV, T, St),
-      ( St == ok -> Gs = []
-      ; St == mismatch -> ( Mode == declared
-                            -> throw(error(literal_type_mismatch(AV, T), typecheck))
-                             ; type_guard(Fun, AV, T, Gs) )
-      ; type_guard(Fun, AV, T, Gs) ) ).
+check_call_arg(Mode, Fun, AV, T, Gs) :- ( var(AV)
+                                          -> ( known_singleton(AV, K)
+                                               -> ( nonvar(T), wildcard_type_t(T) -> Gs = []  %wildcards carry no knowledge
+                                                  ; type_unify(K, T) -> Gs = []
+                                                  ; taint_assumption(AV),  %known conflict: runtime error carries the value
+                                                    type_guard(Fun, AV, T, Gs) )
+                                             ; var(T) -> Gs = []
+                                             ; wildcard_type_t(T) -> Gs = []
+                                             ; type_guard(Fun, AV, T, Gs) )
+                                        ; check_value(AV, T, St),
+                                          ( St == ok -> Gs = []
+                                          ; St == mismatch
+                                            -> ( Mode == declared
+                                                 -> throw(error(literal_type_mismatch(AV, T), typecheck))
+                                                  ; type_guard(Fun, AV, T, Gs) )
+                                          ; type_guard(Fun, AV, T, Gs) ) ).
 
 type_guard(Fun, AV, T, Gs) :- ( ground(T), \+ wildcard_type_t(T)
                                 -> ( strict_mode(true)
@@ -544,15 +543,15 @@ goal_or_throw(Goal, Error) :- ( call(Goal) *-> true ; throw(Error) ).
 %head selects exactly one overload is checked against it, a clause no overload
 %can produce is rejected, and a genuinely ambiguous clause (e.g. all-variable
 %head serving every overload) stays unchecked as before.
-clause_param_types(F, Args, DeclOut) :-
-    length(Args, N),
-    findall(ATs-OTx, fn_decl_arity(F, N, ATs, OTx), Decls),
-    ( Decls == [] -> DeclOut = none
-    ; Decls = [ATs1-OT] -> maplist(bind_param_type, Args, ATs1), DeclOut = out(OT)
-    ; include(clause_head_survives(Args), Decls, Survivors),
-      ( Survivors == [] -> throw(error(no_matching_overload(F), typecheck))
-      ; Survivors = [ATs1-OT] -> maplist(bind_param_type, Args, ATs1), DeclOut = out(OT)
-      ; DeclOut = none ) ).
+clause_param_types(F, Args, DeclOut) :- length(Args, N),
+                                        findall(ATs-OTx, fn_decl_arity(F, N, ATs, OTx), Decls),
+                                        ( Decls == [] -> DeclOut = none
+                                        ; Decls = [ATs1-OT] -> maplist(bind_param_type, Args, ATs1), DeclOut = out(OT)
+                                        ; include(clause_head_survives(Args), Decls, Survivors),
+                                          ( Survivors == [] -> throw(error(no_matching_overload(F), typecheck))
+                                          ; Survivors = [ATs1-OT] -> maplist(bind_param_type, Args, ATs1),
+                                                                     DeclOut = out(OT)
+                                          ; DeclOut = none ) ).
 
 clause_head_survives(Args, ATs-_) :- \+ \+ maplist(head_arg_soft, Args, ATs).
 head_arg_soft(A, T) :- ( var(A) -> true
@@ -577,22 +576,22 @@ bind_param_type(Arg, T) :- ( var(Arg) -> ( nonvar(T), \+ wildcard_type_t(T) -> a
 
 %Which union member does a pattern's shape select?
 pattern_selects_member(P, M) :- nonvar(M), nonvar(P),
-    ( list_type(M, _) -> ( P == [] ; P = [C|_], C == cons ; is_list(P) )
-    ; atom(M) -> \+ \+ structural_pattern_fields(P, M, _, _)
-    ; is_list(M), is_list(P) ->
-        ( M = [Tag|FTs], user_atom_type(Tag)
-          -> P = [Tag2|Fs], Tag2 == Tag, same_length(Fs, FTs)
-           ; same_length(P, M) )
-    ; fail ).
+                                ( list_type(M, _) -> ( P == [] ; P = [C|_], C == cons ; is_list(P) )
+                                ; atom(M) -> \+ \+ structural_pattern_fields(P, M, _, _)
+                                ; is_list(M), is_list(P)
+                                  -> ( M = [Tag|FTs], user_atom_type(Tag)
+                                       -> P = [Tag2|Fs], Tag2 == Tag, same_length(Fs, FTs)
+                                        ; same_length(P, M) )
+                                ; fail ).
 
 %A tagged pattern (Tag P1 ... Pn) against either the structural tuple type
 %(Tag T1 ... Tn) or a nominal type produced by Tag's constructor declaration:
-structural_pattern_fields(Arg, T, Fields, FieldTs) :-
-    is_list(Arg), Arg = [Tag|Fields], atom(Tag), nonvar(T),
-    ( T = [Tag2|FieldTs], Tag2 == Tag, same_length(Fields, FieldTs) -> true
-    ; atom(T), length(Fields, N),
-      findall(ATs-OT, fn_decl_arity(Tag, N, ATs, OT), [FieldTs-OT1]),
-      type_compat_soft(OT1, T) ).
+structural_pattern_fields(Arg, T, Fields, FieldTs) :- is_list(Arg), Arg = [Tag|Fields], atom(Tag), nonvar(T),
+                                                      ( T = [Tag2|FieldTs], Tag2 == Tag,
+                                                        same_length(Fields, FieldTs) -> true
+                                                      ; atom(T), length(Fields, N),
+                                                        findall(ATs-OT, fn_decl_arity(Tag, N, ATs, OT), [FieldTs-OT1]),
+                                                        type_compat_soft(OT1, T) ).
 
 %Contextual output typing for deliberately-undeclared builtins (one clause per
 %builtin; the translator consults this after translating an undeclared call):
@@ -603,16 +602,15 @@ untyped_call_out('union-atom', [A, B], Out) :- union_atom_out_type(A, B, Out).
 %cons stays undeclared (a global (List $a) signature would reject legal
 %heterogeneous expressions), but when the head provably fits the tail's list
 %type the result is known to be that list type:
-cons_out_type(H, Tl, Out) :-
-    ( var(Out),
-      ( var(Tl) -> known_singleton(Tl, TT), list_type(TT, T)
-      ; Tl == [] -> true
-      ; list_elem_type(Tl, T) ),
-      ( wildcard_type_t(T) -> true                 %(List %Undefined%): any head fits
-      ; var(H) -> known_singleton(H, K), type_unify(K, T)
-                ; check_value(H, T, St), St == ok )
-      -> set_out_type(Out, ['List', T])
-       ; true ).
+cons_out_type(H, Tl, Out) :- ( var(Out),
+                               ( var(Tl) -> known_singleton(Tl, TT), list_type(TT, T)
+                               ; Tl == [] -> true
+                               ; list_elem_type(Tl, T) ),
+                               ( wildcard_type_t(T) -> true    %(List %Undefined%): any head fits
+                               ; var(H) -> known_singleton(H, K), type_unify(K, T)
+                                         ; check_value(H, T, St), St == ok )
+                               -> set_out_type(Out, ['List', T])
+                                ; true ).
 
 %union-atom likewise stays undeclared, but concatenating two provably
 %compatible lists yields that list type:
@@ -657,31 +655,30 @@ bind_pattern_typed(P, T) :- ( var(P) -> ( nonvar(T), \+ wildcard_type_t(T) -> ad
 %Check the clause body's inferred output type against the declared output type:
 clause_output_goals(_, none, _, _, []) :- !.
 clause_output_goals(F, out(OT), ExpOut, BodyExpr, Gs) :-
-    ( var(OT) -> Gs = []
-    ; wildcard_type_t(OT) -> Gs = []
-    ; nonvar(BodyExpr), BodyExpr = [Q|_], Q == quote -> Gs = []
-    ; var(ExpOut) ->
-        ( known_candidates(ExpOut, Cs) ->
-            ( member(C, Cs), \+ type_compat_soft(C, OT), \+ refinement_pair(C, OT)
-              -> throw(error(type_conflict(existing(C), required(OT)), typecheck))
-            ; member(C, Cs), \+ type_compat_soft(C, OT)
-              -> type_guard(F, ExpOut, OT, Gs)                %possible runtime refinement
-               ; Gs = [] )
-        ; type_guard(F, ExpOut, OT, Gs) )
-    ; check_value(ExpOut, OT, St),
-      ( St == mismatch -> throw(error(literal_type_mismatch(ExpOut, OT), typecheck))
-      ; St == unknown -> type_guard(F, ExpOut, OT, Gs)
-      ; Gs = [] ) ).
+        ( var(OT) -> Gs = []
+        ; wildcard_type_t(OT) -> Gs = []
+        ; nonvar(BodyExpr), BodyExpr = [Q|_], Q == quote -> Gs = []
+        ; var(ExpOut) ->
+            ( known_candidates(ExpOut, Cs) ->
+                ( member(C, Cs), \+ type_compat_soft(C, OT), \+ refinement_pair(C, OT)
+                  -> throw(error(type_conflict(existing(C), required(OT)), typecheck))
+                ; member(C, Cs), \+ type_compat_soft(C, OT)
+                  -> type_guard(F, ExpOut, OT, Gs)            %possible runtime refinement
+                   ; Gs = [] )
+            ; type_guard(F, ExpOut, OT, Gs) )
+        ; check_value(ExpOut, OT, St),
+          ( St == mismatch -> throw(error(literal_type_mismatch(ExpOut, OT), typecheck))
+          ; St == unknown -> type_guard(F, ExpOut, OT, Gs)
+          ; Gs = [] ) ).
 
 %Strict mode: every compiled function needs a declared or inferred type
 %(lambdas exempt). Checked after clause translation so inference can run first:
-strict_check_function_typed(F, Args) :-
-    ( strict_mode(true), \+ sub_atom(F, 0, _, _, 'lambda_')
-      -> length(Args, N),
-         ( fn_decl_arity(F, N, _, _) -> true
-         ; inferred_decl_arity(F, N, _, _) -> true
-         ; throw(error(strict_missing_function_type(F, N), typecheck)) )
-       ; true ).
+strict_check_function_typed(F, Args) :- ( strict_mode(true), \+ sub_atom(F, 0, _, _, 'lambda_')
+                                          -> length(Args, N),
+                                             ( fn_decl_arity(F, N, _, _) -> true
+                                             ; inferred_decl_arity(F, N, _, _) -> true
+                                             ; throw(error(strict_missing_function_type(F, N), typecheck)) )
+                                           ; true ).
 
 %%% Local type inference for undeclared functions %%%
 %
@@ -697,24 +694,24 @@ strict_check_function_typed(F, Args) :-
 inferred_decl_arity(F, N, ATs, OT) :- inferred_fn_type(F, ATs, OT), length(ATs, N).
 
 begin_clause_inference(F, Args, Assume, saved(OldA, OldD, OldT)) :-
-    catch(b_getval('$assumptions', OldA), _, OldA = []),
-    catch(b_getval('$assume_decl', OldD), _, OldD = none),
-    catch(b_getval('$assump_taint', OldT), _, OldT = []),
-    length(Args, N),
-    ( \+ \+ fn_decl_arity(F, N, _, _) -> Assume = none, Pairs = [], Decl = none
-                                       ; foldl(assume_param_type, Args, t([], []), t(PairsR, PTsR)),
-                                         reverse(PairsR, Pairs), reverse(PTsR, PTs),
-                                         Assume = assume(Pairs),
-                                         Decl = d(F, N, PTs, _OutTv) ),
-    b_setval('$assumptions', Pairs),
-    b_setval('$assume_decl', Decl),
-    b_setval('$assump_taint', []).
+        catch(b_getval('$assumptions', OldA), _, OldA = []),
+        catch(b_getval('$assume_decl', OldD), _, OldD = none),
+        catch(b_getval('$assump_taint', OldT), _, OldT = []),
+        length(Args, N),
+        ( \+ \+ fn_decl_arity(F, N, _, _) -> Assume = none, Pairs = [], Decl = none
+                                           ; foldl(assume_param_type, Args, t([], []), t(PairsR, PTsR)),
+                                             reverse(PairsR, Pairs), reverse(PTsR, PTs),
+                                             Assume = assume(Pairs),
+                                             Decl = d(F, N, PTs, _OutTv) ),
+        b_setval('$assumptions', Pairs),
+        b_setval('$assume_decl', Decl),
+        b_setval('$assump_taint', []).
 
-assume_param_type(Arg, t(Ps, Ts), t(Ps1, [T|Ts])) :-
-    ( var(Arg) -> ( known_singleton(Arg, T) -> Ps1 = Ps
-                                             ; add_known_type(Arg, T), Ps1 = [a(Arg, T)|Ps] )
-    ; value_single_type(Arg, T) -> Ps1 = Ps
-    ; Ps1 = Ps ).
+assume_param_type(Arg, t(Ps, Ts), t(Ps1, [T|Ts])) :- ( var(Arg)
+                                                       -> ( known_singleton(Arg, T) -> Ps1 = Ps
+                                                          ; add_known_type(Arg, T), Ps1 = [a(Arg, T)|Ps] )
+                                                     ; value_single_type(Arg, T) -> Ps1 = Ps
+                                                     ; Ps1 = Ps ).
 
 taint_assumption(AV) :- ( catch(b_getval('$assumptions', Pairs), _, fail),
                           member(a(P, _), Pairs), P == AV
@@ -723,30 +720,29 @@ taint_assumption(AV) :- ( catch(b_getval('$assumptions', Pairs), _, fail),
                            ; true ).
 
 end_clause_inference(F, Args, ExpOut, Assume, saved(OldA, OldD, OldT)) :-
-    ( Assume = assume(Pairs) -> store_inferred_type(F, Pairs, Args, ExpOut) ; true ),
-    b_setval('$assumptions', OldA),
-    b_setval('$assume_decl', OldD),
-    b_setval('$assump_taint', OldT).
+        ( Assume = assume(Pairs) -> store_inferred_type(F, Pairs, Args, ExpOut) ; true ),
+        b_setval('$assumptions', OldA),
+        b_setval('$assume_decl', OldD),
+        b_setval('$assump_taint', OldT).
 
 %The provisional declaration of the clause being translated, for self-recursion:
 assumed_self_decl(F, N, PTs, OutTv) :- catch(b_getval('$assume_decl', D), _, fail),
                                        D = d(F, N, PTs, OutTv).
 
-store_inferred_type(F, Pairs, Args, ExpOut) :-
-    catch(b_getval('$assump_taint', Taints), _, Taints = []),
-    maplist(infer_param_type(Pairs, Taints), Args, ATs0),
-    infer_out_type(ExpOut, OT0),
-    maplist(normalize_inferred, ATs0, ATs),
-    normalize_inferred(OT0, OT),
-    ( member(T, [OT|ATs]), T \== '%Undefined%' -> merge_inferred(F, ATs, OT) ; true ).
+store_inferred_type(F, Pairs, Args, ExpOut) :- catch(b_getval('$assump_taint', Taints), _, Taints = []),
+                                               maplist(infer_param_type(Pairs, Taints), Args, ATs0),
+                                               infer_out_type(ExpOut, OT0),
+                                               maplist(normalize_inferred, ATs0, ATs),
+                                               normalize_inferred(OT0, OT),
+                                               ( member(T, [OT|ATs]), T \== '%Undefined%'
+                                                 -> merge_inferred(F, ATs, OT) ; true ).
 
-infer_param_type(Pairs, Taints, Arg, T) :-
-    ( var(Arg) -> ( memberchk_eq(Arg, Taints) -> T = '%Undefined%'
-                  ; member(a(P, Tv), Pairs), P == Arg -> T = Tv
-                  ; known_singleton(Arg, K) -> T = K
-                  ; T = '%Undefined%' )
-    ; value_single_type(Arg, T0) -> T = T0
-    ; T = '%Undefined%' ).
+infer_param_type(Pairs, Taints, Arg, T) :- ( var(Arg) -> ( memberchk_eq(Arg, Taints) -> T = '%Undefined%'
+                                                         ; member(a(P, Tv), Pairs), P == Arg -> T = Tv
+                                                         ; known_singleton(Arg, K) -> T = K
+                                                         ; T = '%Undefined%' )
+                                           ; value_single_type(Arg, T0) -> T = T0
+                                           ; T = '%Undefined%' ).
 
 infer_out_type(Out, T) :- ( var(Out) -> ( known_singleton(Out, K) -> T = K ; T = '%Undefined%' )
                           ; value_single_type(Out, T0) -> T = T0
@@ -761,15 +757,14 @@ normalize_inferred(T, T) :- ground(T), is_arrow_type(T), !.
 normalize_inferred(_, '%Undefined%').
 
 %Clauses of the same function are joined position-wise; disagreement widens:
-merge_inferred(F, ATs, OT) :-
-    length(ATs, N),
-    ( inferred_decl_arity(F, N, ATs0, OT0)
-      -> retract(inferred_fn_type(F, ATs0, OT0)),
-         maplist(join_inferred, ATs0, ATs, ATs1),
-         join_inferred(OT0, OT, OT1),
-         ( member(T, [OT1|ATs1]), T \== '%Undefined%'
-           -> assertz(inferred_fn_type(F, ATs1, OT1)) ; true )
-       ; assertz(inferred_fn_type(F, ATs, OT)) ).
+merge_inferred(F, ATs, OT) :- length(ATs, N),
+                              ( inferred_decl_arity(F, N, ATs0, OT0)
+                                -> retract(inferred_fn_type(F, ATs0, OT0)),
+                                   maplist(join_inferred, ATs0, ATs, ATs1),
+                                   join_inferred(OT0, OT, OT1),
+                                   ( member(T, [OT1|ATs1]), T \== '%Undefined%'
+                                     -> assertz(inferred_fn_type(F, ATs1, OT1)) ; true )
+                                 ; assertz(inferred_fn_type(F, ATs, OT)) ).
 
 join_inferred(A, B, J) :- ( A =@= B -> J = A ; J = '%Undefined%' ).
 

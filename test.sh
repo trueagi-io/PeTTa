@@ -17,11 +17,8 @@ run_test() {
     f="$1"
     mode_arg=$(mode_arg_for_test "$f")
     echo "Running $f"
-    if [ -n "$mode_arg" ]; then
-        output=$(sh run.sh "$f" "$mode_arg")
-    else
-        output=$(sh run.sh "$f")
-    fi
+    # $mode_arg is --strict or empty; unquoted so an empty value adds no argument
+    output=$(sh run.sh "$f" $mode_arg)
     error=$?
     output=$(echo "$output"  | grep "is " | grep " should ")
     echo "$output" | grep -q "❌"
@@ -44,11 +41,7 @@ run_expected_fail_test() {
     f="$1"
     mode_arg=$(mode_arg_for_test "$f")
     echo "Running (expected fail) $f"
-    if [ -n "$mode_arg" ]; then
-        output=$(sh run.sh "$f" "$mode_arg" 2>&1)
-    else
-        output=$(sh run.sh "$f" 2>&1)
-    fi
+    output=$(sh run.sh "$f" $mode_arg 2>&1)
     status=$?
     if [ $status -eq 0 ]; then
         echo "FAILURE in $f:"
