@@ -54,6 +54,14 @@ normalize_type(T, T).
 
 %%% Store maintenance, called from add_sexp/remove_sexp and forget_symbol.
 %%% Caching is idempotent so seeded builtins and imports do not duplicate:
+%A function type declared for a parenthesized name - (: (/?\) (-> ...)) - is a
+%malformed declaration that would otherwise be ignored silently:
+maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C, [Name], Type],
+                                      C == (:), atom(Name),
+                                      nonvar(Type), fn_type_shape(Type, _, _, _), !,
+                                      format(user_error,
+                                             "Warning: type declaration name (~w) is an expression; write (: ~w ...) to declare the function~n",
+                                             [Name, Name]).
 maybe_cache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term = [C, Name, Type],
                                         C == (:), atom(Name)
                                         -> ( nonvar(Type), fn_type_shape(Type, ATs, OT, Det)
