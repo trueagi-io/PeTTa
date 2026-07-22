@@ -528,7 +528,9 @@ runtime_tuple_ok([F|Fs], [T|Ts]) :- ( var(F) -> true ; runtime_type_ok(F, T) ),
 
 constrain_var_type(V, T) :- ( get_attr(V, mreq, Rs)
                               -> ( member(R, Rs), \+ type_compat_soft(R, T) -> fail
-                                 ; variant_member(T, Rs) -> true   %no duplicate growth on hot loops
+                                 %ground duplicates add nothing; nonground variants are NOT
+                                 %duplicates - their type vars can be bound independently:
+                                 ; ground(T), memberchk(T, Rs) -> true
                                  ; put_attr(V, mreq, [T|Rs]) )
                                ; put_attr(V, mreq, [T]) ).
 

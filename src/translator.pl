@@ -413,8 +413,8 @@ closure_apply_goal(HV, AVs, Out, apply_fnN(HV, AVs, Out)).
 
 %Runtime closure application; the last clause preserves reduce/2 semantics for
 %values (including unbound heads used symbolically) that are not callable.
-%Only a missing predicate (e.g. an arity the arrow type did not predict) falls
-%back to reduce - errors raised inside the callee propagate:
+%A missing predicate (e.g. an arity the arrow type did not predict) fails like
+%it always did - errors raised inside the callee propagate:
 apply_fn1(F, A, Out) :- atom(F), fun(F), !, safe_apply(call(F, A, Out)).
 apply_fn1(P, A, Out) :- compound(P), P = partial(F, Bs), !,
                         append(Bs, [A, Out], CallArgs),
