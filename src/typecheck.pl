@@ -593,6 +593,9 @@ bind_pattern_from(Pat, Val) :- ( nonvar(Pat),
 %Tolerant variant used where a non-matching pattern must not fail or throw
 %(case branches: a wrong pattern just never matches at runtime):
 bind_pattern_typed(P, T) :- ( var(P) -> ( nonvar(T), \+ wildcard_type_t(T) -> add_known_type(P, T) ; true )
+                            ; nonvar(T), T = [L, ET], L == 'List', P = [C, H, R], C == cons
+                              -> bind_pattern_typed(H, ET),    %source-form (cons H R) destructuring
+                                 bind_pattern_typed(R, ['List', ET])
                             ; nonvar(T), T = [L, ET], L == 'List', P = [H|Rest]
                               -> bind_pattern_typed(H, ET),
                                  bind_pattern_typed(Rest, ['List', ET])

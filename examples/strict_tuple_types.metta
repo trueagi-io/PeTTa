@@ -101,3 +101,19 @@
 
 !(test (maybe-number True) 1)
 !(test (collapse (maybe-number False)) ())
+
+; cons destructuring in let* keeps the mapped list's element type:
+; $first : Item, $rest : (List Item), no ascriptions needed.
+!(import! &self (library lib_roman))
+(: Item Type)
+(: Wrap (-> Number Item))
+(: item-val (-> Item Number))
+(= (item-val (Wrap $n)) $n)
+
+(: collect (-> (List Number) Number))
+(= (collect $xs)
+   (let* (($items (map-flat Wrap $xs))
+          ((cons $first $rest) $items))
+      (+ (item-val $first) (size-atom $rest))))
+
+!(test (collect (1 2 3)) 3)
