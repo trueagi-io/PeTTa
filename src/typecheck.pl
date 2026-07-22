@@ -269,8 +269,12 @@ value_candidate_types(partial(F, B), Cs) :- !,
                                                    bound_args_match(B, PTs),
                                                    append(RTs, [OT], Xs) ), Cs).
 value_candidate_types([], [['List', _]]) :- !.
+%A constructor application (STV 0.5 0.8) has the constructor's output type,
+%but only when its fields do not contradict the constructor's signature -
+%otherwise the value is unknown and the (runtime or strict) guard decides:
 value_candidate_types([H|Args], Cs) :- atom(H), length(Args, N), fn_decl_arity(H, N, _, _), !,
-                                findall(OT, fn_decl_arity(H, N, _, OT), Cs).
+                                findall(OT, ( fn_decl_arity(H, N, ATs, OT),
+                                              \+ \+ maplist(arg_soft_ok, Args, ATs) ), Cs).
 value_candidate_types(V, Cs) :- is_list(V), maplist(value_single_type, V, Ts), !, Cs = [Ts].
 value_candidate_types(_, []).
 

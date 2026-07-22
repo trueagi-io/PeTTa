@@ -53,3 +53,17 @@
    ((1.0 2.0) (3.0 4.0)))
 
 !(test (numeric-pairs) ((1.0 2.0) (3.0 4.0)))
+
+; Nominal constructor typing - the recommended idiom for named structures:
+; the constructor's declaration both types construction and binds pattern
+; fields, and signatures mention the abstract type name only.
+(: TV Type)
+(: STV (-> Number Number TV))
+
+(: tv-conf (-> TV Number))
+(= (tv-conf (STV $s $c)) $c)
+
+(: half-conf (-> TV TV))
+(= (half-conf (STV $s $c)) (STV $s (/ $c 2)))
+
+!(test (tv-conf (half-conf (STV 0.9 0.8))) 0.4)
