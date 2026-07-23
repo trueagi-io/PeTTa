@@ -37,6 +37,7 @@ setup(
     package_dir={"": "python"},
     include_package_data=True,
     cmdclass={"build_py": build_py_with_runtime},
+    entry_points={"console_scripts": ["petta=petta.cli:main"]},
     install_requires=[
         'janus-swi',
     ],
