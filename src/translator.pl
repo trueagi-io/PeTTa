@@ -24,12 +24,14 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
                                                translate_expr(BodyExpr, GoalsBody, ExpOut),
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
-                                               -> current_predicate(Base/Arity), length(Bound, N), M is (Arity - N) - 1,
+                                               -> arity(Base, Arity), length(Bound, N), M is (Arity - N) - 1,
                                                   length(ExtraArgs, M), append([Bound,ExtraArgs,[Out]],CallArgs), Goal =.. [Base|CallArgs],
                                                   append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs)
                                                ; FinalGoals= GoalsBody , HeadArgs = Args1, Out = ExpOut ),
                                                append(HeadArgs, [Out], FinalArgs),
                                                Head =.. [F|FinalArgs],
+                                               length(FinalArgs, CompiledArity),
+                                               (arity(F, CompiledArity) -> true ; assertz(arity(F, CompiledArity))),
                                                append(GoalsPrefix, FinalGoals, Goals),
                                                goals_list_to_conj(Goals, BodyConj).
 
@@ -46,6 +48,15 @@ goals_list_to_conj([], true)      :- !.
 goals_list_to_conj([G], G)        :- !.
 goals_list_to_conj([G|Gs], (G,R)) :- goals_list_to_conj(Gs, R).
 
+incomplete_application_kind(Fun, Arity, partial) :- ( arity(Fun, KnownArity), KnownArity >= Arity
+                                                     ; \+ arity(Fun, _) ), !.
+incomplete_application_kind(_, _, overapplied).
+
+throw_function_overapplication(Fun, ActualInputArity) :-
+    findall(InputArity, (arity(Fun, Arity), InputArity is Arity - 1), InputArities),
+    sort(InputArities, KnownInputArities),
+    throw(error(domain_error(function_input_arities(Fun, KnownInputArities), ActualInputArity), none)).
+
 % Runtime dispatcher: call F if it's a registered fun/1, else keep as list:
 reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                          -> % --- Case 1: callable predicate ---
@@ -55,7 +66,9 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                               -> append(Args,[Out],CallArgs),
                                  Goal =.. [F|CallArgs],
                                  catch(call(Goal),_,fail)
-                               ; Out = partial(F,Args) )
+                            ; incomplete_application_kind(F, Arity, partial)
+                              -> Out = partial(F,Args)
+                               ; throw_function_overapplication(F, N) )
                           ; % --- Case 2: partial closure ---
                             compound(F), F = partial(Base, Bound) -> append(Bound, Args, NewArgs),
                                                                      reduce([Base|NewArgs], Out)
@@ -255,7 +268,7 @@ translate_expr([H0|T0], Goals, Out) :-
                                            maybe_print_compiled_clause(Label, ['|->', Args, Body], Clause),
                                            length(FullArgs, N),
                                            Arity is N + 1,
-                                           assertz(arity(F, Arity)),
+                                           (arity(F, Arity) -> true ; assertz(arity(F, Arity))),
                                            % emit closure capturing the environment (free vars)
                                            ( FreeVars == [] -> Out = F
                                                              ; Out = partial(F, FreeVars) )
@@ -317,10 +330,14 @@ translate_expr([H0|T0], Goals, Out) :-
             -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
                list_to_set(TypeChains, UniqueTypeChains),
                ( UniqueTypeChains \= []
-                 -> maplist({Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
-                            typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), UniqueTypeChains, Branches),
-                    disj_list(Branches, Disj),
-                    Goals = [Disj]
+                 -> length(AllAVs, InputArity),
+                    Arity is InputArity + 1,
+                    ( incomplete_application_kind(Fun, Arity, ApplicationKind), ApplicationKind == overapplied
+                      -> append(GsH, [throw_function_overapplication(Fun, InputArity)], Goals)
+                       ; maplist({Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
+                                 typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), UniqueTypeChains, Branches),
+                         disj_list(Branches, Disj),
+                         Goals = [Disj] )
               ; build_call_or_partial(Fun, AllAVs, Out, Inner, [], Goals))
           %Literals (numbers, strings, etc.), known non-function atom => data:
           ; ( atomic(HV), \+ atom(HV) ; atom(HV), \+ fun(HV) ) -> Out = [HV|AVs],
@@ -337,13 +354,14 @@ build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                              Arity is N + 1,
                                                              ( maybe_specialize_call(Fun, AVs, Out, Goal)
                                                                -> append(Inner, [Goal|Extra], Goals)
-                                                                ; ( ( current_predicate(Fun/Arity) ; catch(arity(Fun, Arity), _, fail) ),
-                                                                     \+ ( current_op(_, _, Fun), Arity =< 2 ) )
+                                                                ; arity(Fun, Arity)
                                                                   -> append(AVs, [Out], Args),
                                                                      Goal =.. [Fun|Args],
                                                                      append(Inner, [Goal|Extra], Goals)
-                                                                   ; Out = partial(Fun, AVs),
-                                                                     append(Inner, Extra, Goals) ).
+                                                                ; incomplete_application_kind(Fun, Arity, partial)
+                                                                  -> Out = partial(Fun, AVs),
+                                                                     append(Inner, Extra, Goals)
+                                                                   ; append(Inner, [throw_function_overapplication(Fun, N)], Goals) ).
 
 %Type function call generation, returns function call plus typechecks for input and output:
 typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal) :-
