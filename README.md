@@ -35,7 +35,7 @@ A file can declare the repositories it needs as plain forms:
 
 ```metta
 (git-dependency "https://example/repo.git" "0123456789abcdef0123456789abcdef01234567")
-!(import! &self (library somelib))
+!(import! &self (library repo somelib))
 ```
 
 Declarations are satisfied after the file is parsed and before any of its forms
@@ -47,8 +47,8 @@ base directory: `(git-dependency url rev "build.sh" "./repos")`. A dependency ca
 declare its own dependencies in a `deps.metta` file at its repository root, and
 these are acquired transitively.
 
-For dynamic acquisition, the runnable `git-import!` from `(library lib_import)`
-retains the legacy URL-only, URL/build-command, and
+For dynamic acquisition, the core `git-import!` primitive supports URL-only,
+URL/build-command, and
 URL/build-command/base-directory forms. For a reproducible detached checkout,
 pass a fourth input in the order URL, build command, base directory, commit:
 
@@ -58,6 +58,10 @@ pass a fourth input in the order URL, build command, base directory, commit:
 
 Pinned imports accept only a full 40-character hexadecimal commit SHA;
 abbreviated SHAs, branches, and tags are rejected.
+
+The first argument of the three-argument `library` form is the repository name.
+It resolves through the exact canonical checkout registered by Git acquisition,
+including when a custom base directory is used.
 
 ## Notebooks, Servers, Browser
 

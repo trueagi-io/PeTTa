@@ -12,4 +12,4 @@
                                                                              ($function (superpose $importfunctions)))
                                                                             (import_prolog_function $function)))
 
-!(import_prolog_functions_from_file (library lib_import.pl) (static-import! git-import! use-module!))
+!(import_prolog_functions_from_file (library lib_import.pl) (static-import! use-module!))

@@ -48,9 +48,10 @@ run_prog() {
 }
 
 # Pinned acquisition, transitive manifest, and definitions placed above their imports.
-printf '(git-dependency "file://%s" "%s" "build.sh")\n(= (uses) (libfn 1))\n!(import! &self (library mylib))\n!(uses)\n(= (uses2) (transfn))\n!(import! &self (library translib))\n!(uses2)\n' \
+printf '(git-dependency "file://%s" "%s" "build.sh")\n(= (uses) (libfn 1))\n!(import! &self (library a mylib))\n!(uses)\n(= (uses2) (transfn))\n!(import! &self (library b translib))\n!(uses2)\n' \
     "$fixture/a.git" "$a2" > "$proj/prog.metta"
-run_prog "$proj/prog.metta" "$fixture/run1.log"
+run_prog "$proj/prog.metta" "$fixture/run1.log" ||
+    { echo "fresh run failed"; cat "$fixture/run1.log"; exit 1; }
 grep -q '(libok2 1)' "$fixture/run1.log" || { echo "fresh run: cross-repo call did not reduce"; cat "$fixture/run1.log"; exit 1; }
 grep -q 'trans-ok' "$fixture/run1.log" || { echo "fresh run: transitive dependency missing"; cat "$fixture/run1.log"; exit 1; }
 test "$(git -C "$proj/repos/a" rev-parse HEAD)" = "$a2"
@@ -60,16 +61,18 @@ test "$(cat "$proj/repos/a/.build-count")" = 1
 
 # A second run in the same directory reuses the checkout and produces identical
 # program output; only acquisition progress lines differ between fresh and reuse.
-run_prog "$proj/prog.metta" "$fixture/run2.log"
+run_prog "$proj/prog.metta" "$fixture/run2.log" ||
+    { echo "reuse run failed"; cat "$fixture/run2.log"; exit 1; }
 grep -v '^Running build:' "$fixture/run1.log" > "$fixture/run1.stripped"
 grep -v '^Running build:' "$fixture/run2.log" > "$fixture/run2.stripped"
 diff "$fixture/run1.stripped" "$fixture/run2.stripped" || { echo "dirty rerun diverged from fresh run"; exit 1; }
 test "$(cat "$proj/repos/a/.build-count")" = 1
 
 # Pinning a different commit retargets the existing checkout and reruns the build.
-printf '(git-dependency "file://%s" "%s" "build.sh")\n!(import! &self (library mylib))\n!(libfn 1)\n' \
+printf '(git-dependency "file://%s" "%s" "build.sh")\n!(import! &self (library a mylib))\n!(libfn 1)\n' \
     "$fixture/a.git" "$a1" > "$proj/retarget.metta"
-run_prog "$proj/retarget.metta" "$fixture/run3.log"
+run_prog "$proj/retarget.metta" "$fixture/run3.log" ||
+    { echo "retarget run failed"; cat "$fixture/run3.log"; exit 1; }
 grep -q '(libok 1)' "$fixture/run3.log" || { echo "retarget: old-revision definition not active"; cat "$fixture/run3.log"; exit 1; }
 test "$(git -C "$proj/repos/a" rev-parse HEAD)" = "$a1"
 test "$(cat "$proj/repos/a/.build-count")" = 2

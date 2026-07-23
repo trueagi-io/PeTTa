@@ -1,20 +1,8 @@
 %%%%%%%%%% Dependencies %%%%%%%%%%
 library(X, Path) :- standard_library_path(Base),
-                    atomic_list_concat([Base, '/', X], Path).
-library(X, Y, Path) :- resolve_library_path(library_path_candidate(X, Y), Path).
-
-library_path_candidate(X, Y, Path) :- library_path(Base),
-                                      atom_concat(_, X, Base),
-                                      atomic_list_concat([Base, '/', Y], Path).
-
-resolve_library_path(Candidate, Path) :- ( once((call(Candidate, ExistingPath),
-                                                  library_source_exists(ExistingPath)))
-                                           -> Path = ExistingPath
-                                            ; once(call(Candidate, Path)) ).
-
-library_source_exists(Path) :- exists_file(Path), !.
-library_source_exists(Path) :- file_name_extension(Path, metta, MettaPath),
-                               exists_file(MettaPath).
+                    directory_file_path(Base, X, Path).
+library(X, Y, Path) :- git_library_path(X, Base),
+                       directory_file_path(Base, Y, Path).
 :- prolog_load_context(directory, Source),
    directory_file_path(Source, '..', Parent),
    directory_file_path(Parent, 'lib', LibPath),
@@ -405,7 +393,7 @@ register_fun(N) :- assertz(fun(N)),
                           '<','>','==', '!=', '=', '=?', '<=', '>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
                           'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom', 'alpha-unique-atom',
                           repr, repra, parse, 'println!', 'readln!', test, assert, 'mm2-exec', atom_concat, atom_chars, copy_term, term_hash,
-                          foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'is-alpha-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!',
+                          foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'is-alpha-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!', 'git-import!',
                           'add-atom', 'remove-atom', 'get-atoms', match, 'is-var', 'is-ground', 'is-expr', 'is-space', 'get-mettatype',
                           decons, 'decons-atom', 'py-call', 'get-type', 'get-metatype', '=alpha', concat, sread, cons, reverse,
                           '#+','#-','#*','#div','#//','#mod','#min','#max','#<','#>','#=','#\\=','set_hook',
