@@ -26,7 +26,7 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
                                                -> current_predicate(Base/Arity), length(Bound, N), M is (Arity - N) - 1,
                                                   length(ExtraArgs, M), append(Bound, ExtraArgs, CallInArgs),
-                                                  resolve_runtime_call(Base, CallInArgs, Out, Goal),
+                                                  resolve_memoization(Base, CallInArgs, Out, Goal),
                                                   append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs)
                                                ; FinalGoals= GoalsBody , HeadArgs = Args1, Out = ExpOut ),
                                                append(HeadArgs, [Out], FinalArgs),
@@ -47,9 +47,8 @@ goals_list_to_conj([], true)      :- !.
 goals_list_to_conj([G], G)        :- !.
 goals_list_to_conj([G|Gs], (G,R)) :- goals_list_to_conj(Gs, R).
 
-resolve_runtime_call(Fun, Args, Out, Goal) :-
-    ( current_predicate(metta_try_dispatch_call/4),
-      metta_try_dispatch_call(Fun, Args, Out, Goal)
+resolve_memoization(Fun, Args, Out, Goal) :-
+    ( metta_memoized_dispatch_call(Fun, Args, Out, Goal)
     -> true
     ; append(Args, [Out], DirectArgs),
       Goal =.. [Fun|DirectArgs]
@@ -61,7 +60,7 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                             length(Args, N),
                             Arity is N + 1,
                             ( current_predicate(F/Arity) , \+ (current_op(_, _, F), Arity =< 2)
-                              -> resolve_runtime_call(F, Args, Out, Goal),
+                              -> resolve_memoization(F, Args, Out, Goal),
                                  catch(call(Goal), _, fail)
                                ; Out = partial(F,Args) )
                           ; % --- Case 2: partial closure ---
@@ -337,7 +336,7 @@ build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                                -> append(Inner, [Goal|Extra], Goals)
                                                                 ; ( ( current_predicate(Fun/Arity) ; catch(arity(Fun, Arity), _, fail) ),
                                                                      \+ ( current_op(_, _, Fun), Arity =< 2 ) )
-                                                                  -> resolve_runtime_call(Fun, AVs, Out, Goal),
+                                                                  -> resolve_memoization(Fun, AVs, Out, Goal),
                                                                      append(Inner, [Goal|Extra], Goals)
                                                                    ; Out = partial(Fun, AVs),
                                                                      append(Inner, Extra, Goals) ).

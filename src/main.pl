@@ -15,8 +15,7 @@ main :- current_prolog_flag(argv, Args),
         ; Args = [File|_] -> file_directory_name(File, Dir),
                              assertz(working_dir(Dir)),
                              load_metta_file(File,Results),
-                             exclude(=('Empty'), Results, VisibleResults),
-                             maplist(swrite,VisibleResults,ResultsR),
+                             maplist(swrite,Results,ResultsR),
                              maplist(format("~w~n"), ResultsR)
         ),
         halt.

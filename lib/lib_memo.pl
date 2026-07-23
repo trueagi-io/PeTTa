@@ -39,8 +39,8 @@
 
 % Runtime Hook Integration
 
-:- multifile metta_try_dispatch_call/4.
-metta_try_dispatch_call(Fun, Args, Out, Goal) :-
+:- multifile metta_memoized_dispatch_call/4.
+metta_memoized_dispatch_call(Fun, Args, Out, Goal) :-
     length(Args, CallArity),
     memoization_enabled_for_call(Fun, CallArity),
     Goal = cache_call(Fun, Args, Out).
@@ -765,7 +765,7 @@ cache_call(Fun, AVs, Out) :-
 
 % Public API
 
-'memoize'(Fun, 'Empty') :-
+'memoize'(Fun, true) :-
     ( atom(Fun), fun(Fun)
     -> true
     ; throw(error(domain_error(function_symbol, Fun), 'memoize!/2'))
@@ -778,7 +778,7 @@ cache_call(Fun, AVs, Out) :-
     enable_memoization(Fun),
     forall(member(Term, Terms), 'add-atom'('&self', Term, _)).
 
-'memoize'(Fun, CallArity, 'Empty') :-
+'memoize'(Fun, CallArity, true) :-
     ( atom(Fun), fun(Fun)
     -> true
     ; throw(error(domain_error(function_symbol, Fun), 'memoize!/3'))

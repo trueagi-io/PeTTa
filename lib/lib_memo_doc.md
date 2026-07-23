@@ -83,7 +83,7 @@ Dynamic predicates exposed in the runtime (for debugging and reasoning):
 Refer to source predicates if you need deeper internal debugging; avoid relying on internal facts for program logic unless you intend to keep compatibility with future changes.
 ## Integration Hooks & Synchronization
 The library integrates with the MeTTa runtime via multifile hooks:
-- `metta_try_dispatch_call/4` — intercepts dispatch to memoized functions
+- `metta_memoized_dispatch_call/4` — intercepts dispatch to memoized functions
 - `metta_on_function_changed/1` — triggers invalidation when a function implementation changes
 - `metta_on_function_removed/1` — invalidates and disables memoization when a function is removed
 Synchronization primitives:
