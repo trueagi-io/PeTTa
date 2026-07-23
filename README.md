@@ -45,8 +45,19 @@ when the pin changes, so a fresh clone and a machine with an existing checkout
 behave identically. Optional third and fourth values give a build command and a
 base directory: `(git-dependency url rev "build.sh" "./repos")`. A dependency can
 declare its own dependencies in a `deps.metta` file at its repository root, and
-these are acquired transitively. The runnable `git-import!` from `(library
-lib_import)` remains available for dynamic acquisition.
+these are acquired transitively.
+
+For dynamic acquisition, the runnable `git-import!` from `(library lib_import)`
+retains the legacy URL-only, URL/build-command, and
+URL/build-command/base-directory forms. For a reproducible detached checkout,
+pass a fourth input in the order URL, build command, base directory, commit:
+
+```metta
+!(git-import! "https://example/repo.git" "" "./repos" "0123456789abcdef0123456789abcdef01234567")
+```
+
+Pinned imports accept only a full 40-character hexadecimal commit SHA;
+abbreviated SHAs, branches, and tags are rejected.
 
 ## Notebooks, Servers, Browser
 
