@@ -1,4 +1,31 @@
 import uuid
+from unittest.mock import Mock
+
+import pytest
+
+
+@pytest.mark.parametrize(
+    ("verbose", "expected_binding"),
+    [(False, "false"), (True, "true")],
+)
+def test_run_helper_binds_verbose_atom(
+    monkeypatch, petta_module, verbose, expected_binding
+):
+    query_once = Mock(return_value={"Results": []})
+    monkeypatch.setattr(petta_module, "CONSULTED", True)
+    monkeypatch.setattr(petta_module, "janus", Mock(query_once=query_once))
+
+    petta_module.PeTTa(verbose=verbose).process_metta_string("!(+ 1 1)")
+
+    query_once.assert_called_once_with(
+        "run_metta_helper(Verbose, HelperName, Argument, Results)",
+        {
+            "Verbose": expected_binding,
+            "HelperName": "process_metta_string",
+            "Argument": "!(+ 1 1)",
+        },
+    )
+
 
 def test_load_metta_file_returns_list(petta_instance, dummy_metta_path):
     results = petta_instance.load_metta_file(str(dummy_metta_path))

@@ -1,10 +1,10 @@
 %%%%%%%%%% Dependencies %%%%%%%%%%
-library(X, Path) :- library_path(Base), atomic_list_concat([Base, '/', X], Path).
-library(X, Y, Path) :- library_path(Base), atomic_list_concat([Base, '/../', X, '/', Y], Path).
+library(X, Path) :- standard_library_path(Base), atomic_list_concat([Base, '/', X], Path).
+library(X, Y, Path) :- library_path(Base), atom_concat(_, X, Base), atomic_list_concat([Base, '/', Y], Path).
 :- prolog_load_context(directory, Source),
    directory_file_path(Source, '..', Parent),
    directory_file_path(Parent, 'lib', LibPath),
-   asserta(library_path(LibPath)).
+   asserta(standard_library_path(LibPath)).
 :- autoload(library(uuid)).
 :- use_module(library(random)).
 :- use_module(library(janus)).
@@ -328,8 +328,11 @@ importer_helper(Space, File) :- atom_string(File, SFile),
 'remove-translator-rule!'(HV, true) :- retractall(translator_rule(HV)).
 
 %%% Registration: %%%
-:- dynamic fun/1.
-register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
+:- dynamic fun/1, arity/2.
+register_fun(N) :- fun(N), !.
+register_fun(N) :- assertz(fun(N)),
+                   forall((current_predicate(N/Arity), \+ (current_op(_, _, N), Arity =< 2)),
+                          (arity(N, Arity) -> true ; assertz(arity(N, Arity)))).
 :- maplist(register_fun, [superpose, empty, let, 'let*', '+','-','*','/', '%', min, max, 'change-state!', 'get-state', 'bind!',
                           '<','>','==', '!=', '=', '=?', '<=', '>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
                           'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom', 'alpha-unique-atom',

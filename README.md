@@ -123,6 +123,17 @@ Notes and caveats:
   and `examples/type_dispatch_matrix.sh`, which asserts properties of the
   generated code itself.
 
+Git imports retain the legacy URL-only, URL/build-command, and
+URL/build-command/base-directory forms. For a reproducible detached checkout,
+pass a fourth input in the order URL, build command, base directory, commit:
+
+```metta
+!(git-import! "https://example/repo.git" "" "./repos" "0123456789abcdef0123456789abcdef01234567")
+```
+
+Pinned imports accept only a full 40-character hexadecimal commit SHA;
+abbreviated SHAs, branches, and tags are rejected.
+
 ## Notebooks, Servers, Browser
 
 ### Jupyter Notebook Support
