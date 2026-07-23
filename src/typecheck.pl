@@ -18,6 +18,16 @@
    ; memberchk('--strict', Argv) -> assertz(strict_mode(true)), assertz(strict_det(false))
                                   ; assertz(strict_mode(false)), assertz(strict_det(false)) ).
 
+%Soundness oracles (see examples/soundness_matrix.sh): --oracle re-emits the
+%output guard even where the checker discharged it statically, so a wrong
+%certification fails at runtime; --no-det-cut suppresses the determinism
+%commit, so a semantically nondeterministic det function shows extra results.
+:- dynamic oracle_mode/1.
+:- dynamic suppress_det_cut/1.
+:- current_prolog_flag(argv, Argv),
+   ( memberchk('--oracle', Argv) -> assertz(oracle_mode(true)) ; assertz(oracle_mode(false)) ),
+   ( memberchk('--no-det-cut', Argv) -> assertz(suppress_det_cut(true)) ; assertz(suppress_det_cut(false)) ).
+
 %%% Arrow shapes: prefix (-> A B) and infix determinism arrows (A -[det]-> B).
 %%% Under --strict-det a plain -> is a determinism commitment: functions are
 %%% deterministic unless declared -[nondet]->.
@@ -790,6 +800,20 @@ clause_output_goals(F, out(OT, ATs), ExpOut, BodyExpr, Gs) :-
           ( St == mismatch -> throw(error(literal_type_mismatch(ExpOut, OT), typecheck))
           ; St == unknown -> type_guard(F, ExpOut, OT, Gs)
           ; Gs = [] ) ).
+
+%Under --oracle a statically discharged output certification is re-verified
+%at runtime with the checker's OWN value relation (check_value): a definite
+%mismatch between the certified type and the actual value throws. The
+%reflective guard is deliberately not used here - it is weaker than the
+%checker (no constructor typing over erased brands, no quote exemption).
+oracle_output_check(DeclOut, Out, Gs0, Gs) :-
+    ( oracle_mode(true), DeclOut = out(OT, _), nonvar(OT), \+ wildcard_type_t(OT), Gs0 == []
+      -> Gs = [oracle_check(Out, OT)]
+       ; Gs = Gs0 ).
+
+oracle_check(V, T) :- copy_term(T, T2), check_value(V, T2, St),
+                      ( St == mismatch
+                        -> throw(error(literal_type_mismatch(V, T), typecheck)) ; true ).
 
 parametric_output_check(F, ExpOut) :- ( var(ExpOut)
                                         -> ( known_candidates(ExpOut, Cs), member(C, Cs), nonvar(C)

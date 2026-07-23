@@ -111,4 +111,16 @@ if [ $status -eq 0 ]; then
     fi
 fi
 
+# Soundness oracles (2 extra runs per example; skip with SKIP_SOUNDNESS=1):
+if [ $status -eq 0 ] && [ "${SKIP_SOUNDNESS:-0}" != "1" ]; then
+    echo ""
+    echo "Running examples/soundness_matrix.sh"
+    if sh examples/soundness_matrix.sh; then
+        echo "OK: soundness_matrix.sh"
+    else
+        echo "FAILURE in soundness_matrix.sh"
+        status=1
+    fi
+fi
+
 exit $status

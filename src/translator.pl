@@ -42,7 +42,8 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                ; FinalGoals= GoalsBody , HeadArgs = Args1, Out = ExpOut,
                                                  end_clause_inference(F, Args1, ExpOut, Assume, SavedInf),
                                                  ( ConstrainArgs == false -> OutChecks = []
-                                                 ; clause_output_goals(F, DeclOut, ExpOut, BodyExpr, OutChecks) ) ),
+                                                 ; clause_output_goals(F, DeclOut, ExpOut, BodyExpr, OutChecks0),
+                                                   oracle_output_check(DeclOut, Out, OutChecks0, OutChecks) ) ),
                                                ( ConstrainArgs == false -> true
                                                                          ; strict_check_function_typed(F, Args1) ),
                                                append(HeadArgs, [Out], FinalArgs),
@@ -56,7 +57,8 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                append([GoalsPrefix, Commit, FinalGoals, OutChecks], Goals),
                                                goals_list_to_conj(Goals, BodyConj).
 
-clause_commit_cut(F, Args) :- length(Args, N),
+clause_commit_cut(F, Args) :- \+ suppress_det_cut(true),
+                              length(Args, N),
                               catch(fn_determinism(F, N, det), _, fail).
 
 %%% Late binding across files. A call to a declared function whose definition
