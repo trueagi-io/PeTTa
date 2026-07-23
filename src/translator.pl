@@ -22,6 +22,7 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                                 ; Args1 = Args0, GoalsPrefix = [] ),
                                                catch(nb_getval(F, Prev), _, Prev = []),
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
+                                               retractall(det_analysis_cache(_, _, _)),  %clause set changed
                                                clause_param_types(F, Args1, DeclOut),
                                                %Specialized clause copies (ConstrainArgs == false) are instances of
                                                %already-validated clauses: bind their (more specific) param types for
@@ -175,8 +176,10 @@ translate_expr([H0|T0], Goals, Out) :-
                                                         disj_list(Branches, Disj),
                                                         append(GsH, [Disj], Goals)
         ; HV == collapse, T = [E] -> translate_expr_to_conj(E, Conj, EV),
-                                     %always a list; the element type stays open until known
-                                     ignore(value_single_type(EV, ET)),
+                                     %always a list; a single element type is carried, several
+                                     %become a union (an open variable would later unify with a
+                                     %concrete requirement and wrongly certify a mixed list):
+                                     collapse_elem_type(EV, ET),
                                      set_out_type(Out, ['List', ET]),
                                      append(GsH, [findall(EV, Conj, Out)], Goals)
         ; HV == cut, T = [] -> append(GsH, [(!)], Goals),
@@ -243,12 +246,18 @@ translate_expr([H0|T0], Goals, Out) :-
         %--- Short-circuit boolean operators ---:
         ; HV == 'and-then', T = [A, B] -> translate_expr_to_conj(A, ConjA, Av),
                                            translate_expr_to_conj(B, ConjB, Bv),
+                                           check_call_arg(declared, 'and-then', Av, 'Bool', GsA),
+                                           check_call_arg(declared, 'and-then', Bv, 'Bool', GsB),
+                                           goals_list_to_conj(GsA, GA), goals_list_to_conj(GsB, GB),
                                            set_out_type(Out, 'Bool'),
-                                           append(GsH, [(ConjA, (Av == true -> (ConjB, Out = Bv) ; Out = false))], Goals)
+                                           append(GsH, [(ConjA, GA, (Av == true -> (ConjB, GB, Out = Bv) ; Out = false))], Goals)
         ; HV == 'or-else', T = [A, B] -> translate_expr_to_conj(A, ConjA, Av),
                                           translate_expr_to_conj(B, ConjB, Bv),
+                                          check_call_arg(declared, 'or-else', Av, 'Bool', GsA),
+                                          check_call_arg(declared, 'or-else', Bv, 'Bool', GsB),
+                                          goals_list_to_conj(GsA, GA), goals_list_to_conj(GsB, GB),
                                           set_out_type(Out, 'Bool'),
-                                          append(GsH, [(ConjA, (Av == true -> Out = true ; (ConjB, Out = Bv)))], Goals)
+                                          append(GsH, [(ConjA, GA, (Av == true -> Out = true ; (ConjB, GB, Out = Bv)))], Goals)
         %--- Unification constructs ---:
         ; (HV == let ; HV == chain), T = [Pat, Val, In] -> translate_expr(Pat, Gp, Pv),
                                                            translate_expr(Val, Gv, V),
@@ -360,8 +369,10 @@ translate_expr([H0|T0], Goals, Out) :-
                                      append(ArgsOut, [Out], CallArgs),
                                      Goal =.. [F|CallArgs],
                                      length(Args, NC),
+                                     manual_dispatch_arg_checks(F, NC, ArgsOut, GuardGs),
                                      set_unique_decl_out(F, NC, Out),
-                                     append(Inner, [Goal], Goals)
+                                     append(Inner, GuardGs, Inner1),
+                                     append(Inner1, [Goal], Goals)
         %Produce a dynamic dispatch, translating Args for nesting:
         ; HV == reduce, T = [Expr] -> ( var(Expr) -> translate_expr(Expr, GsH, ExprOut),
                                                      Goals = [reduce(ExprOut, Out)|GsH]
@@ -370,8 +381,10 @@ translate_expr([H0|T0], Goals, Out) :-
                                                      append(GsH, GsArgs, Inner),
                                                      ExprOut = [F|ArgsOut],
                                                      length(Args, NR),
+                                                     manual_dispatch_arg_checks(F, NR, ArgsOut, GuardGs),
                                                      set_unique_decl_out(F, NR, Out),
-                                                     append(Inner, [reduce(ExprOut, Out)], Goals) )
+                                                     append(Inner, GuardGs, Inner1),
+                                                     append(Inner1, [reduce(ExprOut, Out)], Goals) )
         %Invoke translator to evaluate MeTTa code as data/list:
         ; HV == eval, T = [Arg] -> ( nonvar(Arg), Arg = [Q, Quoted], Q == quote
                                      -> translate_expr(Quoted, GsQ, Out),           %(eval (quote E)) == E
@@ -424,7 +437,10 @@ translate_expr([H0|T0], Goals, Out) :-
         %expression data construction, compiled and typed as such:
         ; translate_args(T, GsT, AVs),
           append(GsH, GsT, Inner),
-          ( translate_closure_call(HV, AVs, Inner, Goals, Out) -> true
+          ( var(HV), AVs == []               %singleton ($x) is data, never an application
+            -> Out = [HV],
+               Goals = Inner
+          ; translate_closure_call(HV, AVs, Inner, Goals, Out) -> true
           ; var(HV), known_singleton(HV, K), nonfunction_type(K)
             -> Out = [HV|AVs],
                Goals = Inner
@@ -448,7 +464,24 @@ translate_closure_call(HV, AVs, Inner, Goals, Out) :- var(HV), AVs \== [], known
                                                       append(Inner, GuardGs, Inner1),
                                                       closure_apply_goal(HV, AVs, Out, Goal),
                                                       append(Inner1, [Goal], Goals),
-                                                      set_out_type(Out, OutT).
+                                                      %a variable arrow output is knowledge too: it is the
+                                                      %declaration-instance type var shared with the context
+                                                      %(e.g. map-flat's element type), not an unknown:
+                                                      ( var(Out), var(OutT) -> add_known_type(Out, OutT)
+                                                                             ; set_out_type(Out, OutT) ).
+%Underapplying a typed closure parameter builds a partial: the used argument
+%positions are checked and the result carries the remaining arrow:
+translate_closure_call(HV, AVs, Inner, Goals, Out) :- var(HV), AVs \== [], known_singleton(HV, K),
+                                                      nonvar(K), K = [H|Xs],
+                                                      ( H == (->) ; H == '-[nondet]->' ),
+                                                      length(AVs, N), length(Xs, LX), N < LX - 1,
+                                                      append(ArgTs, [OutT], Xs),
+                                                      length(UsedTs, N), append(UsedTs, RestTs, ArgTs),
+                                                      apply_call_args(declared, closure, AVs, UsedTs, GuardGs),
+                                                      append(Inner, GuardGs, Inner1),
+                                                      append(Inner1, [reduce([HV|AVs], Out)], Goals),
+                                                      append(RestTs, [OutT], RXs),
+                                                      ( var(Out) -> add_known_type(Out, [H|RXs]) ; true ).
 
 closure_apply_goal(HV, [A], Out, apply_fn1(HV, A, Out)) :- !.
 closure_apply_goal(HV, [A, B], Out, apply_fn2(HV, A, B, Out)) :- !.
@@ -524,6 +557,13 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
              apply_call_args(declared, Fun, AVs, PTs, GuardGs),
              append([GsH, GsT, GuardGs], Inner),
              build_direct_call(Fun, AVs, Out, Inner, [], Goals)
+        ; assumed_self_decl(Fun, NTotal, PTs, OutTv)
+          -> translate_args(Args, GsT, AVs0),                      %self-recursion under the provisional type
+             append(Bound, AVs0, AVs),                             %(before the store: earlier clauses' inference
+             apply_call_args(inferred, Fun, AVs, PTs, GuardGs),    %is stale while later clauses widen it)
+             append([GsH, GsT, GuardGs], Inner),
+             build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
+             ( var(Out) -> add_known_type(Out, OutTv) ; true )
         ; findall(it(IATs, IOT), inferred_decl_arity(Fun, NTotal, IATs, IOT), [it(IATs, IOT)])
           -> translate_args(Args, GsT, AVs0),                      %inferred type: knowledge only, never rejects
              append(Bound, AVs0, AVs),
@@ -531,13 +571,6 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
              append([GsH, GsT, GuardGs], Inner),
              build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
              set_out_type(Out, IOT)
-        ; assumed_self_decl(Fun, NTotal, PTs, OutTv)
-          -> translate_args(Args, GsT, AVs0),                      %self-recursion under the provisional type
-             append(Bound, AVs0, AVs),
-             apply_call_args(inferred, Fun, AVs, PTs, GuardGs),
-             append([GsH, GsT, GuardGs], Inner),
-             build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
-             ( var(Out) -> add_known_type(Out, OutTv) ; true )
         ; translate_args(Args, GsT, AVs0),                         %no type information
           append(Bound, AVs0, AVs),
           append(GsH, GsT, Inner),
@@ -704,11 +737,21 @@ translate_args([X|Xs], Goals, [V|Vs]) :- translate_expr(X, G1, V),
 %uniquely declared or inferred. The initial value's type is deliberately NOT
 %used as a fallback: the result comes from the accumulator function, and the
 %init only surfaces when the generator is empty.
-foldall_out_type(AFV, _Init, Out) :- ( atom(AFV),
-                                       findall(OT, ( fn_decl_arity(AFV, 2, _, OT)
-                                                   ; inferred_decl_arity(AFV, 2, _, OT) ), [OT1])
-                                       -> set_out_type(Out, OT1)
-                                        ; true ).
+%foldall returns Init when the generator is empty, so the accumulator's
+%output type is only trustworthy when the initial value fits it too:
+foldall_out_type(AFV, Init, Out) :- ( atom(AFV),
+                                      findall(OT, ( fn_decl_arity(AFV, 2, _, OT)
+                                                  ; inferred_decl_arity(AFV, 2, _, OT) ), [OT1]),
+                                      ( var(Init) -> ( known_singleton(Init, IT) -> \+ \+ type_unify(IT, OT1) ; true )
+                                      ; value_single_type(Init, IT) -> \+ \+ type_unify(IT, OT1)
+                                      ; true )
+                                      -> set_out_type(Out, OT1)
+                                       ; true ).
+
+collapse_elem_type(EV, ET) :- ( var(EV), known_candidates(EV, Cs)
+                                -> ( Cs = [C1] -> ET = C1 ; ET = ['|'|Cs] )
+                              ; nonvar(EV), value_single_type(EV, ET0) -> ET = ET0
+                              ; true ).
 
 %Build A ; B ; C ... from a list:
 disj_list([G], G).

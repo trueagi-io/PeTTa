@@ -119,14 +119,14 @@
 (: @ (-> $a $b $a))
 (= (@ $a $b) (let $a $b $a))
 
-(: head (-> $a (List $a)))
+(: head (-> $a %Undefined%))
 (= (head $x) (cons $x $xs))
-(: tail (-> (List $a) (List $a)))
+(: tail (-> (List $a) %Undefined%))
 (= (tail $xs) (cons $x $xs))
 
-(: mylast ($a -[nondet]-> (List $a)))
+(: mylast ($a -[nondet]-> %Undefined%))
 (= (mylast $x) (union-atom $xs ($x)))
-(: init ((List $a) -[nondet]-> (List $a)))
+(: init ((List $a) -[nondet]-> %Undefined%))
 (= (init $xs) (union-atom $xs ($x)))
 
 (: rcons (-> (List $a) $a (List $a)))

@@ -257,8 +257,11 @@ note_list_elem_type(XVar, L) :-
     ( var(XVar), list_elem_type(L, ET) -> add_known_type(XVar, ET) ; true ).
 
 list_elem_type(L, ET) :- var(L), !, known_singleton(L, ['List', ET0]), ground(ET0), ET = ET0.
+%A variable element type is fine for literal lists: it is a declaration
+%instance var (e.g. rcons appending an $a onto a (List $a)), compared by
+%identity so distinct unknowns do not conflate:
 list_elem_type(L, ET) :- is_list(L), L = [E|Es],
-                         value_single_type(E, ET), ground(ET),
+                         value_single_type(E, ET),
                          forall(member(E2, Es), ( value_single_type(E2, T2), T2 == ET )).
 
 add_known_types(V, Cs) :- maplist(add_known_type(V), Cs).
@@ -269,6 +272,12 @@ set_out_type(Out, OT) :- ( var(Out), nonvar(OT), \+ wildcard_type_t(OT) -> add_k
 %When F/N has exactly one declared output type, the call result is that type:
 set_unique_decl_out(F, N, Out) :- ( atom(F), findall(OT, fn_decl_arity(F, N, _, OT), [OT1])
                                     -> set_out_type(Out, OT1) ; true ).
+
+%Manual call/reduce dispatch bypasses typed translation, not typing: when the
+%target has exactly one declaration at this arity, its input checks apply:
+manual_dispatch_arg_checks(F, N, AVs, Gs) :- ( atom(F), findall(ATs, fn_decl_arity(F, N, ATs, _), [ATs1])
+                                               -> apply_call_args(declared, F, AVs, ATs1, Gs)
+                                                ; Gs = [] ).
 
 %Call-site output typing. An output type variable that occurs in no argument
 %type is universally quantified - by parametricity only a bottom function
@@ -286,7 +295,10 @@ same_call_var_conflict([V|Vs], [T|Ts]) :- ( var(V), nonvar(T), \+ wildcard_type_
                                           ; same_call_var_conflict(Vs, Ts) ).
 
 var_conflict_in_rest(V, T, [V2|Vs], [T2|Ts]) :- ( V == V2, nonvar(T2), \+ wildcard_type_t(T2),
-                                                  \+ type_compat_soft(T, T2) -> true
+                                                  %symmetric: a conflict needs NO common inhabitant,
+                                                  %not merely directional incompatibility (unions!):
+                                                  \+ type_compat_soft(T, T2),
+                                                  \+ type_compat_soft(T2, T) -> true
                                                 ; var_conflict_in_rest(V, T, Vs, Ts) ).
 
 %%% Static typing of values (translated call results, literals, closures):
@@ -494,7 +506,9 @@ check_call_arg(Mode, Fun, AV, T, Gs) :- ( var(AV)
                                                   ; type_guard(Fun, AV, T, Gs) )
                                           ; type_guard(Fun, AV, T, Gs) ) ).
 
-type_guard(Fun, AV, T, Gs) :- ( ground(T), \+ wildcard_type_t(T)
+%Open structured types (e.g. (List $a)) still guard their outer shape; only a
+%fully unconstrained type variable needs no check at all:
+type_guard(Fun, AV, T, Gs) :- ( nonvar(T), \+ wildcard_type_t(T)
                                 -> ( strict_mode(true)
                                      -> throw(error(strict_runtime_typecheck(Fun, typecheck_or_error(AV, T)), typecheck))
                                       ; guard_goal(AV, T, G), Gs = [G] )
@@ -578,11 +592,11 @@ goal_or_throw(Goal, Error) :- ( call(Goal) *-> true ; throw(Error) ).
 clause_param_types(F, Args, DeclOut) :- length(Args, N),
                                         findall(ATs-OTx, fn_decl_arity(F, N, ATs, OTx), Decls),
                                         ( Decls == [] -> DeclOut = none
-                                        ; Decls = [ATs1-OT] -> maplist(bind_param_type, Args, ATs1), DeclOut = out(OT)
+                                        ; Decls = [ATs1-OT] -> maplist(bind_param_type, Args, ATs1), DeclOut = out(OT, ATs1)
                                         ; include(clause_head_survives(Args), Decls, Survivors),
                                           ( Survivors == [] -> throw(error(no_matching_overload(F), typecheck))
                                           ; Survivors = [ATs1-OT] -> maplist(bind_param_type, Args, ATs1),
-                                                                     DeclOut = out(OT)
+                                                                     DeclOut = out(OT, ATs1)
                                           ; DeclOut = none ) ).
 
 clause_head_survives(Args, ATs-_) :- \+ \+ maplist(head_arg_soft, Args, ATs).
@@ -590,8 +604,11 @@ head_arg_soft(A, T) :- ( var(A) -> true
                        ; check_value(A, T, St) -> St \== mismatch
                        ; true ).
 
-bind_param_type(Arg, T) :- ( var(Arg) -> ( nonvar(T), \+ wildcard_type_t(T) -> add_known_type(Arg, T)
-                                                                             ; true )
+bind_param_type(Arg, T) :- ( var(Arg) -> ( nonvar(T) -> ( \+ wildcard_type_t(T) -> add_known_type(Arg, T)
+                                                                                  ; true )
+                                           %a variable type is the declaration instance: recording it
+                                           %lets identical unknowns be recognized (e.g. rcons's $a):
+                                           ; add_known_type(Arg, T) )
                            ; list_type(T, ET), Arg = [H|Rest]
                              -> bind_param_type(H, ET),          %type element vars of list patterns
                                 bind_param_type(Rest, ['List', ET])
@@ -694,10 +711,17 @@ bind_pattern_typed(P, T) :- ( var(P) -> ( nonvar(T), \+ wildcard_type_t(T) -> ad
 
 %Check the clause body's inferred output type against the declared output type:
 clause_output_goals(_, none, _, _, []) :- !.
-clause_output_goals(F, out(OT), ExpOut, BodyExpr, Gs) :-
-        ( var(OT) -> Gs = []
+clause_output_goals(F, out(OT, ATs), ExpOut, BodyExpr, Gs) :-
+        %A declared output type variable occurring in no argument type claims
+        %parametric polymorphism: only a bottom body (no value of its own) can
+        %honor it, so a body with a concrete result type is rejected:
+        ( var(OT) -> ( term_variables(ATs, Vs), \+ memberchk_eq(OT, Vs)
+                       -> parametric_output_check(F, ExpOut) ; true ),
+                     Gs = []
         ; wildcard_type_t(OT) -> Gs = []
-        ; nonvar(BodyExpr), BodyExpr = [Q|_], Q == quote -> Gs = []
+        %quoted CODE is exempt from output checking; a quoted literal is just
+        %that literal and is checked like any other value:
+        ; nonvar(BodyExpr), BodyExpr = [Q, QV], Q == quote, \+ atomic(QV) -> Gs = []
         ; var(ExpOut) ->
             ( known_candidates(ExpOut, Cs) ->
                 ( member(C, Cs), \+ type_compat_soft(C, OT), \+ refinement_pair(C, OT)
@@ -710,6 +734,11 @@ clause_output_goals(F, out(OT), ExpOut, BodyExpr, Gs) :-
           ( St == mismatch -> throw(error(literal_type_mismatch(ExpOut, OT), typecheck))
           ; St == unknown -> type_guard(F, ExpOut, OT, Gs)
           ; Gs = [] ) ).
+
+parametric_output_check(F, ExpOut) :- ( var(ExpOut)
+                                        -> ( known_candidates(ExpOut, Cs), member(C, Cs), nonvar(C)
+                                             -> throw(error(non_parametric_output(F), typecheck)) ; true )
+                                         ; throw(error(non_parametric_output(F), typecheck)) ).
 
 %Strict mode: every compiled function needs a declared or inferred type
 %(lambdas exempt). Checked after clause translation so inference can run first:
@@ -839,9 +868,14 @@ ensure_non_overlapping_clause_heads(F, Args, [fun_meta(PrevArgs, PrevBody)|Rest]
       -> throw(error(overlapping_deterministic_clauses(F, Args, PrevArgs), determinism))
        ; ensure_non_overlapping_clause_heads(F, Args, Rest) ).
 
+%Only a cut guaranteed to execute before any failure or choice point makes
+%the compiler's clause-entry commit equivalent to the source cut: the body
+%must BE (cut), or bind it as the first let/let* value. A cut somewhere
+%deeper (e.g. inside an if branch) may never run, so it exempts nothing.
 body_commits(E) :- nonvar(E),
                    ( E = [C], C == cut -> true
-                   ; is_list(E), member(X, E), body_commits(X) -> true
+                   ; E = [L, _, V, _], L == let -> nonvar(V), V = [C], C == cut
+                   ; E = [L, [[_, V]|_], _], L == 'let*' -> nonvar(V), V = [C], C == cut
                    ; fail ).
 
 clause_heads_overlap(ArgsA, ArgsB) :- copy_term((ArgsA, ArgsB), (CA, CB)),
@@ -851,8 +885,46 @@ builtin_call_determinism(superpose, 1, nondet).
 builtin_call_determinism(empty, 0, nondet).
 
 function_call_determinism(F, N, Det) :- builtin_call_determinism(F, N, Det), !.
-function_call_determinism(F, N, Det) :- catch(fn_determinism(F, N, Det), _, fail), !.
-function_call_determinism(_, _, unspecified).
+function_call_determinism(F, N, Det) :- catch(fn_determinism(F, N, Det0), _, fail),
+                                        Det0 \== unspecified, !, Det = Det0.
+function_call_determinism(F, N, Det) :- body_determinism(F, N, Det).
+
+%A deterministic caller needs positive evidence about its callees. Functions
+%without a determinism arrow are analyzed from their translated clauses
+%(bodies deterministic, heads non-overlapping), memoized, and treated as det
+%on cycles (a recursive call cannot introduce what the rest disproves).
+%A registered predicate with no MeTTa clauses is a Prolog builtin: det
+%unless listed in builtin_call_determinism.
+:- dynamic det_analysis_cache/3.
+
+body_determinism(F, N, Det) :- det_analysis_cache(F, N, Det0), !, Det = Det0.
+body_determinism(F, _, det) :- catch(b_getval('$det_stack', St), _, St = []),
+                               memberchk(F, St), !.
+body_determinism(F, N, Det) :- catch(nb_getval(F, Metas0), _, Metas0 = []),
+                               include(arity_meta(N), Metas0, Metas),
+                               ( Metas == []
+                                 -> Arity is N + 1,
+                                    ( functor(H, F, Arity), predicate_property(H, defined)
+                                      -> Det = det ; Det = unspecified )
+                                  ; catch(b_getval('$det_stack', St), _, St = []),
+                                    b_setval('$det_stack', [F|St]),
+                                    clause_set_determinism(Metas, Det0),
+                                    b_setval('$det_stack', St),
+                                    Det = Det0,
+                                    assertz(det_analysis_cache(F, N, Det)) ).
+
+arity_meta(N, fun_meta(Args, _)) :- length(Args, N).
+
+clause_set_determinism(Metas, Det) :- ( member(fun_meta(_, B), Metas),
+                                        deterministic_expr(B, R), R \== ok
+                                        -> ( R = nondeterministic(_) -> Det = nondet ; Det = unspecified )
+                                      ; overlapping_meta_pair(Metas) -> Det = nondet
+                                      ; Det = det ).
+
+overlapping_meta_pair(Metas) :- append(_, [fun_meta(A1, _)|Rest], Metas),
+                                member(fun_meta(A2, B2), Rest),
+                                clause_heads_overlap(A1, A2),
+                                \+ body_commits(B2).
 
 deterministic_expr(Expr, ok) :- ( var(Expr) ; atomic(Expr) ; Expr = partial(_, _) ), !.
 %A variable head must not unify with the construct patterns below. Under
@@ -900,9 +972,10 @@ deterministic_expr([Head|_], unknown(dynamic_head(Head))).
 
 deterministic_call_expr([Fun|Args], Result) :- atom(Fun), !,
                                                length(Args, N),
-                                               ( function_call_determinism(Fun, N, nondet)
-                                                 -> Result = nondeterministic(call(Fun))
-                                                  ; combine_determinism_list(Args, Result) ).
+                                               function_call_determinism(Fun, N, Det),
+                                               ( Det == nondet -> Result = nondeterministic(call(Fun))
+                                               ; Det == det -> combine_determinism_list(Args, Result)
+                                               ; Result = unknown(undetermined_call(Fun)) ).
 deterministic_call_expr(Expr, unknown(dynamic_call(Expr))).
 
 combine_determinism_list([], ok).
