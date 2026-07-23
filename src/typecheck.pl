@@ -10,20 +10,28 @@
 :- dynamic declared_value_type/2.  % declared_value_type(Name, Type)
 :- dynamic strict_mode/1.
 
-:- current_prolog_flag(argv, Argv),
-   ( memberchk('--strict', Argv) -> assertz(strict_mode(true))
-                                  ; assertz(strict_mode(false)) ).
+:- dynamic strict_det/1.
 
-%%% Arrow shapes: prefix (-> A B) and infix determinism arrows (A -[det]-> B):
-arrow_det('->', unspecified).
+:- current_prolog_flag(argv, Argv),
+   ( memberchk('--strict-det', Argv) -> assertz(strict_mode(true)), assertz(strict_det(true))
+   ; memberchk('--strict', Argv) -> assertz(strict_mode(true)), assertz(strict_det(false))
+                                  ; assertz(strict_mode(false)), assertz(strict_det(false)) ).
+
+%%% Arrow shapes: prefix (-> A B) and infix determinism arrows (A -[det]-> B).
+%%% Under --strict-det a plain -> is a determinism commitment: functions are
+%%% deterministic unless declared -[nondet]->.
+plain_arrow_det(Det) :- ( strict_det(true) -> Det = det ; Det = unspecified ).
+
+arrow_det('->', Det) :- plain_arrow_det(Det).
 arrow_det('-[det]->', det).
 arrow_det('-[deterministic]->', det).
 arrow_det('-[nondet]->', nondet).
 arrow_det('-[nondeterministic]->', nondet).
 
-fn_type_shape(Type, ArgTypes, OutType, unspecified) :- is_list(Type), Type = [Arrow|Xs],
-                                                       Arrow == (->), !,
-                                                       append(ArgTypes, [OutType], Xs).
+fn_type_shape(Type, ArgTypes, OutType, Det) :- is_list(Type), Type = [Arrow|Xs],
+                                               Arrow == (->), !,
+                                               plain_arrow_det(Det),
+                                               append(ArgTypes, [OutType], Xs).
 %Juxtaposed infix form (A B -[det]-> C): a single arrow before the output type:
 fn_type_shape(Type, ArgTypes, OutType, Det) :- is_list(Type),
                                                append(ArgTypes, [Arrow, OutType], Type),
@@ -40,14 +48,15 @@ infix_fn_parts([A, Arrow, B], [A], B, Det) :- nonvar(Arrow), arrow_det(Arrow, De
 infix_fn_parts([A, Arrow|Rest], [A|As], Out, Det) :- nonvar(Arrow), arrow_det(Arrow, _),
                                                      infix_fn_parts(Rest, As, Out, Det).
 
-%Normalize nested arrow types to canonical prefix form:
+%Normalize nested arrow types to canonical prefix form. Nondeterministic
+%arrows keep their marker so closure parameters carry the commitment:
 normalize_type(T, T) :- var(T), !.
 normalize_type(T, T) :- atomic(T), !.
-normalize_type(T, TN) :- is_list(T), fn_type_shape(T, ATs, OT, _), !,
+normalize_type(T, TN) :- is_list(T), fn_type_shape(T, ATs, OT, Det), !,
                          maplist(normalize_type, ATs, ATN),
                          normalize_type(OT, OTN),
                          append(ATN, [OTN], Xs),
-                         TN = [->|Xs].
+                         ( Det == nondet -> TN = ['-[nondet]->'|Xs] ; TN = [->|Xs] ).
 normalize_type(T, TN) :- is_list(T), !, maplist(normalize_type, T, TN).
 normalize_type(T, T).
 
@@ -124,9 +133,10 @@ forget_symbol_types(Name) :- retractall(declared_fn_type(Name, _, _, _)),
 
 %%% Store lookup (each retrieval yields a fresh copy of the declaration):
 fn_decl_arity(F, N, ATs, OT) :- declared_fn_type(F, ATs, OT, _), length(ATs, N).
-fn_decl_partial(F, N, PTs, RTs, OT) :- declared_fn_type(F, ATs, OT, _),
-                                       length(ATs, Total), Total > N,
-                                       length(PTs, N), append(PTs, RTs, ATs).
+fn_decl_partial(F, N, PTs, RTs, OT) :- fn_decl_partial(F, N, PTs, RTs, OT, _).
+fn_decl_partial(F, N, PTs, RTs, OT, Det) :- declared_fn_type(F, ATs, OT, Det),
+                                            length(ATs, Total), Total > N,
+                                            length(PTs, N), append(PTs, RTs, ATs).
 
 %%% The single compatibility relation. Binds type variables (polymorphism);
 %%% wrap in type_compat_soft/2 for a side-effect-free check.
@@ -144,14 +154,23 @@ type_unify(A, B) :- is_union(A), !, A = ['|'|As],
 type_unify(A, B) :- is_union(B), !, B = ['|'|Ms],
                     member(M, Ms), type_unify(A, M), !.
 type_unify(A, B) :- atom(A), !, A == B.
+%Arrows: a det closure fits anywhere, a nondet closure only fits a nondet
+%requirement once --strict-det makes plain -> a determinism commitment:
+type_unify(A, B) :- is_arrow_type(A), is_arrow_type(B), !,
+                    A = [HA|As], B = [HB|Bs],
+                    det_arrow_fits(HA, HB),
+                    same_length(As, Bs), maplist(type_unify, As, Bs).
 type_unify(A, B) :- is_list(A), !, is_list(B), same_length(A, B), maplist(type_unify, A, B).
 type_unify(A, B) :- A == B.
+
+det_arrow_fits(HA, _) :- HA == (->), !.
+det_arrow_fits(_, HB) :- ( HB == '-[nondet]->' -> true ; \+ strict_det(true) ).
 
 is_union(T) :- nonvar(T), T = [P|_], P == '|'.
 
 type_compat_soft(A, B) :- \+ \+ type_unify(A, B).
 
-is_arrow_type(T) :- nonvar(T), T = [A|_], A == (->).
+is_arrow_type(T) :- nonvar(T), T = [A|_], ( A == (->) ; A == '-[nondet]->' ).
 
 list_type(T, ET) :- nonvar(T), T = [L, ET], L == 'List'.
 
@@ -277,17 +296,19 @@ value_candidate_types(true, ['Bool']) :- !.
 value_candidate_types(false, ['Bool']) :- !.
 value_candidate_types(V, Cs) :- atom(V), !,
                                 findall(T, declared_value_type(V, T), Vs),
-                                findall([->|Xs], ( declared_fn_type(V, ATs, OT, _),
-                                                   append(ATs, [OT], Xs) ), Fs),
+                                findall([H|Xs], ( declared_fn_type(V, ATs, OT, Det),
+                                                  det_arrow_head(Det, H),
+                                                  append(ATs, [OT], Xs) ), Fs),
                                 append(Vs, Fs, Cs0),
                                 ( Cs0 == [], current_arithmetic_function(V)
                                   -> Cs = ['Number']                %arithmetic constants: inf, nan, pi, e
                                    ; Cs = Cs0 ).
 value_candidate_types(partial(F, B), Cs) :- !,
                                 length(B, N),
-                                findall([->|Xs], ( fn_decl_partial(F, N, PTs, RTs, OT),
-                                                   bound_args_match(B, PTs),
-                                                   append(RTs, [OT], Xs) ), Cs).
+                                findall([H|Xs], ( fn_decl_partial(F, N, PTs, RTs, OT, Det),
+                                                  det_arrow_head(Det, H),
+                                                  bound_args_match(B, PTs),
+                                                  append(RTs, [OT], Xs) ), Cs).
 value_candidate_types([], [['List', _]]) :- !.
 %A constructor application (STV 0.5 0.8) has the constructor's output type,
 %but only when its fields do not contradict the constructor's signature -
@@ -300,6 +321,9 @@ value_candidate_types(_, []).
 
 value_single_type(V, T) :- ( var(V) -> known_singleton(V, T)
                                      ; value_candidate_types(V, [T0]), T = T0 ).
+
+det_arrow_head(nondet, '-[nondet]->') :- !.
+det_arrow_head(_, (->)).
 
 bound_args_match(B, PTs) :- \+ \+ maplist(arg_soft_ok, B, PTs).
 
@@ -380,16 +404,22 @@ tuple_fields_status([F|Fs], [T|Ts], St) :- elem_status(F, T, S1),
                                              ; St = S2 ) ).
 
 %Arrow types of closures over inferred (undeclared) functions:
+%Inference makes no determinism claim, so under --strict-det inferred arrows
+%are conservatively nondet - declare the function to commit it:
+inferred_arrow_head(H) :- ( strict_det(true) -> H = '-[nondet]->' ; H = (->) ).
+
 inferred_value_candidates(V, Cs) :- atom(V), !,
-                                    findall([->|Xs], ( inferred_fn_type(V, ATs, OT),
-                                                       append(ATs, [OT], Xs) ), Cs).
+                                    inferred_arrow_head(H),
+                                    findall([H|Xs], ( inferred_fn_type(V, ATs, OT),
+                                                      append(ATs, [OT], Xs) ), Cs).
 inferred_value_candidates(partial(F, B), Cs) :- !,
                                     length(B, N),
-                                    findall([->|Xs], ( inferred_fn_type(F, ATs, OT),
-                                                       length(ATs, Total), Total > N,
-                                                       length(PTs, N), append(PTs, RTs, ATs),
-                                                       bound_args_match(B, PTs),
-                                                       append(RTs, [OT], Xs) ), Cs).
+                                    inferred_arrow_head(H),
+                                    findall([H|Xs], ( inferred_fn_type(F, ATs, OT),
+                                                      length(ATs, Total), Total > N,
+                                                      length(PTs, N), append(PTs, RTs, ATs),
+                                                      bound_args_match(B, PTs),
+                                                      append(RTs, [OT], Xs) ), Cs).
 inferred_value_candidates(_, []).
 
 %Slow completion of the primitive fast paths above:
@@ -801,11 +831,18 @@ ensure_deterministic_expr(Expr, Fun) :- deterministic_expr(Expr, R),
                                           -> throw(error(determinism_conflict(Fun, Reason), determinism))
                                            ; throw(error(determinism_conflict(Fun, unknown(Expr)), determinism)) ).
 
+%A clause whose body commits with (cut) never falls through to a later
+%clause, so overlap with it cannot create a choicepoint:
 ensure_non_overlapping_clause_heads(_, _, []).
-ensure_non_overlapping_clause_heads(F, Args, [fun_meta(PrevArgs, _)|Rest]) :-
-    ( clause_heads_overlap(Args, PrevArgs)
+ensure_non_overlapping_clause_heads(F, Args, [fun_meta(PrevArgs, PrevBody)|Rest]) :-
+    ( clause_heads_overlap(Args, PrevArgs), \+ body_commits(PrevBody)
       -> throw(error(overlapping_deterministic_clauses(F, Args, PrevArgs), determinism))
        ; ensure_non_overlapping_clause_heads(F, Args, Rest) ).
+
+body_commits(E) :- nonvar(E),
+                   ( E = [C], C == cut -> true
+                   ; is_list(E), member(X, E), body_commits(X) -> true
+                   ; fail ).
 
 clause_heads_overlap(ArgsA, ArgsB) :- copy_term((ArgsA, ArgsB), (CA, CB)),
                                       unifiable(CA, CB, _).
@@ -818,7 +855,18 @@ function_call_determinism(F, N, Det) :- catch(fn_determinism(F, N, Det), _, fail
 function_call_determinism(_, _, unspecified).
 
 deterministic_expr(Expr, ok) :- ( var(Expr) ; atomic(Expr) ; Expr = partial(_, _) ), !.
+%A variable head must not unify with the construct patterns below. Under
+%--strict-det its known arrow type is a determinism commitment: a plain ->
+%closure is deterministic, a -[nondet]-> closure is not.
+deterministic_expr([Head|Args], Result) :- var(Head), !,
+    ( Args == [] -> Result = ok                    %singleton ($x) is data, not application
+    ; strict_det(true), known_singleton(Head, K), nonvar(K), K = [A|_]
+      -> ( A == (->) -> combine_determinism_list(Args, Result)
+         ; A == '-[nondet]->' -> Result = nondeterministic(nondet_closure)
+         ; Result = unknown(dynamic_head(Head)) )
+       ; Result = unknown(dynamic_head(Head)) ).
 deterministic_expr([collapse, _], ok) :- !.
+deterministic_expr(['trace!', A, B], Result) :- !, combine_determinism_list([A, B], Result).
 deterministic_expr([once, _], ok) :- !.
 deterministic_expr([quote, _], ok) :- !.
 deterministic_expr([eval, _], unknown(dynamic_eval)) :- !.

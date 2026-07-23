@@ -29,7 +29,7 @@
 (= (assertAlphaEqualToResult $A $B)
    (assertAlphaEqual $A $B))
 
-(: unify (-> Expression Expression Expression Expression %Undefined%))
+(: unify (Expression Expression Expression Expression -[nondet]-> %Undefined%))
 (= (unify $space $pattern $then $else)
    (if (is-space $space)
        (let $temp (cut)
@@ -42,7 +42,7 @@
        (eval $then)
        (eval $else)))
 
-(: add-reduct (-> %Undefined% Expression Bool))
+(: add-reduct (%Undefined% Expression -[nondet]-> Bool))
 (= (add-reduct $space $f)
    (let* (($headbody (cdr-atom $f))
           ($head (car-atom $headbody))
@@ -67,12 +67,12 @@
 (= (for-each-in-atom $L $f)
    (map-atom $L $f))
 
-(: evalc (-> Expression %Undefined% %Undefined%))
+(: evalc (Expression %Undefined% -[nondet]-> %Undefined%))
 (= (evalc $expression &self)
    (eval $expression))
 
 ;Quoting
-(: unquote (-> Expression %Undefined%))
+(: unquote (Expression -[nondet]-> %Undefined%))
 (= (unquote (quote $A))
    (let $cut (cut) (eval $A)))
 (= (unquote $A) (quote (unquote $A)))

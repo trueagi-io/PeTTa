@@ -4,6 +4,9 @@
 mode_arg_for_test() {
     base=$(basename "$1")
     case "$base" in
+        strictdet_*.metta|fail_strictdet_*.metta)
+            printf '%s\n' --strict-det
+            ;;
         strict_*.metta|fail_strict_*.metta)
             printf '%s\n' --strict
             ;;

@@ -2,14 +2,14 @@
 (: traceid (-> $a $a))
 (= (traceid $x) (trace! $x $x))
 (: tracem (-> $msg $a $a))
-(= (tracem $msg $x) (trace! ($msg $x) $x))
+(= (tracem $msg $x) (trace! (quote ($msg $x)) $x))
 
 ;Higher order functions
 (: map-flat (-> (-> $a $b) (List $a) (List $b)))
 (= (map-flat $f ()) ())
 (= (map-flat $f (cons $x $xs)) (cons ($f $x) (map-flat $f $xs)))
 
-(: map-nested (-> Expression Expression Expression))
+(: map-nested (-> (-> $a $b) Expression Expression))
 (= (map-nested $f ()) ())
 (= (map-nested $f (cons $x $xs))
      (if (is-expr $x)
@@ -34,7 +34,7 @@
 ;Set operations on Expressions
 
 ;Intersection
-(: /?\ (-> Expression (List $a) (List $b) (List $a)))
+(: /?\ (-> (-> $a $b Bool) (List $a) (List $b) (List $a)))
 (= (/?\ $pred () $b) ())
 (= (/?\ $pred (cons $a $as) $bs)
       (if (fold-flat or False (map-flat ($pred $a) $bs))
@@ -49,7 +49,7 @@
 (= (/=a\ $a $b) (/?\ =alpha $a $b))
 
 ;Subtraction
-(: \? (-> Expression (List $a) (List $b) (List $a)))
+(: \? (-> (-> $a $b Bool) (List $a) (List $b) (List $a)))
 (= (\? $pred () $bs) ())
 (= (\? $pred (cons $a $as) $bs)
   (if (fold-flat or False (map-flat ($pred $a) $bs))
@@ -64,7 +64,7 @@
 (= (\=a $a $b) (\? =alpha $a $b))
 
 ;Unification
-(: \?/ (-> Expression (List $a) (List $b) (List $a)))
+(: \?/ (-> (-> $a $b Bool) (List $a) (List $b) (List $a)))
 (= (\?/ $pred () $bs) $bs)
 (= (\?/ $pred (cons $a $as) $bs)
   (if (fold-flat or False (map-flat ($pred $a) $bs))
@@ -92,7 +92,7 @@
 (: &&& (-> (-> $a $b) (-> $a $c) $a Expression))
 (= (&&& $f1 $f2 $arg) (($f1 $arg) ($f2 $arg)))
 
-(: &^& (-> (-> $a $b) (-> $a $b) $a $b))
+(: &^& ((-> $a $b) (-> $a $b) $a -[nondet]-> $b))
 (= (&^& $f1 $f2 $arg) (superpose (($f1 $arg) ($f2 $arg))))
 
 ;Error handling
@@ -124,9 +124,9 @@
 (: tail (-> (List $a) (List $a)))
 (= (tail $xs) (cons $x $xs))
 
-(: mylast (-> $a (List $a)))
+(: mylast ($a -[nondet]-> (List $a)))
 (= (mylast $x) (union-atom $xs ($x)))
-(: init (-> (List $a) (List $a)))
+(: init ((List $a) -[nondet]-> (List $a)))
 (= (init $xs) (union-atom $xs ($x)))
 
 (: rcons (-> (List $a) $a (List $a)))

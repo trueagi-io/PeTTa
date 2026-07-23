@@ -1,11 +1,11 @@
 ;Migrate atoms to another space:
-(: migrateAtoms (-> %Undefined% %Undefined% Expression %Undefined%))
+(: migrateAtoms (%Undefined% %Undefined% Expression -[nondet]-> %Undefined%))
 (= (migrateAtoms $FromSpace $ToSpace $Pattern)
    (match $FromSpace $Pattern ((add-atom $FromSpace $Pattern)
                                (remove-atom $FromSpace $Pattern))))
 
 ;Like unify-space case of Minimal MeTTa:
-(: find (-> %Undefined% Expression Bool))
+(: find (%Undefined% Expression -[nondet]-> Bool))
 (= (find $space $pattern)
    (case (match $space $pattern True)
          ((True True)

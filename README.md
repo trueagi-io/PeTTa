@@ -95,6 +95,17 @@ constant-memory deep recursion via last-call optimization
 (see `examples/determinism_lco.metta`). `-[nondet]->` documents intentional
 nondeterminism.
 
+**Strict determinism mode.** `--strict-det` (implies `--strict`) makes a
+plain `->` itself a determinism commitment: every declared function is
+validated as deterministic unless its arrow says `-[nondet]->`. Overlapping
+clause heads, `superpose`/`match` bodies and dynamic `eval` become compile
+errors on `->` functions — in MeTTa every matching clause fires, so each such
+error is either an accidental source of multiple results or a missing
+`-[nondet]->`. Closure parameters carry the same commitment: a
+`(-> $a $b)`-typed parameter may be applied inside a deterministic body,
+a `-[nondet]->` one may not. A clause that commits with `(cut)` may overlap
+with later clauses. See `examples/strictdet_basics.metta`.
+
 Notes and caveats:
 
 - Function type declarations are pre-cached per file, so helpers may be

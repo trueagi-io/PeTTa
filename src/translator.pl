@@ -21,13 +21,15 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                                   flatten(GoalsA,GoalsPrefix)
                                                                 ; Args1 = Args0, GoalsPrefix = [] ),
                                                catch(nb_getval(F, Prev), _, Prev = []),
+                                               nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
+                                               clause_param_types(F, Args1, DeclOut),
                                                %Specialized clause copies (ConstrainArgs == false) are instances of
                                                %already-validated clauses: bind their (more specific) param types for
                                                %guard elimination, but skip the determinism/strict/output checks.
+                                               %Determinism runs after param binding so closure params carry their
+                                               %declared arrow types into the body analysis.
                                                ( ConstrainArgs == false -> true
                                                                          ; validate_function_determinism(F, Args1, BodyExpr, Prev) ),
-                                               nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
-                                               clause_param_types(F, Args1, DeclOut),
                                                begin_clause_inference(F, Args1, Assume, SavedInf),
                                                translate_expr(BodyExpr, GoalsBody, ExpOut),
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
@@ -398,7 +400,9 @@ nonfunction_type(K) :- nonvar(K), ( primitive_type(K)
 %whose type is still an unbound assumption tells us it is a function.
 translate_closure_call(HV, AVs, Inner, Goals, Out) :- var(HV), AVs \== [], known_singleton(HV, K),
                                                       length(AVs, N), N1 is N + 1,
-                                                      length(Xs, N1), K = [->|Xs],
+                                                      ( var(K) -> length(Xs, N1), K = [->|Xs]
+                                                      ; K = [H|Xs], ( H == (->) ; H == '-[nondet]->' ),
+                                                        length(Xs, N1) ),
                                                       append(ArgTs, [OutT], Xs),
                                                       apply_call_args(declared, closure, AVs, ArgTs, GuardGs),
                                                       append(Inner, GuardGs, Inner1),
