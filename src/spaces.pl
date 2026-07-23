@@ -18,6 +18,8 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                  once(translate_clause(Term, Clause)),
                                  assertz(Clause, Ref),
                                  assertz(translated_from(Ref, Term)),
+                                 note_late_symbol_uses(Term, Ref),
+                                 recompile_late_uses(FAtom),
                                  invalidate_specializations(FAtom),
                                  maybe_print_compiled_clause("added function", Term, Clause).
 

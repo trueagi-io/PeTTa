@@ -56,6 +56,46 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
 clause_commit_cut(F, Args) :- length(Args, N),
                               catch(fn_determinism(F, N, det), _, fail).
 
+%%% Late binding across files. A call to a declared function whose definition
+%%% has not arrived yet compiles as data (which is also what keeps declared
+%%% constructors literal). Clauses embedding such a symbol are recorded, and
+%%% when the definition arrives they are retranslated - now as real calls.
+:- dynamic late_symbol_use/3.   % late_symbol_use(F, ClauseRef, SourceTerm)
+
+note_late_symbol_uses(Term, Ref) :- Term = [=, _, Body],
+                                    forall(( declared_undefined_atom(Body, F),
+                                             \+ late_symbol_use(F, Ref, _) ),
+                                           assertz(late_symbol_use(F, Ref, Term))).
+
+declared_undefined_atom(T, F) :- ( atom(T) -> F = T, \+ fun(F), fn_decl_arity(F, _, _, _)
+                                 ; is_list(T), member(E, T), declared_undefined_atom(E, F) ).
+
+%The definition of F arrived: retranslate every clause that saw F as data.
+%The stale fun_meta entry is dropped first so the clause is not re-validated
+%against itself; its specializations are invalidated like any redefinition.
+recompile_late_uses(F) :- ( late_symbol_use(F, _, _)
+                            -> findall(Ref-Term, late_symbol_use(F, Ref, Term), Us),
+                               retractall(late_symbol_use(F, _, _)),
+                               forall(member(Ref-Term, Us), recompile_clause(Ref, Term))
+                             ; true ).
+
+recompile_clause(Ref, Term) :- ( clause(_, _, Ref)
+                                 -> erase(Ref),
+                                    retractall(translated_from(Ref, _)),
+                                    Term = [=, [G|_], Body],
+                                    drop_stale_fun_meta(G, Body),
+                                    translate_clause(Term, Clause),
+                                    assertz(Clause, NewRef),
+                                    assertz(translated_from(NewRef, Term)),
+                                    note_late_symbol_uses(Term, NewRef),
+                                    invalidate_specializations(G)
+                                  ; true ).
+
+drop_stale_fun_meta(G, Body) :- catch(nb_getval(G, Metas), _, fail),
+                                select(fun_meta(_, B), Metas, Rest), B =@= Body, !,
+                                nb_setval(G, Rest).
+drop_stale_fun_meta(_, _).
+
 %Print compiled clause:
 maybe_print_compiled_clause(_, _, _) :- silent(true), !.
 maybe_print_compiled_clause(Label, FormTerm, Clause) :-
