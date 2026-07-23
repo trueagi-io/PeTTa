@@ -29,6 +29,25 @@ The following projects are cloned and built by build.sh:
 
 Please check out [Extension libraries](https://github.com/trueagi-io/PeTTa/wiki/Extension-libraries) for a set of extension libraries that can be invoked from MeTTa files directly from the git repository.
 
+### Git dependencies
+
+A file can declare the repositories it needs as plain forms:
+
+```metta
+(git-dependency "https://example/repo.git" "0123456789abcdef0123456789abcdef01234567")
+!(import! &self (library somelib))
+```
+
+Declarations are satisfied after the file is parsed and before any of its forms
+run, so the checkout exists when the import resolves. The commit must be a full
+40-character SHA; the checkout is verified against it on every run and retargeted
+when the pin changes, so a fresh clone and a machine with an existing checkout
+behave identically. Optional third and fourth values give a build command and a
+base directory: `(git-dependency url rev "build.sh" "./repos")`. A dependency can
+declare its own dependencies in a `deps.metta` file at its repository root, and
+these are acquired transitively. The runnable `git-import!` from `(library
+lib_import)` remains available for dynamic acquisition.
+
 ## Notebooks, Servers, Browser
 
 ### Jupyter Notebook Support

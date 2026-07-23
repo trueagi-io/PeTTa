@@ -33,8 +33,8 @@ library_source_exists(Path) :- file_name_extension(Path, metta, MettaPath),
 :- use_module(library(process)).
 :- use_module(library(filesex)).
 :- current_prolog_flag(argv, Argv),
-   ( member(mork, Argv) -> ensure_loaded([parser, translator, specializer, filereader, '../mork_ffi/morkspaces', spaces])
-                         ; ensure_loaded([parser, translator, specializer, filereader, spaces])).
+   ( member(mork, Argv) -> ensure_loaded([parser, translator, specializer, filereader, gitimport, '../mork_ffi/morkspaces', spaces])
+                         ; ensure_loaded([parser, translator, specializer, filereader, gitimport, spaces])).
 
 %%%%%%%%%% Standard Library for MeTTa %%%%%%%%%%
 
@@ -280,7 +280,7 @@ py_bool_norm(R, R).
 'get-state'(Var, Value) :- nb_getval(Var, Value).
 
 %%% Eval: %%%
-eval(C, Out) :- translate_expr(C, Goals, Out),
+eval(C, Out) :- translate_runnable_expr(C, Goals, Out),
                 call_goals(Goals).
 
 call_goals([]).
@@ -396,7 +396,7 @@ importer_helper(Space, File) :-
 
 %%% Registration: %%%
 :- dynamic fun/1.
-register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
+register_fun(N) :- ( fun(N) -> true ; assertz(fun(N)), repair_after_late_registration(N) ).
 :- maplist(register_fun, [superpose, empty, let, 'let*', '+','-','*','/', '%', min, max, 'change-state!', 'get-state', 'bind!',
                           '<','>','==', '!=', '=', '=?', '<=', '>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
                           'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom', 'alpha-unique-atom',
