@@ -139,11 +139,17 @@
 (: snd (-> ($a $b) $b))
 (= (snd ($a $b)) $b)
 
+; Pair utilities: results are pairs whose heads may themselves be applied,
+; so outputs stay dynamic and determinism is unprovable for the appliers.
+(: first ((-> $a $c) ($a $b) -[nondet]-> %Undefined%))
 (= (first $f ($a $b)) (($f $a) $b))
+(: second ((-> $b $c) ($a $b) -[nondet]-> %Undefined%))
 (= (second $f ($a $b)) ($a ($f $b)))
 
+(: cns (-> ($a $b) %Undefined%))
 (= (cns ($a $b)) (cons $a $b))
 
+(: flip (($a $b) -[nondet]-> %Undefined%))
 (= (flip ($a $b)) ($b $a))
 
 ;(= (prog1 (cons $x $xs)) $x)

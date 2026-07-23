@@ -96,7 +96,7 @@ precache_fn_type_decl(Space, Term) :- ( is_list(Term), Term = [C, Name, Type],
                                          ; true ).
 
 %Seed the store with the builtin operator types (called once after loading):
-seed_builtin_types :- library_path(Base),
+seed_builtin_types :- standard_library_path(Base),
                       atomic_list_concat([Base, '/lib_builtin_types.metta'], Path),
                       read_file_to_string(Path, S, []),
                       metta_string_forms(S, Forms),
