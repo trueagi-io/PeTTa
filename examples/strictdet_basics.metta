@@ -30,3 +30,10 @@
 (= (spread $f $n) ($f $n))
 
 !(test (collapse (spread pick 7)) (1 2 7))
+
+; A variable head with a provably non-function type is data construction,
+; not an application - deterministic like any other structure building:
+(: make-pair-list (-> Number Number (List (Number Number))))
+(= (make-pair-list $x $y) (cons ($x $y) ()))
+
+!(test (make-pair-list 1 2) ((1 2)))

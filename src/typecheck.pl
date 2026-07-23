@@ -860,9 +860,10 @@ deterministic_expr(Expr, ok) :- ( var(Expr) ; atomic(Expr) ; Expr = partial(_, _
 %closure is deterministic, a -[nondet]-> closure is not.
 deterministic_expr([Head|Args], Result) :- var(Head), !,
     ( Args == [] -> Result = ok                    %singleton ($x) is data, not application
-    ; strict_det(true), known_singleton(Head, K), nonvar(K), K = [A|_]
-      -> ( A == (->) -> combine_determinism_list(Args, Result)
-         ; A == '-[nondet]->' -> Result = nondeterministic(nondet_closure)
+    ; strict_det(true), known_singleton(Head, K), nonvar(K)
+      -> ( K = [A|_], A == (->) -> combine_determinism_list(Args, Result)
+         ; K = [A|_], A == '-[nondet]->' -> Result = nondeterministic(nondet_closure)
+         ; nonfunction_type(K) -> combine_determinism_list(Args, Result)  %data construction
          ; Result = unknown(dynamic_head(Head)) )
        ; Result = unknown(dynamic_head(Head)) ).
 deterministic_expr([collapse, _], ok) :- !.
