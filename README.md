@@ -87,6 +87,18 @@ execution list. A value fits a union if it fits some member, and `case` or
 clause-head patterns narrow to the member their shape selects, typing the
 pattern's variables. Unions are declared, never inferred.
 
+**Erased nominal newtypes.** `(: KB (Newtype Expression))` declares a
+distinct compile-time role over an existing representation: nothing is
+wrapped at runtime and no guards are emitted. A branded value fits its
+representation, but different brands never unify merely because their
+representations do — swapping a `Proof` into a `KB` position is a compile
+error. Raw literals and constructed values acquire a brand contextually from
+the expected position; an unknown variable does not (under `--strict`) —
+brand it explicitly with `(brand KB $x)`, an erased trust operation that
+rejects conflicting brands but generates no check (a role has no runtime
+witness). Declared relation schemas restore brands on `match`. Use
+`(the KB ...)` instead when you want the representation checked at runtime.
+
 **Determinism arrows.** `(: f (A B -[det]-> C))` (or the chained form
 `(A -[det]-> B)`) declares a deterministic function: the compiler validates
 that its clauses cannot overlap and its body is deterministic, then commits to

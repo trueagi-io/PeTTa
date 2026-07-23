@@ -404,6 +404,15 @@ translate_expr([H0|T0], Goals, Out) :-
                                      -> translate_expr(Quoted, GsQ, Out),           %(eval (quote E)) == E
                                         append(GsH, GsQ, Goals)
                                       ; append(GsH, [eval(Arg, Out)], Goals) )
+        %Erased branding of a semantic role: knowledge only, no runtime goal:
+        ; HV == brand, T = [TypeExpr, Expr] -> translate_expr(Expr, GsE, Out0),
+                                               normalize_type(TypeExpr, TN),
+                                               brand_type(Out0, TN),
+                                               ( nonvar(Out0)               %a branded literal keeps its brand
+                                                 -> add_known_type(Out, TN),
+                                                    append([GsH, GsE, [Out = Out0]], Goals)
+                                                  ; Out = Out0,
+                                                    append(GsH, GsE, Goals) )
         %Explicit type ascription for dynamically typed values:
         ; HV == the, T = [TypeExpr, Expr] -> translate_expr(Expr, GsE, Out0),
                                              normalize_type(TypeExpr, TN),
@@ -599,7 +608,7 @@ eff_arg_types(FullDecls, NB, NProv, Ts) :- NEnd is NB + NProv - 1,
                                            ; numlist(NB, NEnd, Is),
                                              maplist(eff_arg_type(FullDecls), Is, Ts) ).
 eff_arg_type(FullDecls, I, T) :- ( forall(member(ft(ATs, _), FullDecls),
-                                          ( nth0(I, ATs, Ty), Ty == 'Expression' ))
+                                          ( nth0(I, ATs, Ty), expression_typed(Ty) ))
                                    -> T = 'Expression' ; true ).
 
 %Expression-typed args stay unevaluated data, except underapplied callable
@@ -699,7 +708,7 @@ build_direct_call(Fun, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
 %Selectively apply translate_args for non-Expression args while Expression args stay as data input:
 translate_args_by_type([], _, [], []) :- !.
 translate_args_by_type([A|As], [T|Ts], GsOut, [AV|AVs]) :-
-                      ( T == 'Expression' -> expression_arg_value(A, AV), GsA = []
+                      ( expression_typed(T) -> expression_arg_value(A, AV), GsA = []
                                            ; translate_expr(A, GsA, AV) ),
                       translate_args_by_type(As, Ts, GsRest, AVs),
                       append(GsA, GsRest, GsOut).

@@ -8,6 +8,7 @@
 
 :- dynamic declared_fn_type/4.     % declared_fn_type(F, ArgTypes, OutType, Det)
 :- dynamic declared_value_type/2.  % declared_value_type(Name, Type)
+:- dynamic declared_newtype/2.     % declared_newtype(Name, Representation) - erased nominal types
 :- dynamic strict_mode/1.
 
 :- dynamic strict_det/1.
@@ -70,6 +71,14 @@ maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C
                                       format(user_error,
                                              "Warning: type declaration name (~w) is an expression; write (: ~w ...) to declare the function~n",
                                              [Name, Name]).
+%Erased nominal newtypes: (: KB (Newtype Expression)) declares KB as a
+%distinct compile-time role over the given representation. Nothing exists at
+%runtime; the brand lives purely in the checker.
+maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C, Name, [NT, R]],
+                                      C == (:), atom(Name), NT == 'Newtype', !,
+                                      normalize_type(R, RN),
+                                      ( declared_newtype(Name, R2), R2 =@= RN -> true
+                                                                              ; assertz(declared_newtype(Name, RN)) ).
 maybe_cache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term = [C, Name, Type],
                                         C == (:), atom(Name)
                                         -> ( nonvar(Type), fn_type_shape(Type, ATs, OT, Det)
@@ -129,6 +138,7 @@ warn_if_late_declaration(Name) :-
 
 forget_symbol_types(Name) :- retractall(declared_fn_type(Name, _, _, _)),
                              retractall(declared_value_type(Name, _)),
+                             retractall(declared_newtype(Name, _)),
                              retractall(inferred_fn_type(Name, _, _)).
 
 %%% Store lookup (each retrieval yields a fresh copy of the declaration):
@@ -153,6 +163,13 @@ type_unify(A, B) :- is_union(A), !, A = ['|'|As],
                     \+ ( member(MA, As), \+ type_compat_soft(MA, B) ).
 type_unify(A, B) :- is_union(B), !, B = ['|'|Ms],
                     member(M, Ms), type_unify(A, M), !.
+%Newtypes are nominal: identical brands unify, a brand fits its
+%representation, but neither the bare representation nor a different brand
+%fits it implicitly (that is the point):
+type_unify(A, B) :- atom(A), declared_newtype(A, RA), !,
+                    ( atom(B) -> ( declared_newtype(B, _) -> A == B ; type_unify(RA, B) )
+                               ; type_unify(RA, B) ).
+type_unify(A, B) :- atom(B), declared_newtype(B, _), !, atom(A), A == B.
 type_unify(A, B) :- atom(A), !, A == B.
 %Arrows: a det closure fits anywhere, a nondet closure only fits a nondet
 %requirement once --strict-det makes plain -> a determinism commitment:
@@ -234,6 +251,29 @@ ascribe_type(V, T, Gs) :- ( var(T) -> Gs = []
                             ; St == mismatch -> throw(error(literal_type_mismatch(V, T), typecheck))
                             ; ground(T) -> guard_goal(V, T, G), Gs = [G]
                             ; Gs = [] ) ).
+
+%(brand T Expr): erased trust in a semantic role. No runtime goal exists - a
+%role has no runtime witness by construction - but a value already carrying
+%a DIFFERENT brand is rejected, and the value must be statically admissible
+%for the newtype's representation:
+brand_type(V, T) :-
+    ( \+ ( atom(T), declared_newtype(T, _) )
+      -> throw(error(unknown_newtype(T), typecheck))
+    ; var(V) -> ( known_singleton(V, K)
+                  -> ( type_unify(K, T) -> true
+                     ; atom(K), declared_newtype(K, _)
+                       -> throw(error(type_conflict(existing(K), required(T)), typecheck))
+                     ; declared_newtype(T, R), \+ \+ type_unify(K, R)
+                       -> put_attr(V, tknown, [T])
+                     ; throw(error(type_conflict(existing(K), required(T)), typecheck)) )
+                   ; add_known_type(V, T) )
+    ; check_value(V, T, St),
+      ( St == mismatch -> throw(error(literal_type_mismatch(V, T), typecheck)) ; true ) ).
+
+%Newtype-transparent test for the Expression argument convention (arguments
+%whose declared type is Expression, or a brand of it, stay unevaluated data):
+expression_typed(Ty) :- nonvar(Ty), ( Ty == 'Expression' -> true
+                                    ; atom(Ty), declared_newtype(Ty, R), R == 'Expression' ).
 
 %Derive match-pattern variable types from declared relation schemas: atoms
 %matched by (F ...) conform to F's declared argument types, and a pattern
@@ -393,6 +433,15 @@ check_value(V, T, St) :- is_list(T), !,
                          ; atom(V) -> atom_value_status(V, T, St)
                          ; non_list(V) -> St = mismatch
                          ; St = unknown ).
+%A raw or representation-typed value acquires a newtype contextually; a
+%value already carrying a different brand does not (that is the feature):
+check_value(V, T, St) :- atom(T), declared_newtype(T, R), !,
+                         value_candidate_types(V, Cs),
+                         ( Cs == [] -> check_value(V, R, St)
+                         ; member(C, Cs), type_unify(C, T) -> St = ok
+                         ; member(C, Cs), \+ ( atom(C), declared_newtype(C, _) ),
+                           type_unify(C, R) -> St = ok
+                         ; St = mismatch ).
 check_value(V, T, St) :- atom(T), !,
                          value_candidate_types(V, Cs),
                          ( Cs == [] -> St = unknown
@@ -438,6 +487,7 @@ inferred_value_candidates(_, []).
 prim_mismatch_status(P, T, St) :- ( wildcard_type_t(T) -> St = ok
                                   ; is_union(T) -> ( T = ['|'|Ms], member(M, Ms), type_compat_soft(P, M)
                                                      -> St = ok ; St = mismatch )
+                                  ; atom(T), declared_newtype(T, R) -> prim_mismatch_status(P, R, St)
                                   ; atom(T) -> ( refinement_pair(P, T) -> St = unknown
                                                                         ; St = mismatch )
                                   ; ( T = [L|_], L == 'List' ; is_arrow_type(T) ) -> St = mismatch
@@ -493,6 +543,10 @@ check_call_arg(Mode, Fun, AV, T, Gs) :- ( var(AV)
                                           -> ( known_singleton(AV, K)
                                                -> ( nonvar(T), wildcard_type_t(T) -> Gs = []  %wildcards carry no knowledge
                                                   ; type_unify(K, T) -> Gs = []
+                                                  %conflicting brands cannot be deferred to a runtime
+                                                  %guard - newtypes are erased there - so they reject now:
+                                                  ; atom(T), declared_newtype(T, _), atom(K), declared_newtype(K, _)
+                                                    -> throw(error(type_conflict(existing(K), required(T)), typecheck))
                                                   ; taint_assumption(AV),  %known conflict: runtime error carries the value
                                                     type_guard(Fun, AV, T, Gs) )
                                              ; var(T) -> Gs = []
@@ -548,6 +602,8 @@ runtime_type_ok(V, T) :- list_type(T, ET), !,
 runtime_type_ok(V, T) :- is_arrow_type(T), !, \+ value_definitely_mismatch(V, T).
 runtime_type_ok(V, T) :- is_union(T), !, T = ['|'|Ms],
                          member(M, Ms), runtime_type_ok(V, M), !.
+%Newtypes are erased: at runtime only the representation exists.
+runtime_type_ok(V, T) :- atom(T), declared_newtype(T, R), !, runtime_type_ok(V, R).
 runtime_type_ok(V, T) :- T = [Tag|FieldTs], user_atom_type(Tag), !,
                          is_list(V), V = [VTag|Fields], VTag == Tag,
                          same_length(Fields, FieldTs),
