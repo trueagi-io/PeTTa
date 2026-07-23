@@ -475,19 +475,24 @@ tuple_fields_status([F|Fs], [T|Ts], St) :- elem_status(F, T, S1),
                                              ; St = S2 ) ).
 
 %Arrow types of closures over inferred (undeclared) functions:
-%Inference makes no determinism claim, so under --strict-det inferred arrows
-%are conservatively nondet - declare the function to commit it:
-inferred_arrow_head(H) :- ( strict_det(true) -> H = '-[nondet]->' ; H = (->) ).
+%Inference itself makes no determinism claim; under --strict-det an inferred
+%arrow is det only when the clause-set analysis proves it (the same
+%transitive-evidence rule calls use), otherwise conservatively nondet:
+inferred_arrow_head(F, N, H) :- ( strict_det(true)
+                                  -> ( catch((body_determinism(F, N, D), D == det), _, fail)
+                                       -> H = (->) ; H = '-[nondet]->' )
+                                   ; H = (->) ).
 
 inferred_value_candidates(V, Cs) :- atom(V), !,
-                                    inferred_arrow_head(H),
                                     findall([H|Xs], ( inferred_fn_type(V, ATs, OT),
+                                                      length(ATs, N),
+                                                      inferred_arrow_head(V, N, H),
                                                       append(ATs, [OT], Xs) ), Cs).
 inferred_value_candidates(partial(F, B), Cs) :- !,
                                     length(B, N),
-                                    inferred_arrow_head(H),
                                     findall([H|Xs], ( inferred_fn_type(F, ATs, OT),
                                                       length(ATs, Total), Total > N,
+                                                      inferred_arrow_head(F, Total, H),
                                                       length(PTs, N), append(PTs, RTs, ATs),
                                                       bound_args_match(B, PTs),
                                                       append(RTs, [OT], Xs) ), Cs).
@@ -1055,7 +1060,16 @@ deterministic_call_expr([Fun|Args], Result) :- atom(Fun), !,
                                                function_call_determinism(Fun, N, Det),
                                                ( Det == nondet -> Result = nondeterministic(call(Fun))
                                                ; Det == det -> combine_determinism_list(Args, Result)
+                                               ; underapplied_closure(Fun, N) -> combine_determinism_list(Args, Result)
                                                ; Result = unknown(undetermined_call(Fun)) ).
+
+%Underapplication builds a closure instead of calling (reduce case 1):
+%constructing the partial is deterministic - the closure's own determinism
+%is judged at its call site through its arrow type - so only the bound
+%arguments need to be deterministic here:
+underapplied_closure(Fun, N) :- CallArity is N + 1,
+                                \+ arity(Fun, CallArity),
+                                arity(Fun, Known), Known > CallArity, !.
 deterministic_call_expr(Expr, unknown(dynamic_call(Expr))).
 
 combine_determinism_list([], ok).
