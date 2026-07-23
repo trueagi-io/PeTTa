@@ -881,8 +881,8 @@ deterministic_expr([if, Cond, Then], Result) :- !, combine_determinism_list([Con
 deterministic_expr([if, Cond, Then, Else], Result) :- !, combine_determinism_list([Cond, Then, Else], Result).
 deterministic_expr([progn|Exprs], Result) :- !, combine_determinism_list(Exprs, Result).
 deterministic_expr([prog1|Exprs], Result) :- !, combine_determinism_list(Exprs, Result).
-deterministic_expr([let, Pat, Val, In], Result) :- !, combine_determinism_list([Pat, Val, In], Result).
-deterministic_expr([chain, Pat, Val, In], Result) :- !, combine_determinism_list([Pat, Val, In], Result).
+deterministic_expr([let, Pat, Val, In], Result) :- !, pattern_then_exprs(Pat, [Val, In], Result).
+deterministic_expr([chain, Pat, Val, In], Result) :- !, pattern_then_exprs(Pat, [Val, In], Result).
 deterministic_expr(['let*', Binds, Body], Result) :- !, binds_and_body_determinism(Binds, Body, Result).
 deterministic_expr([sealed, _, Expr], Result) :- !, deterministic_expr(Expr, Result).
 deterministic_expr(['forall', _, _], ok) :- !.
@@ -912,7 +912,7 @@ combine_determinism_list([Expr|Exprs], Result) :- deterministic_expr(Expr, First
 
 binds_and_body_determinism([], Body, Result) :- deterministic_expr(Body, Result).
 binds_and_body_determinism([[Pat, Val]|Rest], Body, Result) :-
-    combine_determinism_list([Pat, Val], HeadResult),
+    pattern_then_exprs(Pat, [Val], HeadResult),
     ( HeadResult == ok -> binds_and_body_determinism(Rest, Body, Result)
                         ; Result = HeadResult ).
 
@@ -922,6 +922,21 @@ case_expr_determinism(KeyExpr, PairsExpr, Result) :- deterministic_expr(KeyExpr,
 
 case_pairs_determinism([], ok).
 case_pairs_determinism([[CaseExpr, BranchExpr]|Rest], Result) :-
-    combine_determinism_list([CaseExpr, BranchExpr], PairResult),
+    pattern_then_exprs(CaseExpr, [BranchExpr], PairResult),
     ( PairResult == ok -> case_pairs_determinism(Rest, Result)
                         ; Result = PairResult ).
+
+%Patterns are matched, not executed: a variable head is structure, and only
+%fun-headed subterms are embedded calls that the pattern evaluates:
+pattern_then_exprs(Pat, Exprs, Result) :- deterministic_pattern(Pat, R0),
+                                          ( R0 == ok -> combine_determinism_list(Exprs, Result)
+                                                      ; Result = R0 ).
+
+deterministic_pattern(P, ok) :- ( var(P) ; atomic(P) ; P = partial(_, _) ), !.
+deterministic_pattern([H|T], Result) :- atom(H), fun(H), !, deterministic_expr([H|T], Result).
+deterministic_pattern(P, Result) :- combine_pattern_list(P, Result).
+
+combine_pattern_list([], ok).
+combine_pattern_list([E|Es], Result) :- deterministic_pattern(E, R1),
+                                        ( R1 == ok -> combine_pattern_list(Es, Result)
+                                                    ; Result = R1 ).

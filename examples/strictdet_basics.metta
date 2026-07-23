@@ -37,3 +37,19 @@
 (= (make-pair-list $x $y) (cons ($x $y) ()))
 
 !(test (make-pair-list 1 2) ((1 2)))
+
+; case and let patterns are matched, not executed: a variable-headed
+; pattern is structure, not a dynamic call.
+(: select-tail (-> Expression Expression))
+(= (select-tail $value)
+   (case $value
+      ((($head $tail) $tail)
+       ($other $other))))
+
+!(test (select-tail (a b)) b)
+!(test (select-tail x) x)
+
+(: second (-> Expression %Undefined%))
+(= (second $pair) (let ($a $b) $pair $b))
+
+!(test (second (1 2)) 2)
