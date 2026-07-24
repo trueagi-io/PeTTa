@@ -23,6 +23,17 @@
 
 !(test (from-dynamic somekb) (rule-ev somekb r0))
 
+; brand erases inside Expression-typed argument positions too: the callee
+; receives the bare value, never a literal (brand ...) form.
+(: Box (Newtype Expression))
+(: identity-box (-> Box Box))
+(= (identity-box $value) $value)
+
+(: brand-and-call (-> Expression Box))
+(= (brand-and-call $value) (identity-box (brand Box $value)))
+
+!(test (brand-and-call (payload value)) (payload value))
+
 ; Brands do not survive an untyped space, but a declared relation schema
 ; restores them on match - still guard-free.
 (: rule-row (-> KB Proof Atom))

@@ -622,6 +622,12 @@ eff_arg_type(FullDecls, I, T) :- ( forall(member(ft(ATs, _), FullDecls),
 %Expression-typed args stay unevaluated data, except underapplied callable
 %expressions representable as a goal-free closure. Only expressions that can
 %actually become a closure are translated, so plain data is never re-translated:
+%brand is a checker construct, not data - it erases here too, branding the
+%inner value as knowledge (use quote to pass a literal (brand ...) form):
+expression_arg_value(A, AV) :- nonvar(A), A = [B, TypeExpr, Inner], B == brand, !,
+                               expression_arg_value(Inner, AV),
+                               normalize_type(TypeExpr, TN),
+                               brand_type(AV, TN).
 expression_arg_value(A, AV) :- ( maybe_closure_expr(A),
                                  catch(( translate_expr(A, GsExpr, AVExpr),
                                          trivial_goals(GsExpr),
