@@ -142,7 +142,10 @@ jobs:
         working-directory: python
 
       - name: Run shell tests
-        run: sh test.sh
+        run: |
+          sh test.sh
+          sh tests/test_git_import.sh
+          sh tests/regression/test_git_dependency.sh
 
   # 5) On push to main, rebuild & publish :latest only when Dockerfile changed
   publish-latest:

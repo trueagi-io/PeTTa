@@ -29,7 +29,26 @@ The following projects are cloned and built by build.sh:
 
 Please check out [Extension libraries](https://github.com/trueagi-io/PeTTa/wiki/Extension-libraries) for a set of extension libraries that can be invoked from MeTTa files directly from the git repository.
 
-Git imports retain the legacy URL-only, URL/build-command, and
+### Git dependencies
+
+A file can declare the repositories it needs as plain forms:
+
+```metta
+(git-dependency "https://example/repo.git" "0123456789abcdef0123456789abcdef01234567")
+!(import! &self (library repo somelib))
+```
+
+Declarations are satisfied after the file is parsed and before any of its forms
+run, so the checkout exists when the import resolves. The commit must be a full
+40-character SHA; the checkout is verified against it on every run and retargeted
+when the pin changes, so a fresh clone and a machine with an existing checkout
+behave identically. Optional third and fourth values give a build command and a
+base directory: `(git-dependency url rev "build.sh" "./repos")`. A dependency can
+declare its own dependencies in a `deps.metta` file at its repository root, and
+these are acquired transitively.
+
+For dynamic acquisition, the core `git-import!` primitive supports URL-only,
+URL/build-command, and
 URL/build-command/base-directory forms. For a reproducible detached checkout,
 pass a fourth input in the order URL, build command, base directory, commit:
 
@@ -39,6 +58,10 @@ pass a fourth input in the order URL, build command, base directory, commit:
 
 Pinned imports accept only a full 40-character hexadecimal commit SHA;
 abbreviated SHAs, branches, and tags are rejected.
+
+The first argument of the three-argument `library` form is the repository name.
+It resolves through the exact canonical checkout registered by Git acquisition,
+including when a custom base directory is used.
 
 ## Notebooks, Servers, Browser
 

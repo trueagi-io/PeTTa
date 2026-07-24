@@ -2,49 +2,194 @@
 :- use_module(library(pcre)). % re_replace/4
 :- current_prolog_flag(argv, Args), ( (memberchk(silent, Args) ; memberchk('--silent', Args) ; memberchk('-s', Args))
                                       -> assertz(silent(true)) ; assertz(silent(false)) ).
+:- dynamic working_dir/1.
+:- dynamic translated_from/2.
+:- dynamic compiled_metta_source/1.
+
+push_working_dir(Filename) :- file_directory_name(Filename, Dir0),
+                              ( absolute_file_name(Dir0, Dir, [file_type(directory), file_errors(fail)])
+                                -> true
+                                 ; Dir = Dir0 ),
+                              asserta(working_dir(Dir)).
+
+pop_working_dir :- retract(working_dir(_)), !.
+pop_working_dir.
 
 %Read Filename into string S and process it (S holds MeTTa code):
 load_metta_file(Filename, Results) :- load_metta_file(Filename, Results, '&self').
-load_metta_file(Filename, Results, Space) :- read_file_to_string(Filename, S, []),
-                                             process_metta_string(S, Results, Space).
+load_metta_file(Filename, Results, Space) :-
+    with_mutex(metta_loader,
+               catch(load_metta_file_impl(Filename, Results, Space),
+                     Error,
+                     rethrow_metta_file_error(Filename, Error))).
+
+load_metta_file_impl(Filename, Results, Space) :-
+    load_metta_file_impl(Filename, Results, Space, compile).
+
+load_metta_file_impl(Filename, Results, Space, CompileMode) :-
+    setup_call_cleanup(push_working_dir(Filename),
+                       ( read_file_to_string(Filename, S, []),
+                         process_metta_string(S, Results, Space, CompileMode) ),
+                       pop_working_dir).
+
+% Function clauses are global Prolog predicates, while source atoms belong to a
+% particular MeTTa space.  Coordinate compilation by canonical source path so
+% the clauses are emitted once, then populate every requested space separately.
+load_imported_metta_file(Filename, Results, Space) :-
+    catch(load_imported_metta_file_impl(Filename, Results, Space),
+          Error,
+          rethrow_metta_file_error(Filename, Error)).
+
+load_imported_metta_file_impl(Filename, Results, Space) :-
+    ( compiled_metta_source(Filename)
+      -> load_metta_file_impl(Filename, Results, Space, populate)
+       ; assertz(compiled_metta_source(Filename)),
+         run_new_source_load(Filename, Results, Space) ).
+
+run_new_source_load(Filename, Results, Space) :-
+    catch(( once(load_metta_file_impl(Filename, Results, Space, compile))
+            -> true
+             ; retractall(compiled_metta_source(Filename)), fail ),
+          Error,
+          ( retractall(compiled_metta_source(Filename)),
+            throw(Error) )).
+
+rethrow_metta_file_error(_, Error) :- Error = error(_, context(_, _)), !,
+                                      throw(Error).
+rethrow_metta_file_error(Filename, error(Type, _)) :- !,
+                                                      throw(error(Type, context(Filename, 'while loading MeTTa file'))).
+rethrow_metta_file_error(_, Error) :- throw(Error).
 
 %Extract function definitions, call invocations, and S-expressions part of &self space:
 process_metta_string(S, Results) :- process_metta_string(S, Results, '&self').
-process_metta_string(S, Results, Space) :- string_codes(S, Cs),
-                                           strip(Cs, 0, Codes),
-                                           phrase(top_forms(Forms, 1), Codes),
-                                           maplist(parse_form, Forms, ParsedForms),
-                                           maplist(process_form(Space), ParsedForms, ResultsList), !,
-                                           append(ResultsList, Results).
+process_metta_string(S, Results, Space) :-
+    with_mutex(metta_loader,
+               process_metta_string(S, Results, Space, compile)).
+process_metta_string(S, Results, Space, CompileMode) :-
+    parse_metta_source(S, ParsedForms),
+    register_parsed_signatures(ParsedForms),
+    % Pinned git dependencies declared in this file are fetched before any of
+    % its forms run (gitimport.pl).
+    acquire_declared_dependencies(ParsedForms),
+    maplist(process_form(Space, CompileMode), ParsedForms, ResultsList), !,
+    append(ResultsList, Results).
 
-%First pass to convert MeTTa to Prolog Terms and register functions:
+parse_metta_source(S, ParsedForms) :-
+    string_codes(S, Cs),
+    strip(Cs, 0, Codes),
+    phrase(top_forms(Forms, 1), Codes),
+    maplist(parse_form, Forms, ParsedForms).
+
+% Register the complete signature set before repairing callers.  Translating a
+% caller while only the first overload is visible can otherwise leave it stale.
+register_parsed_signatures(ParsedForms) :-
+    findall(F-Arity,
+            ( member(parsed(function, _, [=, [F|Args], _]), ParsedForms),
+              length(Args, InputArity),
+              Arity is InputArity + 1 ),
+            Signatures),
+    register_function_signatures(Signatures).
+
+register_function_signature(F, Arity) :-
+    register_function_signatures([F-Arity]).
+
+register_function_signatures(Signatures0) :-
+    sort(Signatures0, Signatures),
+    findall(F,
+            ( member(F-Arity, Signatures),
+              \+ arity(F, Arity) ),
+            NewArityNames0),
+    forall(member(F-Arity, Signatures),
+           ( arity(F, Arity) -> true ; assertz(arity(F, Arity)) )),
+    findall(F, member(F-_, Signatures), Names0),
+    sort(Names0, Names),
+    findall(F, (member(F, Names), \+ fun(F)), NewFunNames),
+    forall(member(F, Names),
+           ( warn_if_executed_as_symbol(F),
+             ensure_fun_registered(F) )),
+    append(NewArityNames0, NewFunNames, RepairNames0),
+    sort(RepairNames0, RepairNames),
+    forall(member(F, RepairNames), repair_after_late_registration(F)).
+
+ensure_fun_registered(N) :- fun(N), !.
+ensure_fun_registered(N) :-
+    assertz(fun(N)),
+    forall(( current_predicate(N/Arity),
+             \+ (current_op(_, _, N), Arity =< 2) ),
+           ( arity(N, Arity) -> true ; assertz(arity(N, Arity)) )).
+
+%An expression that already executed compiled F as plain data; that execution cannot
+%be repaired retroactively, so flag it when F now arrives through a parsed definition:
+warn_if_executed_as_symbol(F) :- \+ fun(F), symbol_head(F, runnable), !,
+                                 format(user_error, "Warning: ~w is defined or imported after already being used; earlier expressions treat it as a plain symbol. Move the import or definition above the first use.~n", [F]).
+warn_if_executed_as_symbol(_).
+
+%A function arriving after its name was already compiled as plain data in stored
+%definitions: recompile those definitions from their source terms, so import order
+%cannot change what a definition means:
+repair_after_late_registration(F) :- ( symbol_head(F, clause) -> repair_stale_definitions(F) ; true ).
+
+repair_stale_definitions(F) :- findall(G, ( translated_from(_, [=, [G|_], Body]),
+                                            atom(G),
+                                            uses_as_data(F, Body) ), Gs0),
+                               sort(Gs0, Gs),
+                               forall(member(G, Gs), recompile_function(G)).
+
+%Rebuild every clause of G from its stored source terms. Erasing and re-appending each
+%tracked clause in assertion order keeps their relative order; clauses asserted through
+%Prolog interop are not tracked and would end up before the rebuilt ones:
+recompile_function(G) :- findall(Ref-Term, ( translated_from(Ref, Term),
+                                             Term = [=, [G0|_], _],
+                                             G0 == G ), Pairs),
+                         forall(member(Ref-Term, Pairs),
+                                ( erase(Ref),
+                                  retract(translated_from(Ref, Term)),
+                                  copy_term(Term, Fresh),
+                                  once(translate_clause(Fresh, Clause)),
+                                  assertz(Clause, NewRef),
+                                  assertz(translated_from(NewRef, Term)) )),
+                         invalidate_specializations(G).
+
+%True if the term contains a call-shaped (list-head) occurrence of F:
+uses_as_data(F, Term) :- nonvar(Term),
+                         Term = [H|Args],
+                         ( H == F -> true
+                         ; uses_as_data(F, H) -> true
+                         ; uses_as_data_args(F, Args) ).
+uses_as_data_args(F, Args) :- nonvar(Args),
+                              Args = [A|Rest],
+                              ( uses_as_data(F, A) -> true ; uses_as_data_args(F, Rest) ).
+
+% First pass converts MeTTa to Prolog terms without mutating registration state.
 parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
-                                           ( Term = [=, [F|W], _], atom(F) -> register_fun(F), length(W, N), Arity is N + 1, assertz(arity(F,Arity)), T=function
-                                                                            ; T=expression ).
+                                           ( Term = [=, [F|_], _], atom(F) -> T=function
+                                                                           ; T=expression ).
 parse_form(runnable(S), parsed(runnable, S, Term)) :- sread(S, Term).
 
 %Second pass to compile / run / add the Terms:
-process_form(Space, parsed(expression, _, Term), []) :- 'add-atom'(Space, Term, true),
-                                                        ( silent(true) -> true ; swrite(Term,STerm),
-                                                                                 format("\e[33m--> metta sexpr -->~n\e[36m~w~n", [STerm]),
-                                                                                 format("\e[33m^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
-process_form(_, parsed(runnable, FormStr, Term), Result) :- translate_expr([collapse, Term], Goals, Result),
-                                                            ( silent(true) -> true ; format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
-                                                                                     forall(member(G, Goals), portray_clause((:- G))),
-                                                                                     format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ),
-                                                            call_goals(Goals).
-process_form(Space, parsed(function, FormStr, Term), []) :- add_sexp(Space, Term),
-                                                            Term = [=, [F|_], _],
-                                                            translate_clause(Term, Clause),
-                                                            assertz(Clause, Ref),
-                                                            assertz(translated_from(Ref, Term)),
-                                                            metta_on_function_changed(F),
-                                                            ( silent(true) -> true ; format("\e[33m--> metta function -->~n\e[36m~w~n\e[33m--> prolog clause -->~n\e[32m", [FormStr]),
-                                                                                     clause(Head, Body, Ref),
-                                                                                     ( Body == true -> Show = Head; Show = (Head :- Body) ),
-                                                                                     portray_clause(current_output, Show),
-                                                                                     format("\e[33m^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
-process_form(_, In, _) :- format(atom(Msg), "failed to process form: ~w", [In]), throw(error(syntax_error(Msg), none)).
+process_form(Space, _, parsed(expression, _, Term), []) :- 'add-atom'(Space, Term, true),
+                                                           ( silent(true) -> true ; swrite(Term,STerm),
+                                                                                    format("\e[33m--> metta sexpr -->~n\e[36m~w~n", [STerm]),
+                                                                                    format("\e[33m^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
+process_form(_, _, parsed(runnable, FormStr, Term), Result) :- translate_runnable_expr([collapse, Term], Goals, Result),
+                                                               ( silent(true) -> true ; format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
+                                                                                        forall(member(G, Goals), portray_clause((:- G))),
+                                                                                        format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ),
+                                                               call_goals(Goals).
+process_form(Space, populate, parsed(function, _, Term), []) :- add_sexp(Space, Term).
+process_form(Space, compile, parsed(function, FormStr, Term), []) :- add_sexp(Space, Term),
+                                                                     Term = [=, [F|_], _],
+                                                                     translate_clause(Term, Clause),
+                                                                     assertz(Clause, Ref),
+                                                                     assertz(translated_from(Ref, Term)),
+                                                                     metta_on_function_changed(F),
+                                                                     ( silent(true) -> true ; format("\e[33m--> metta function -->~n\e[36m~w~n\e[33m--> prolog clause -->~n\e[32m", [FormStr]),
+                                                                     clause(Head, Body, Ref),
+                                                                     ( Body == true -> Show = Head; Show = (Head :- Body) ),
+                                                                     portray_clause(current_output, Show),
+                                                                     format("\e[33m^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
+process_form(_, _, In, _) :- format(atom(Msg), "failed to process form: ~w", [In]),
+                             throw(error(syntax_error(Msg), none)).
 
 %Like blanks but counts newlines:
 newlines(C0, C2) --> blanks_to_nl, !, {C1 is C0+1}, newlines(C1,C2).
