@@ -167,32 +167,29 @@ parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
 parse_form(runnable(S), parsed(runnable, S, Term)) :- sread(S, Term).
 
 %Second pass to compile / run / add the Terms:
-process_form(Space, _, parsed(expression, _, Term), []) :-
-    'add-atom'(Space, Term, true),
-    ( silent(true) -> true ; swrite(Term,STerm),
-                               format("\e[33m--> metta sexpr -->~n\e[36m~w~n", [STerm]),
-                               format("\e[33m^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
-process_form(_, _, parsed(runnable, FormStr, Term), Result) :-
-    translate_runnable_expr([collapse, Term], Goals, Result),
-    ( silent(true) -> true ; format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
-                               forall(member(G, Goals), portray_clause((:- G))),
-                               format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ),
-    call_goals(Goals).
-process_form(Space, populate, parsed(function, _, Term), []) :-
-    add_sexp(Space, Term).
-process_form(Space, compile, parsed(function, FormStr, Term), []) :-
-    add_sexp(Space, Term),
-    translate_clause(Term, Clause),
-    assertz(Clause, Ref),
-    assertz(translated_from(Ref, Term)),
-    ( silent(true) -> true ; format("\e[33m--> metta function -->~n\e[36m~w~n\e[33m--> prolog clause -->~n\e[32m", [FormStr]),
-                               clause(Head, Body, Ref),
-                               ( Body == true -> Show = Head; Show = (Head :- Body) ),
-                               portray_clause(current_output, Show),
-                               format("\e[33m^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
-process_form(_, _, In, _) :-
-    format(atom(Msg), "failed to process form: ~w", [In]),
-    throw(error(syntax_error(Msg), none)).
+process_form(Space, _, parsed(expression, _, Term), []) :- 'add-atom'(Space, Term, true),
+                                                           ( silent(true) -> true ; swrite(Term,STerm),
+                                                                                    format("\e[33m--> metta sexpr -->~n\e[36m~w~n", [STerm]),
+                                                                                    format("\e[33m^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
+process_form(_, _, parsed(runnable, FormStr, Term), Result) :- translate_runnable_expr([collapse, Term], Goals, Result),
+                                                               ( silent(true) -> true ; format("\e[33m--> metta runnable  -->~n\e[36m!~w~n\e[33m-->  prolog goal  -->\e[35m ~n", [FormStr]),
+                                                                                        forall(member(G, Goals), portray_clause((:- G))),
+                                                                                        format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ),
+                                                               call_goals(Goals).
+process_form(Space, populate, parsed(function, _, Term), []) :- add_sexp(Space, Term).
+process_form(Space, compile, parsed(function, FormStr, Term), []) :- add_sexp(Space, Term),
+                                                                     Term = [=, [F|_], _],
+                                                                     translate_clause(Term, Clause),
+                                                                     assertz(Clause, Ref),
+                                                                     assertz(translated_from(Ref, Term)),
+                                                                     metta_on_function_changed(F),
+                                                                     ( silent(true) -> true ; format("\e[33m--> metta function -->~n\e[36m~w~n\e[33m--> prolog clause -->~n\e[32m", [FormStr]),
+                                                                     clause(Head, Body, Ref),
+                                                                     ( Body == true -> Show = Head; Show = (Head :- Body) ),
+                                                                     portray_clause(current_output, Show),
+                                                                     format("\e[33m^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
+process_form(_, _, In, _) :- format(atom(Msg), "failed to process form: ~w", [In]),
+                             throw(error(syntax_error(Msg), none)).
 
 %Like blanks but counts newlines:
 newlines(C0, C2) --> blanks_to_nl, !, {C1 is C0+1}, newlines(C1,C2).

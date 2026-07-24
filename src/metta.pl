@@ -22,8 +22,8 @@ library(X, Y, Path) :- git_library_path(X, Base),
 :- use_module(library(process)).
 :- use_module(library(filesex)).
 :- current_prolog_flag(argv, Argv),
-   ( member(mork, Argv) -> ensure_loaded([parser, translator, specializer, filereader, gitimport, '../mork_ffi/morkspaces', spaces])
-                         ; ensure_loaded([parser, translator, specializer, filereader, gitimport, spaces])).
+   ( member(mork, Argv) -> ensure_loaded([ext_points, parser, translator, specializer, filereader, gitimport, '../mork_ffi/morkspaces', spaces])
+                         ; ensure_loaded([ext_points, parser, translator, specializer, filereader, gitimport, spaces])).
 
 %%%%%%%%%% Standard Library for MeTTa %%%%%%%%%%
 

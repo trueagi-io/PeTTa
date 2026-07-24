@@ -22,13 +22,17 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                                 ; Args1 = Args0, GoalsPrefix = [] ),
                                                catch(nb_getval(F, Prev), _, Prev = []),
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
-                                               translate_expr(BodyExpr, GoalsBody, ExpOut),
+                                               ( declared_output_type(F, 'Atom')
+                                                 -> GoalsBody = [],
+                                                    ExpOut = BodyExpr
+                                                  ; translate_expr(BodyExpr, GoalsBody, ExpOut) ),
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
                                                -> length(Bound, N),
                                                   MinimumArity is N + 1,
                                                   setof(A, (arity(Base, A), A > MinimumArity), [Arity|_]),
                                                   M is (Arity - N) - 1,
-                                                  length(ExtraArgs, M), append([Bound,ExtraArgs,[Out]],CallArgs), Goal =.. [Base|CallArgs],
+                                                  length(ExtraArgs, M), append(Bound, ExtraArgs, CallInArgs),
+                                                  resolve_memoization(Base, CallInArgs, Out, Goal),
                                                   append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs)
                                                ; FinalGoals= GoalsBody , HeadArgs = Args1, Out = ExpOut ),
                                                append(HeadArgs, [Out], FinalArgs),
@@ -68,6 +72,12 @@ goals_list_to_conj([], true)      :- !.
 goals_list_to_conj([G], G)        :- !.
 goals_list_to_conj([G|Gs], (G,R)) :- goals_list_to_conj(Gs, R).
 
+resolve_memoization(Fun, Args, Out, Goal) :-
+    ( metta_memoized_dispatch_call(Fun, Args, Out, Goal)
+    -> true
+    ; append(Args, [Out], DirectArgs),
+      Goal =.. [Fun|DirectArgs]
+    ).
 incomplete_application_kind(Fun, Arity, partial) :- ( arity(Fun, KnownArity), KnownArity >= Arity
                                                      ; \+ arity(Fun, _) ), !.
 incomplete_application_kind(_, _, overapplied).
@@ -83,12 +93,11 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                             length(Args, N),
                             Arity is N + 1,
                             ( current_predicate(F/Arity) , \+ (current_op(_, _, F), Arity =< 2)
-                              -> append(Args,[Out],CallArgs),
-                                 Goal =.. [F|CallArgs],
-                                 catch(call(Goal),_,fail)
+                              -> resolve_memoization(F, Args, Out, Goal),
+                                 catch(call(Goal), _, fail)
                             ; incomplete_application_kind(F, Arity, partial)
                               -> Out = partial(F,Args)
-                               ; throw_function_overapplication(F, N) )
+                            ; throw_function_overapplication(F, N) )
                           ; % --- Case 2: partial closure ---
                             compound(F), F = partial(Base, Bound) -> append(Bound, Args, NewArgs),
                                                                      reduce([Base|NewArgs], Out)
@@ -377,8 +386,7 @@ build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                              ( maybe_specialize_call(Fun, AVs, Out, Goal)
                                                                -> append(Inner, [Goal|Extra], Goals)
                                                                 ; arity(Fun, Arity)
-                                                                  -> append(AVs, [Out], Args),
-                                                                     Goal =.. [Fun|Args],
+                                                                  -> resolve_memoization(Fun, AVs, Out, Goal),
                                                                      append(Inner, [Goal|Extra], Goals)
                                                                 ; incomplete_application_kind(Fun, Arity, partial)
                                                                   -> Out = partial(Fun, AVs),
@@ -392,7 +400,7 @@ typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchG
     translate_args_by_type(T, ArgTypes, GsT2, AVsTmp0),
     ( IsPartial -> append(Bound, AVsTmp0, AVsTmp) ; AVsTmp = AVsTmp0 ),
     append(GsH, GsT2, InnerTmp),
-    ( (OutType == '%Undefined%' ; OutType == 'Atom')
+    ( (OutType == '%Undefined%' ; OutType == '_' ; OutType == 'Atom')
        -> Extra = [] ; Extra = [('get-type'(Out, OutType) *-> true ; 'get-metatype'(Out, OutType))] ),
     build_call_or_partial(Fun, AVsTmp, Out, InnerTmp, Extra, GoalsList),
     goals_list_to_conj(GoalsList, BranchGoal).
@@ -401,9 +409,9 @@ typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchG
 %Selectively apply translate_args for non-Expression args while Expression args stay as data input:
 translate_args_by_type([], _, [], []) :- !.
 translate_args_by_type([A|As], [T|Ts], GsOut, [AV|AVs]) :-
-                      ( T == 'Expression' -> AV = A, GsA = []
+                      ( T == 'Atom' -> AV = A, GsA = []
                                            ; translate_expr(A, GsA1, AV),
-                                             ( (T == '%Undefined%' ; T == 'Atom')
+                                             ( (T == '%Undefined%' ; T == '_')
                                                -> GsA = GsA1
                                                 ; append(GsA1, [('get-type'(AV, T) *-> true ; 'get-metatype'(AV, T))], GsA))),
                                              translate_args_by_type(As, Ts, GsRest, AVs),
@@ -479,3 +487,10 @@ next_lambda_name(Name) :- ( catch(nb_getval(lambda_counter, Prev), _, Prev = 0) 
                           N is Prev + 1,
                           nb_setval(lambda_counter, N),
                           format(atom(Name), 'lambda_~d', [N]).
+
+declared_output_type(F, OutType) :- atom(F),
+									nonvar(OutType),
+									catch(match('&self', [':', F, TypeChain], TypeChain, TypeChain), _, fail),
+									TypeChain = [->|Types],
+									append(_, [DeclaredOutType], Types),
+									DeclaredOutType == OutType.
