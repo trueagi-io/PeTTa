@@ -1,0 +1,11 @@
+(= (injectPrologCode $code)
+   (progn (translatePredicate (open_string $code $S))
+          (translatePredicate (load_files user ((Predicate (stream $S)))))
+          True))
+
+(: tabled (-> Expression Atom))
+(= (tabled $call)
+   (progn (translatePredicate (atom_string (car-atom $call) $strname))
+          (translatePredicate (atom_string (+ 1 (length (cdr-atom $call))) $strarity))
+          (translatePredicate (atomics_to_string (":- table " $strname "/" $strarity ".") $code))
+          (injectPrologCode $code)))

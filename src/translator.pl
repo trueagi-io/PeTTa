@@ -24,13 +24,15 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
                                                translate_expr(BodyExpr, GoalsBody, ExpOut),
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
-                                               -> current_predicate(Base/Arity), length(Bound, N), M is (Arity - N) - 1,
+                                               -> arity(Base, Arity), length(Bound, N), M is (Arity - N) - 1,
                                                   length(ExtraArgs, M), append(Bound, ExtraArgs, CallInArgs),
                                                   resolve_memoization(Base, CallInArgs, Out, Goal),
                                                   append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs)
                                                ; FinalGoals= GoalsBody , HeadArgs = Args1, Out = ExpOut ),
                                                append(HeadArgs, [Out], FinalArgs),
                                                Head =.. [F|FinalArgs],
+                                               length(FinalArgs, CompiledArity),
+                                               (arity(F, CompiledArity) -> true ; assertz(arity(F, CompiledArity))),
                                                append(GoalsPrefix, FinalGoals, Goals),
                                                goals_list_to_conj(Goals, BodyConj).
 
@@ -53,6 +55,14 @@ resolve_memoization(Fun, Args, Out, Goal) :-
     ; append(Args, [Out], DirectArgs),
       Goal =.. [Fun|DirectArgs]
     ).
+incomplete_application_kind(Fun, Arity, partial) :- ( arity(Fun, KnownArity), KnownArity >= Arity
+                                                     ; \+ arity(Fun, _) ), !.
+incomplete_application_kind(_, _, overapplied).
+
+throw_function_overapplication(Fun, ActualInputArity) :-
+    findall(InputArity, (arity(Fun, Arity), InputArity is Arity - 1), InputArities),
+    sort(InputArities, KnownInputArities),
+    throw(error(domain_error(function_input_arities(Fun, KnownInputArities), ActualInputArity), none)).
 
 % Runtime dispatcher: call F if it's a registered fun/1, else keep as list:
 reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
@@ -62,7 +72,9 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                             ( current_predicate(F/Arity) , \+ (current_op(_, _, F), Arity =< 2)
                               -> resolve_memoization(F, Args, Out, Goal),
                                  catch(call(Goal), _, fail)
-                               ; Out = partial(F,Args) )
+                            ; incomplete_application_kind(F, Arity, partial)
+                              -> Out = partial(F,Args)
+                            ; throw_function_overapplication(F, N) )
                           ; % --- Case 2: partial closure ---
                             compound(F), F = partial(Base, Bound) -> append(Bound, Args, NewArgs),
                                                                      reduce([Base|NewArgs], Out)
@@ -82,6 +94,8 @@ rewrite_streamops(['trace!', Arg1, Arg2],
                   [progn, ['println!', Arg1], Arg2]).
 rewrite_streamops([unique, Arg],
                   [call, [superpose, ['unique-atom', [collapse, Arg]]]]).
+rewrite_streamops(['alpha-unique', Arg],
+                  [call, [superpose, ['alpha-unique-atom', [collapse, Arg]]]]).
 rewrite_streamops([union, [superpose|A], [superpose|B]],
                   [call, [superpose, ['union-atom', [collapse, [superpose|A]],
                                                     [collapse, [superpose|B]]]]]).
@@ -179,6 +193,13 @@ translate_expr([H0|T0], Goals, Out) :-
                                                      ; translate_expr(KeyExpr, Gk, Kv),
                                                        translate_case(PairsExpr, Kv, Out, IfGoal, KeyGoal),
                                                        append([GsH, Gk, KeyGoal, [IfGoal]], Goals) )
+        %--- Short-circuit boolean operators ---:
+        ; HV == 'and-then', T = [A, B] -> translate_expr_to_conj(A, ConjA, Av),
+                                           translate_expr_to_conj(B, ConjB, Bv),
+                                           append(GsH, [(ConjA, (Av == true -> (ConjB, Out = Bv) ; Out = false))], Goals)
+        ; HV == 'or-else', T = [A, B] -> translate_expr_to_conj(A, ConjA, Av),
+                                          translate_expr_to_conj(B, ConjB, Bv),
+                                          append(GsH, [(ConjA, (Av == true -> Out = true ; (ConjB, Out = Bv)))], Goals)
         %--- Unification constructs ---:
         ; (HV == let ; HV == chain), T = [Pat, Val, In] -> translate_expr(Pat, Gp, Pv),
                                                            translate_expr(Val, Gv, V),
@@ -253,14 +274,15 @@ translate_expr([H0|T0], Goals, Out) :-
                                            maybe_print_compiled_clause(Label, ['|->', Args, Body], Clause),
                                            length(FullArgs, N),
                                            Arity is N + 1,
-                                           assertz(arity(F, Arity)),
+                                           (arity(F, Arity) -> true ; assertz(arity(F, Arity))),
                                            % emit closure capturing the environment (free vars)
                                            ( FreeVars == [] -> Out = F
                                                              ; Out = partial(F, FreeVars) )
         %--- Spaces ---:
-        ; ( HV == 'add-atom' ; HV == 'remove-atom' ), T = [_,_] -> append(T, [Out], RawArgs),
-                                                                   Goal =.. [HV|RawArgs],
-                                                                   append(GsH, [Goal], Goals)
+        ; ( HV == 'add-atom' ; HV == 'remove-atom' ), T = [Space,Atom] ->
+                                                                   translate_expr(Space, G1, S),
+                                                                   Goal =.. [HV,S,Atom,Out],
+                                                                   append([GsH,G1,[Goal]], Goals)
         ; HV == match, T = [Space, Pattern, Body] -> translate_expr(Space, G1, S),
                                                      translate_expr(Body, GsB, Out),
                                                      append(G1, [match(S, Pattern, Out, Out)], G2),
@@ -313,11 +335,16 @@ translate_expr([H0|T0], Goals, Out) :-
             ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
             ) % Check for type definition [:,HV,TypeChain]
             -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
-               ( TypeChains \= []
-                 -> maplist({Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
-                            typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), TypeChains, Branches),
-                    disj_list(Branches, Disj),
-                    Goals = [Disj]
+               list_to_set(TypeChains, UniqueTypeChains),
+               ( UniqueTypeChains \= []
+                 -> length(AllAVs, InputArity),
+                    Arity is InputArity + 1,
+                    ( incomplete_application_kind(Fun, Arity, ApplicationKind), ApplicationKind == overapplied
+                      -> append(GsH, [throw_function_overapplication(Fun, InputArity)], Goals)
+                       ; maplist({Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
+                                 typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), UniqueTypeChains, Branches),
+                         disj_list(Branches, Disj),
+                         Goals = [Disj] )
               ; build_call_or_partial(Fun, AllAVs, Out, Inner, [], Goals))
           %Literals (numbers, strings, etc.), known non-function atom => data:
           ; ( atomic(HV), \+ atom(HV) ; atom(HV), \+ fun(HV) ) -> Out = [HV|AVs],
@@ -334,12 +361,13 @@ build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                              Arity is N + 1,
                                                              ( maybe_specialize_call(Fun, AVs, Out, Goal)
                                                                -> append(Inner, [Goal|Extra], Goals)
-                                                                ; ( ( current_predicate(Fun/Arity) ; catch(arity(Fun, Arity), _, fail) ),
-                                                                     \+ ( current_op(_, _, Fun), Arity =< 2 ) )
+                                                                ; arity(Fun, Arity)
                                                                   -> resolve_memoization(Fun, AVs, Out, Goal),
                                                                      append(Inner, [Goal|Extra], Goals)
-                                                                   ; Out = partial(Fun, AVs),
-                                                                     append(Inner, Extra, Goals) ).
+                                                                ; incomplete_application_kind(Fun, Arity, partial)
+                                                                  -> Out = partial(Fun, AVs),
+                                                                     append(Inner, Extra, Goals)
+                                                                   ; append(Inner, [throw_function_overapplication(Fun, N)], Goals) ).
 
 %Type function call generation, returns function call plus typechecks for input and output:
 typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal) :-

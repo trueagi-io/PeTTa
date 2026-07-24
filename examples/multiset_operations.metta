@@ -2,3 +2,7 @@
 !(test (union-atom (a b b c) (b c c d)) (a b b c b c c d))
 !(test (intersection-atom (a b c c) (b c c c d)) (b c c))
 !(test (subtraction-atom (a b b c) (b c c d)) (a b))
+!(test (intersection-atom (a b c c) (b c d)) (b c))
+!(test (intersection-atom (a a a) (a)) (a))
+!(test (subtraction-atom (a a a) (a)) (a a))
+!(test (intersection-atom (a b) ()) ())
