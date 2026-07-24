@@ -704,6 +704,15 @@ pattern_selects_member(P, M) :- nonvar(M), nonvar(P),
                                         ; same_length(P, M) )
                                 ; fail ).
 
+%Tag evidence outranks shape: (box $pair) also parses as a plain list, but a
+%head atom that is a declared constructor of (or the tag of) exactly one
+%member makes that member the selection - nominal tags are the idiomatic
+%union discriminator (see strict_tuple_types.metta):
+pattern_selects_member_tagged(P, M) :- nonvar(M), nonvar(P), P = [Tag|Fs], atom(Tag),
+                                       ( atom(M) -> \+ \+ structural_pattern_fields(P, M, _, _)
+                                       ; is_list(M), M = [Tag2|FTs], Tag2 == Tag,
+                                         user_atom_type(Tag), same_length(Fs, FTs) ).
+
 %A tagged pattern (Tag P1 ... Pn) against either the structural tuple type
 %(Tag T1 ... Tn) or a nominal type produced by Tag's constructor declaration:
 structural_pattern_fields(Arg, T, Fields, FieldTs) :- is_list(Arg), Arg = [Tag|Fields], atom(Tag), nonvar(T),
@@ -766,7 +775,9 @@ bind_pattern_from(Pat, Val) :- ( nonvar(Pat),
 bind_pattern_typed(P, T) :- ( var(P) -> ( nonvar(T), \+ wildcard_type_t(T) -> add_known_type(P, T) ; true )
                             ; is_union(T), T = ['|'|Ms]        %a pattern narrows to the member it selects
                               -> ( findall(M, ( member(M, Ms), pattern_selects_member(P, M) ), [M1])
-                                   -> bind_pattern_typed(P, M1) ; true )
+                                   -> bind_pattern_typed(P, M1)
+                                 ; findall(M, ( member(M, Ms), pattern_selects_member_tagged(P, M) ), [M2])
+                                   -> bind_pattern_typed(P, M2) ; true )
                             ; list_type(T, ET), P = [C, H, R], C == cons
                               -> bind_pattern_typed(H, ET),    %source-form (cons H R) destructuring
                                  bind_pattern_typed(R, ['List', ET])
