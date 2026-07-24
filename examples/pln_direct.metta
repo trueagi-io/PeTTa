@@ -1,7 +1,7 @@
 !(import! &self (library lib_pln))
 
 ;PLN IMPLICATION TO CLAUSE COMPILATION EXTENSION:
-(: => (-> Atom Atom Atom %Undefined%))
+(: => (-> Atom Atom %Undefined% %Undefined%))
 (= (=> (cons , $args) $C $stvImp)
        (progn (cut) (add-atom &self (= $C (Truth_ModusPonens (foldl-atom $args (stv 1.0 1.0) Truth_ModusPonens) $stvImp)))))
 (= (=> $A $C $stvImp)
