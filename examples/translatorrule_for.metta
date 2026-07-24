@@ -1,4 +1,4 @@
-(: for (-> Atom Atom Atom Atom))
+(: for (-> Atom Atom Atom %Undefined%))
 (= (for $var $collection $body)
    (quote (let $var (superpose $collection)
                     $body)))

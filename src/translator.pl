@@ -22,7 +22,10 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                                 ; Args1 = Args0, GoalsPrefix = [] ),
                                                catch(nb_getval(F, Prev), _, Prev = []),
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
-                                               translate_expr(BodyExpr, GoalsBody, ExpOut),
+                                               ( declared_output_type(F, 'Atom')
+                                                 -> GoalsBody = [],
+                                                    ExpOut = BodyExpr
+                                                  ; translate_expr(BodyExpr, GoalsBody, ExpOut) ),
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
                                                -> arity(Base, Arity), length(Bound, N), M is (Arity - N) - 1,
                                                   length(ExtraArgs, M), append(Bound, ExtraArgs, CallInArgs),
@@ -376,7 +379,7 @@ typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchG
     translate_args_by_type(T, ArgTypes, GsT2, AVsTmp0),
     ( IsPartial -> append(Bound, AVsTmp0, AVsTmp) ; AVsTmp = AVsTmp0 ),
     append(GsH, GsT2, InnerTmp),
-    ( (OutType == '%Undefined%' ; OutType == 'Atom')
+    ( (OutType == '%Undefined%' ; OutType == '_' ; OutType == 'Atom')
        -> Extra = [] ; Extra = [('get-type'(Out, OutType) *-> true ; 'get-metatype'(Out, OutType))] ),
     build_call_or_partial(Fun, AVsTmp, Out, InnerTmp, Extra, GoalsList),
     goals_list_to_conj(GoalsList, BranchGoal).
@@ -387,7 +390,7 @@ translate_args_by_type([], _, [], []) :- !.
 translate_args_by_type([A|As], [T|Ts], GsOut, [AV|AVs]) :-
                       ( T == 'Atom' -> AV = A, GsA = []
                                            ; translate_expr(A, GsA1, AV),
-                                             ( T == '%Undefined%'
+                                             ( (T == '%Undefined%' ; T == '_')
                                                -> GsA = GsA1
                                                 ; append(GsA1, [('get-type'(AV, T) *-> true ; 'get-metatype'(AV, T))], GsA))),
                                              translate_args_by_type(As, Ts, GsRest, AVs),
@@ -463,3 +466,10 @@ next_lambda_name(Name) :- ( catch(nb_getval(lambda_counter, Prev), _, Prev = 0) 
                           N is Prev + 1,
                           nb_setval(lambda_counter, N),
                           format(atom(Name), 'lambda_~d', [N]).
+
+declared_output_type(F, OutType) :- atom(F),
+									nonvar(OutType),
+									catch(match('&self', [':', F, TypeChain], TypeChain, TypeChain), _, fail),
+									TypeChain = [->|Types],
+									append(_, [DeclaredOutType], Types),
+									DeclaredOutType == OutType.

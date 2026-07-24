@@ -1,13 +1,13 @@
 !(import! &self (library lib_nars))
 
 ;PLN IMPLICATION TO CLAUSE COMPILATION EXTENSION:
-(: => (-> Atom Atom Atom Atom))
+(: => (-> Atom Atom Atom %Undefined%))
 (= (=> (cons , $args) $C $stvImp)
        (progn (cut) (add-atom &self (= $C (Truth_Deduction (foldl-atom $args (stv 1.0 1.0) Truth_Deduction) $stvImp)))))
 (= (=> $A $C $stvImp)
    (add-atom &self (= $C (Truth_Deduction $A $stvImp))))
 
-(: ? (-> Atom Atom))
+(: ? (-> Atom %Undefined%))
 (= (? $term)
    (unique-atom (collapse ($term (progn (reduce $term) ;ensures binding to specific answer, then combines evidence for all derived variants:
                                         (foldl-atom (collapse (reduce $term)) (stv 0.5 0.0) Truth_Revision))))))
