@@ -6,10 +6,9 @@
 (: aa (-> A A))
 (= (aa a) a)
 
-; Dynamic form: compile-time cannot guarantee output type, runtime check must enforce it.
-(: bad-catch (-> A B))
-(= (bad-catch $x) (catch (aa $x)))
-
+; Dynamic forms: compile-time cannot guarantee output type, runtime check must
+; enforce it. (catch is no longer such a form - its result is typed as a union
+; of the inner type and (Error Detail Ctx), see fail_catch_output_mismatch.metta)
 (: bad-filter (-> A B))
 (= (bad-filter $x) (filter-atom (1) $y (aa $x)))
 
@@ -21,12 +20,6 @@
 ; fail_foldall_output_mismatch.metta)
 (: bad-foldall (-> A B))
 (= (bad-foldall $x) (foldall $x (superpose (1 2)) 0))
-
-!(test
-   (let* (($expr (quote (bad-catch a)))
-          ($result (catch (eval $expr))))
-     (car-atom $result))
-   Error)
 
 !(test
    (let* (($expr (quote (bad-filter a)))
