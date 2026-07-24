@@ -1147,9 +1147,119 @@ deterministic_call_expr([Fun|Args], Result) :- atom(Fun), !,
                                                function_call_determinism(Fun, N, Det),
                                                ( Det == nondet -> Result = nondeterministic(call(Fun))
                                                ; Det == det -> combine_determinism_list(Args, Result)
+                                               ; det_closure_args_ok(Fun, N, Args), body_determinism_assuming(Fun, N, det)
+                                                 -> combine_determinism_list(Args, Result)
                                                ; underapplied_closure(Fun, N) -> combine_determinism_list(Args, Result)
                                                ; Result = unknown(undetermined_call(Fun)) ).
 deterministic_call_expr(Expr, unknown(dynamic_call(Expr))).
+
+%%% Argument-aware transitive determinism through higher-order functions.
+%A function whose declared arrow is a plain -> (no det commitment outside
+%--strict-det) can still be deterministic CONDITIONALLY on its closure
+%arguments: fold-flat is det exactly when the folded closure is det. The
+%unconditional body_determinism analyzes the callee's clauses in isolation -
+%the closure param applies with a plain -> head, which is not det evidence -
+%so it reports unspecified and a det caller's validation fails. Here, when
+%the ACTUAL argument at a call site is det, we re-analyze the callee's
+%clauses with the closure-parameter positions treated as det and certify the
+%call. The det assumption is scoped to copies of the callee's clause metas;
+%no global flag ever makes a plain -> arrow count as det.
+%
+%NOTE ON MECHANISM: the stored clause metas are captured (translator.pl)
+%before clause_param_types binds the declared arrow types onto the head param
+%vars, so those vars carry NO tknown arrow attribute. Rather than read and
+%upgrade an existing attribute, we DERIVE the det arrow from the function's
+%unique declaration and attach it to the copied head var at each arrow
+%position. The net effect is identical - the copy's param var reads as
+%-[det]-> for the var-head application in deterministic_expr - and it stays
+%scoped to the copy; the stored metas are never mutated.
+:- dynamic det_assume_cache/3.
+
+%Declared arrow parameter positions (head -> or -[det]->, never -[nondet]->,
+%whose det-ness is irrelevant or already handled as nondet), as
+%pos(Index, InArity, Head) where InArity is the arrow's parameter count:
+arrow_det_positions(ATs, Positions) :- findall(pos(Idx, M, H),
+                                              ( nth0(Idx, ATs, T), is_arrow_type(T),
+                                                T = [H|Rest], ( H == (->) ; H == '-[det]->' ),
+                                                length(Rest, L), M is L - 1 ),
+                                              Positions).
+
+%Fun must have a UNIQUE arity-N declaration exposing at least one non-nondet
+%arrow parameter, and every such position's actual argument must be det (else
+%this path adds nothing and fails so the normal fallbacks run):
+det_closure_args_ok(Fun, N, Args) :- findall(ATs, fn_decl_arity(Fun, N, ATs, _), [ATs1]),
+                                     arrow_det_positions(ATs1, Positions),
+                                     Positions \== [],
+                                     det_closure_positions(Positions, Args).
+
+det_closure_positions([], _).
+det_closure_positions([pos(Idx, M, _)|Ps], Args) :- nth0(Idx, Args, Arg),
+                                                    det_arg_evidence(Arg, M),
+                                                    det_closure_positions(Ps, Args).
+
+%An actual argument carries det evidence when it is: a var whose known arrow
+%commits to det; a lambda with a det body; a (partial) application or bare
+%atom naming a function that is det at the relevant arity. Anything else
+%fails:
+det_arg_evidence(Arg, _) :- var(Arg), !, known_singleton(Arg, K), nonvar(K), is_arrow_type(K),
+                            K = [H|_], ( H == '-[det]->' -> true ; H == (->), strict_det(true) ).
+det_arg_evidence(['|->', _, LBody], _) :- !, deterministic_expr(LBody, ok).
+det_arg_evidence([F2|_], _) :- atom(F2), !, fn_own_arity(F2, A), det_atom_evidence(F2, A).
+det_arg_evidence(F2, M) :- atom(F2), !, det_atom_evidence(F2, M).
+
+det_atom_evidence(F2, M) :- ( catch(fn_determinism(F2, M, det), _, fail) -> true
+                            ; body_determinism(F2, M, det) ).
+
+%The named function's own full arity (declared, else from stored clauses):
+fn_own_arity(F2, A) :- fn_decl_arity(F2, A, _, _), !.
+fn_own_arity(F2, A) :- catch(nb_getval(F2, Metas), _, fail), member(fun_meta(As, _), Metas), length(As, A), !.
+
+%body_determinism GIVEN the arrow-typed parameters are det. Analyzes COPIES
+%of the stored clause metas with each arrow-position head param var attached
+%the -[det]-> form of its declared arrow type; the stored metas stay intact.
+%A SEPARATE assume-stack breaks recursion (the callee re-enters this path
+%with the now-det closure var, and det_closure_args_ok re-confirms it) and a
+%separate cache memoizes the argument-independent ("det GIVEN det closures")
+%result. Never reuses body_determinism's $det_stack - that would let the
+%unconditional analysis wrongly certify a plain -> as det.
+body_determinism_assuming(F, N, Det) :- det_assume_cache(F, N, Det0), !, Det = Det0.
+body_determinism_assuming(F, _, det) :- catch(b_getval('$det_assume_stack', St), _, St = []),
+                                        memberchk(F, St), !.
+body_determinism_assuming(F, N, Det) :- catch(nb_getval(F, Metas0), _, Metas0 = []),
+                                        include(arity_meta(N), Metas0, Metas),
+                                        Metas \== [],
+                                        findall(ATs, fn_decl_arity(F, N, ATs, _), [ATs1]),
+                                        arrow_det_positions(ATs1, Positions),
+                                        Positions \== [],
+                                        maplist(assume_det_meta(ATs1, Positions), Metas, Upgraded),
+                                        catch(b_getval('$det_assume_stack', St), _, St = []),
+                                        b_setval('$det_assume_stack', [F|St]),
+                                        clause_set_determinism(Upgraded, Det0),
+                                        b_setval('$det_assume_stack', St),
+                                        Det = Det0,
+                                        assertz(det_assume_cache(F, N, Det)).
+
+%Copy the clause meta (attributes copy with the term) and, at each arrow
+%position, attach the det form of the declared arrow to the COPIED head var -
+%never the stored one:
+assume_det_meta(ATs1, Positions, Meta, Meta2) :- copy_term(Meta, Meta2),
+                                                 Meta2 = fun_meta(Args, _),
+                                                 assume_det_positions(Positions, ATs1, Args).
+
+assume_det_positions([], _, _).
+assume_det_positions([pos(Idx, _, _)|Ps], ATs1, Args) :- nth0(Idx, ATs1, T), T = [_|Rest],
+                                                        copy_term(Rest, Rest2),
+                                                        DetArrow = ['-[det]->'|Rest2],
+                                                        ( nth0(Idx, Args, HeadArg) -> assume_det_param(HeadArg, DetArrow) ; true ),
+                                                        assume_det_positions(Ps, ATs1, Args).
+
+%Only a var head param (carrying no attr, or an existing arrow attr) is
+%upgraded; any other shape is left as-is so the analysis stays conservative
+%(and therefore sound) for that clause:
+assume_det_param(V, DetArrow) :- ( var(V),
+                                   ( get_attr(V, tknown, [K]) -> ( nonvar(K), is_arrow_type(K) ) ; true )
+                                 -> put_attr(V, tknown, [DetArrow])
+                                 ; true ).
 
 %Underapplication builds a closure instead of calling (reduce case 1):
 %constructing the partial is deterministic - the closure's own determinism

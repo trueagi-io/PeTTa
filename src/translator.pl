@@ -23,6 +23,7 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                catch(nb_getval(F, Prev), _, Prev = []),
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
                                                retractall(det_analysis_cache(_, _, _)),  %clause set changed
+                                               retractall(det_assume_cache(_, _, _)),  %conditional-det results depend on clauses too
                                                clause_param_types(F, Args1, DeclOut),
                                                %Snapshot the declared arg positions that stay bare type variables after
                                                %head binding; checked below to enforce their claimed universality:
