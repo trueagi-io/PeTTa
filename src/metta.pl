@@ -341,23 +341,22 @@ resolve_python_import_path(File, CanonPath) :-
       -> true
        ; throw_missing_import(File) ).
 
-:- dynamic metta_import_state/3.
+:- dynamic imported_metta_source/2.
 
-% The entire loader graph runs under the recursive metta_loader mutex, so these
-% per-space markers only need to distinguish cycles, completed loads, and retry.
+% Assert before loading to break cycles; retain on success and retract on failure.
+% The recursive metta_loader mutex serializes the entire loader graph.
 import_once(Space, CanonPath, Goal) :-
-    ( metta_import_state(Space, CanonPath, _)
+    ( imported_metta_source(Space, CanonPath)
       -> true
-       ; assertz(metta_import_state(Space, CanonPath, loading)),
+       ; assertz(imported_metta_source(Space, CanonPath)),
          run_new_import(Space, CanonPath, Goal) ).
 
 run_new_import(Space, CanonPath, Goal) :-
     catch(( once(Goal)
-            -> retractall(metta_import_state(Space, CanonPath, _)),
-               assertz(metta_import_state(Space, CanonPath, loaded))
-             ; retractall(metta_import_state(Space, CanonPath, _)), fail ),
+            -> true
+             ; retractall(imported_metta_source(Space, CanonPath)), fail ),
           Error,
-          ( retractall(metta_import_state(Space, CanonPath, _)),
+          ( retractall(imported_metta_source(Space, CanonPath)),
             throw(Error) )).
 
 python_module_names(CanonPath, ModuleKey, ModuleName) :-

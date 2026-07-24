@@ -4,7 +4,7 @@
                                       -> assertz(silent(true)) ; assertz(silent(false)) ).
 :- dynamic working_dir/1.
 :- dynamic translated_from/2.
-:- dynamic metta_source_state/2.
+:- dynamic compiled_metta_source/1.
 
 push_working_dir(Filename) :- file_directory_name(Filename, Dir0),
                               ( absolute_file_name(Dir0, Dir, [file_type(directory), file_errors(fail)])
@@ -41,18 +41,17 @@ load_imported_metta_file(Filename, Results, Space) :-
           rethrow_metta_file_error(Filename, Error)).
 
 load_imported_metta_file_impl(Filename, Results, Space) :-
-    ( metta_source_state(Filename, _)
+    ( compiled_metta_source(Filename)
       -> load_metta_file_impl(Filename, Results, Space, populate)
-       ; assertz(metta_source_state(Filename, loading)),
+       ; assertz(compiled_metta_source(Filename)),
          run_new_source_load(Filename, Results, Space) ).
 
 run_new_source_load(Filename, Results, Space) :-
     catch(( once(load_metta_file_impl(Filename, Results, Space, compile))
-            -> retractall(metta_source_state(Filename, _)),
-               assertz(metta_source_state(Filename, loaded))
-             ; retractall(metta_source_state(Filename, _)), fail ),
+            -> true
+             ; retractall(compiled_metta_source(Filename)), fail ),
           Error,
-          ( retractall(metta_source_state(Filename, _)),
+          ( retractall(compiled_metta_source(Filename)),
             throw(Error) )).
 
 rethrow_metta_file_error(_, Error) :- Error = error(_, context(_, _)), !,
@@ -67,16 +66,19 @@ process_metta_string(S, Results, Space) :-
     with_mutex(metta_loader,
                process_metta_string(S, Results, Space, compile)).
 process_metta_string(S, Results, Space, CompileMode) :-
-    string_codes(S, Cs),
-    strip(Cs, 0, Codes),
-    phrase(top_forms(Forms, 1), Codes),
-    maplist(parse_form, Forms, ParsedForms),
+    parse_metta_source(S, ParsedForms),
     register_parsed_signatures(ParsedForms),
     % Pinned git dependencies declared in this file are fetched before any of
     % its forms run (gitimport.pl).
     acquire_declared_dependencies(ParsedForms),
     maplist(process_form(Space, CompileMode), ParsedForms, ResultsList), !,
     append(ResultsList, Results).
+
+parse_metta_source(S, ParsedForms) :-
+    string_codes(S, Cs),
+    strip(Cs, 0, Codes),
+    phrase(top_forms(Forms, 1), Codes),
+    maplist(parse_form, Forms, ParsedForms).
 
 % Register the complete signature set before repairing callers.  Translating a
 % caller while only the first overload is visible can otherwise leave it stale.

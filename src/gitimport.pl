@@ -2,7 +2,7 @@
 :- use_module(library(process)).
 :- use_module(library(random)).
 
-:- dynamic git_dependency_state/3.
+:- dynamic git_dependency/2.
 :- dynamic git_library_path/2.
 
 % Runtime git-import! is a core primitive.  Declarative git-dependency forms use
@@ -45,25 +45,21 @@ acquire_git_declaration(Args) :-
 % A declarative URL has one revision per process.  This prevents two manifests
 % from silently retargeting the same checkout beneath already-loaded code.
 acquire_git_dependency(Url, Rev, Build, Base) :-
-    ( git_dependency_state(Url, Previous, _)
+    ( git_dependency(Url, Previous)
       -> ( Previous == Rev
            -> true
             ; throw(error(domain_error(conflicting_git_dependency, Url),
                           context('git-dependency',
                                   two_revisions(Previous, Rev)))) )
-       ; assertz(git_dependency_state(Url, Rev, loading)),
+       ; assertz(git_dependency(Url, Rev)),
          run_new_git_dependency(Url, Rev, Build, Base) ).
-
-acquired_git_dep(Url, Rev) :-
-    git_dependency_state(Url, Rev, loaded).
 
 run_new_git_dependency(Url, Rev, Build, Base) :-
     catch(( once(acquire_git_dependency_body(Url, Rev, Build, Base))
-            -> retractall(git_dependency_state(Url, Rev, _)),
-               assertz(git_dependency_state(Url, Rev, loaded))
-             ; retractall(git_dependency_state(Url, Rev, _)), fail ),
+            -> true
+             ; retractall(git_dependency(Url, Rev)), fail ),
           Error,
-          ( retractall(git_dependency_state(Url, Rev, _)),
+          ( retractall(git_dependency(Url, Rev)),
             throw(Error) )).
 
 acquire_git_dependency_body(Url, Rev, Build, Base) :-
@@ -77,13 +73,8 @@ acquire_manifest_dependencies(LocalDir) :-
     directory_file_path(LocalDir, 'deps.metta', Manifest),
     ( exists_file(Manifest)
       -> read_file_to_string(Manifest, Source, []),
-         string_codes(Source, Codes0),
-         strip(Codes0, 0, Codes),
-         phrase(top_forms(Forms, 1), Codes),
-         forall(( member(form(FormSource), Forms),
-                  sread(FormSource, Term),
-                  Term = ['git-dependency'|Args] ),
-                acquire_git_declaration(Args))
+         parse_metta_source(Source, ParsedForms),
+         acquire_declared_dependencies(ParsedForms)
        ; true ).
 
 % The name is recorded explicitly with the canonical checkout root.  library/3
