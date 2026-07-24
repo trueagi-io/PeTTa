@@ -80,6 +80,13 @@ checker already knows is a compile-time error.
 (= (greet) (the String (match &self (name $n) $n)))
 ```
 
+**Auditing runtime checks.** `--warn-runtime-checks` (independent of the other
+flags) prints a warning for every runtime type check the compiler emits —
+implicit residual guards and explicit `(the ...)` ascriptions alike, each with
+the containing function and the checked type. Combined with `--strict` (which
+already forbids the implicit ones) a warning-free compile certifies that the
+program contains no runtime type checks at all.
+
 **Union types.** A heterogeneous position can declare its alternatives with
 `(| T1 T2 ...)` — for example `(List (| (CPU %Undefined% %Undefined%
 %Undefined%) (: %Undefined% %Undefined% %Undefined% TV)))` for a mixed

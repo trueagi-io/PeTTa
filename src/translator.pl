@@ -244,6 +244,13 @@ translate_expr([H0|T0], Goals, Out) :-
                                               build_branch(ConE, Ev, Out, BE),
                                               ( ConC == true -> append(GsH, [ (CondGoal -> BT ; BE) ], Goals)
                                                               ; append(GsH, [ (ConC, (CondGoal -> BT ; BE)) ], Goals) )
+        %A case whose arguments do not fit (case Key ((Pattern Value) ...))
+        %compiles as a data list - warn, because that is rarely intended and
+        %the downstream errors do not mention case at all:
+        ; HV == case, \+ ( T = [_, Ps], is_list(Ps), forall(member(Pr, Ps), (is_list(Pr), length(Pr, 2))) )
+          -> format(user_error, "Warning: (case ...) does not match (case Key ((Pattern Value) ...)) and compiles as plain data~n", []),
+             eval_data_list([HV|T], GsD, Out),
+             append(GsH, GsD, Goals)
         ; HV == case, T = [KeyExpr, PairsExpr] -> ( select(Found0, PairsExpr, Rest0),
                                                     subsumes_term(['Empty', _], Found0),
                                                     Found0 = ['Empty', DefaultExpr],

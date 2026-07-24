@@ -28,6 +28,19 @@
    ( memberchk('--oracle', Argv) -> assertz(oracle_mode(true)) ; assertz(oracle_mode(false)) ),
    ( memberchk('--no-det-cut', Argv) -> assertz(suppress_det_cut(true)) ; assertz(suppress_det_cut(false)) ).
 
+%--warn-runtime-checks reports every runtime type check the compiler emits -
+%implicit residual guards and explicit (the ...) ascriptions alike - so the
+%user can see and eliminate them one by one. Independent of --strict (where
+%implicit residuals are errors anyway, this reports the explicit remainder):
+:- dynamic warn_runtime_checks/1.
+:- current_prolog_flag(argv, Argv),
+   ( memberchk('--warn-runtime-checks', Argv) -> assertz(warn_runtime_checks(true))
+                                               ; assertz(warn_runtime_checks(false)) ).
+
+warn_residual_check(Ctx, T) :- ( warn_runtime_checks(true)
+                                 -> format(user_error, "Warning: runtime type check in ~w against ~p~n", [Ctx, T])
+                                  ; true ).
+
 %%% Arrow shapes: prefix, like every MeTTa form - (-> A B), (-[det]-> A B),
 %%% (-[nondet]-> A B). Under --strict-det a plain -> is a determinism
 %%% commitment: functions are deterministic unless declared -[nondet]->.
@@ -246,15 +259,18 @@ ascribe_type(V, T, Gs) :- ( var(T) -> Gs = []
                                 -> ( type_unify(K, T) -> Gs = []
                                    ; \+ \+ type_unify(T, K)       %the ascribed type fits the known type
                                      -> put_attr(V, tknown, [T]), %(e.g. a union member): narrow to it, checked
-                                        ( ground(T) -> guard_goal(V, T, G), Gs = [G] ; Gs = [] )
+                                        ascription_guard(V, T, Gs)
                                    ; throw(error(type_conflict(existing(K), required(T)), typecheck)) )
                                  ; add_known_type(V, T),
-                                   ( ground(T) -> guard_goal(V, T, G), Gs = [G] ; Gs = [] ) )
+                                   ascription_guard(V, T, Gs) )
                           ; check_value(V, T, St),
                             ( St == ok -> Gs = []
                             ; St == mismatch -> throw(error(literal_type_mismatch(V, T), typecheck))
-                            ; ground(T) -> guard_goal(V, T, G), Gs = [G]
-                            ; Gs = [] ) ).
+                            ; ascription_guard(V, T, Gs) ) ).
+
+ascription_guard(V, T, Gs) :- ( ground(T) -> warn_residual_check('(the ...)', T),
+                                             guard_goal(V, T, G), Gs = [G]
+                                           ; Gs = [] ).
 
 %(brand T Expr): erased trust in a semantic role. No runtime goal exists - a
 %role has no runtime witness by construction - but a value already carrying
@@ -441,18 +457,29 @@ check_value(V, T, St) :- is_list(T), !,
 %value already carrying a different brand does not (that is the feature):
 check_value(V, T, St) :- atom(T), declared_newtype(T, R), !,
                          value_candidate_types(V, Cs),
-                         ( Cs == [] -> check_value(V, R, St)
+                         ( Cs == [] -> ( constructed_definite_mismatch(V) -> St = mismatch
+                                                                           ; check_value(V, R, St) )
                          ; member(C, Cs), type_unify(C, T) -> St = ok
                          ; member(C, Cs), \+ ( atom(C), declared_newtype(C, _) ),
                            type_unify(C, R) -> St = ok
                          ; St = mismatch ).
 check_value(V, T, St) :- atom(T), !,
                          value_candidate_types(V, Cs),
-                         ( Cs == [] -> St = unknown
+                         ( Cs == [] -> ( constructed_definite_mismatch(V) -> St = mismatch
+                                                                           ; St = unknown )
                          ; member(C, Cs), type_unify(C, T) -> St = ok
                          ; member(C, Cs), refinement_pair(C, T) -> St = unknown
                          ; St = mismatch ).
 check_value(_, _, unknown).
+
+%A constructor application every declaration of which is definitely
+%contradicted by some field can never have any type. In particular a field
+%branded with a different newtype is unfixable at runtime - brands are
+%erased - so it must reject at compile time, not degrade to a guard:
+constructed_definite_mismatch(V) :- is_list(V), V = [H|Args], atom(H),
+                                    length(Args, N), fn_decl_arity(H, N, _, _),
+                                    forall(fn_decl_arity(H, N, ATs, _),
+                                           \+ \+ tuple_fields_status(Args, ATs, mismatch)).
 
 %How an atom's declared candidate types stand against a required type:
 atom_value_status(V, T, St) :- value_candidate_types(V, Cs),
@@ -574,7 +601,8 @@ check_call_arg(Mode, Fun, AV, T, Gs) :- ( var(AV)
 type_guard(Fun, AV, T, Gs) :- ( nonvar(T), \+ wildcard_type_t(T)
                                 -> ( strict_mode(true)
                                      -> throw(error(strict_runtime_typecheck(Fun, typecheck_or_error(AV, T)), typecheck))
-                                      ; guard_goal(AV, T, G), Gs = [G] )
+                                      ; warn_residual_check(Fun, T),
+                                        guard_goal(AV, T, G), Gs = [G] )
                                  ; Gs = [] ).
 
 %Inline the primitive fast path into the compiled goal so hot code only pays a
@@ -620,6 +648,10 @@ runtime_type_ok(V, T) :- T = [Tag|FieldTs], user_atom_type(Tag), !,
 runtime_type_ok(V, T) :- is_list(T), !,
                          is_list(V), same_length(V, T),
                          runtime_tuple_ok(V, T).
+%Nominal values type by their cached declarations before falling back to
+%get-type reflection (which scans &self per lookup - hot residual checks on
+%constructed values must not pay that). Only positive matches commit:
+runtime_type_ok(V, T) :- atom(T), nominal_value_ok(V, T), !.
 %get-type is user-extensible and extensions may call typechecked code, so a
 %guard reached from within a get-type call must not recurse into get-type:
 runtime_type_ok(_, _) :- nb_current('$in_typecheck', true), !.
@@ -630,6 +662,15 @@ runtime_type_ok(V, T) :- setup_call_cleanup(nb_setval('$in_typecheck', true),
 runtime_list_ok([], _).
 runtime_list_ok([E|Es], ET) :- ( var(E) -> true ; runtime_type_ok(E, ET) ),
                                runtime_list_ok(Es, ET).
+
+%A constructor application whose unique declaration outputs T (fields still
+%checked), or a value atom declared T:
+nominal_value_ok(V, T) :- is_list(V), V = [Ctor|Fields], atom(Ctor), !,
+                          length(Fields, N),
+                          findall(ATs-OT, fn_decl_arity(Ctor, N, ATs, OT), [FieldTs-OT1]),
+                          OT1 == T,
+                          runtime_tuple_ok(Fields, FieldTs).
+nominal_value_ok(V, T) :- atom(V), declared_value_type(V, VT), VT == T.
 
 runtime_tuple_ok([], []).
 runtime_tuple_ok([F|Fs], [T|Ts]) :- ( var(F) -> true ; runtime_type_ok(F, T) ),
