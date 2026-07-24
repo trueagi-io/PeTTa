@@ -495,7 +495,7 @@ nonfunction_type(K) :- nonvar(K), ( primitive_type(K)
 translate_closure_call(HV, AVs, Inner, Goals, Out) :- var(HV), AVs \== [], known_singleton(HV, K),
                                                       length(AVs, N), N1 is N + 1,
                                                       ( var(K) -> length(Xs, N1), K = [->|Xs]
-                                                      ; K = [H|Xs], ( H == (->) ; H == '-[nondet]->' ),
+                                                      ; K = [H|Xs], ( H == (->) ; H == '-[det]->' ; H == '-[nondet]->' ),
                                                         length(Xs, N1) ),
                                                       append(ArgTs, [OutT], Xs),
                                                       apply_call_args(declared, closure, AVs, ArgTs, GuardGs),
@@ -511,7 +511,7 @@ translate_closure_call(HV, AVs, Inner, Goals, Out) :- var(HV), AVs \== [], known
 %positions are checked and the result carries the remaining arrow:
 translate_closure_call(HV, AVs, Inner, Goals, Out) :- var(HV), AVs \== [], known_singleton(HV, K),
                                                       nonvar(K), K = [H|Xs],
-                                                      ( H == (->) ; H == '-[nondet]->' ),
+                                                      ( H == (->) ; H == '-[det]->' ; H == '-[nondet]->' ),
                                                       length(AVs, N), length(Xs, LX), N < LX - 1,
                                                       append(ArgTs, [OutT], Xs),
                                                       length(UsedTs, N), append(UsedTs, RestTs, ArgTs),

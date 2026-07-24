@@ -68,11 +68,21 @@ infix_arrow_misuse(T) :- is_list(T), T = [H|_], nonvar(H), infix_arrow_misuse(H)
 %arrows keep their marker so closure parameters carry the commitment:
 normalize_type(T, T) :- var(T), !.
 normalize_type(T, T) :- atomic(T), !.
-normalize_type(T, TN) :- is_list(T), fn_type_shape(T, ATs, OT, Det), !,
+normalize_type(T, TN) :- is_list(T), fn_type_shape(T, ATs, OT, _), !,
+                         T = [Arrow|_],
+                         canonical_arrow(Arrow, H),
                          maplist(normalize_type, ATs, ATN),
                          normalize_type(OT, OTN),
                          append(ATN, [OTN], Xs),
-                         ( Det == nondet -> TN = ['-[nondet]->'|Xs] ; TN = [->|Xs] ).
+                         TN = [H|Xs].
+
+%Explicit determinism markers survive normalization so closure parameters
+%carry their commitment in every mode, not only under --strict-det:
+canonical_arrow('-[det]->', '-[det]->') :- !.
+canonical_arrow('-[deterministic]->', '-[det]->') :- !.
+canonical_arrow('-[nondet]->', '-[nondet]->') :- !.
+canonical_arrow('-[nondeterministic]->', '-[nondet]->') :- !.
+canonical_arrow(_, (->)).
 normalize_type(T, TN) :- is_list(T), !, maplist(normalize_type, T, TN).
 normalize_type(T, T).
 
@@ -197,14 +207,16 @@ type_unify(A, B) :- is_arrow_type(A), is_arrow_type(B), !,
 type_unify(A, B) :- is_list(A), !, is_list(B), same_length(A, B), maplist(type_unify, A, B).
 type_unify(A, B) :- A == B.
 
-det_arrow_fits(HA, _) :- HA == (->), !.
-det_arrow_fits(_, HB) :- ( HB == '-[nondet]->' -> true ; \+ strict_det(true) ).
+det_arrow_fits(_, HB) :- HB == '-[nondet]->', !.
+det_arrow_fits(HA, HB) :- HB == '-[det]->', !,
+                          ( HA == '-[det]->' -> true ; HA == (->), strict_det(true) ).
+det_arrow_fits(HA, _) :- ( HA == '-[nondet]->' -> \+ strict_det(true) ; true ).
 
 is_union(T) :- nonvar(T), T = [P|_], P == '|'.
 
 type_compat_soft(A, B) :- \+ \+ type_unify(A, B).
 
-is_arrow_type(T) :- nonvar(T), T = [A|_], ( A == (->) ; A == '-[nondet]->' ).
+is_arrow_type(T) :- nonvar(T), T = [A|_], ( A == (->) ; A == '-[det]->' ; A == '-[nondet]->' ).
 
 list_type(T, ET) :- nonvar(T), T = [L, ET], L == 'List'.
 
@@ -395,6 +407,7 @@ value_single_type(V, T) :- ( var(V) -> known_singleton(V, T)
                                      ; value_candidate_types(V, [T0]), T = T0 ).
 
 det_arrow_head(nondet, '-[nondet]->') :- !.
+det_arrow_head(det, '-[det]->') :- !.
 det_arrow_head(_, (->)).
 
 bound_args_match(B, PTs) :- \+ \+ maplist(arg_soft_ok, B, PTs).
@@ -1058,13 +1071,15 @@ overlapping_meta_pair(Metas) :- append(_, [fun_meta(A1, _)|Rest], Metas),
                                 \+ body_commits(B2).
 
 deterministic_expr(Expr, ok) :- ( var(Expr) ; atomic(Expr) ; Expr = partial(_, _) ), !.
-%A variable head must not unify with the construct patterns below. Under
-%--strict-det its known arrow type is a determinism commitment: a plain ->
-%closure is deterministic, a -[nondet]-> closure is not.
+%A variable head must not unify with the construct patterns below. An
+%explicit -[det]-> arrow (or nonfunction data type) on the head is det
+%evidence in every mode; a plain -> counts only under --strict-det, where
+%it is a commitment:
 deterministic_expr([Head|Args], Result) :- var(Head), !,
     ( Args == [] -> Result = ok                    %singleton ($x) is data, not application
-    ; strict_det(true), known_singleton(Head, K), nonvar(K)
-      -> ( K = [A|_], A == (->) -> combine_determinism_list(Args, Result)
+    ; known_singleton(Head, K), nonvar(K)
+      -> ( K = [A|_], A == '-[det]->' -> combine_determinism_list(Args, Result)
+         ; K = [A|_], A == (->), strict_det(true) -> combine_determinism_list(Args, Result)
          ; K = [A|_], A == '-[nondet]->' -> Result = nondeterministic(nondet_closure)
          ; nonfunction_type(K) -> combine_determinism_list(Args, Result)  %data construction
          ; Result = unknown(dynamic_head(Head)) )
