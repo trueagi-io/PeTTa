@@ -51,7 +51,7 @@ run_expected_fail_test() {
         echo "Expected non-zero exit status, got success"
         return 1
     fi
-    echo "$output" | grep -E -q "Type mismatch|Type conflict|Determinism check failed|Conflicting determinism declarations|Deterministic function .* overlapping clauses|Strict mode rejected residual runtime type goal|Strict mode requires a declared or inferable type|No matching typed overload|Declared output type variable|Arrows are prefix"
+    echo "$output" | grep -E -q "Type mismatch|Type conflict|Determinism check failed|Conflicting determinism declarations|Deterministic function .* overlapping clauses|Strict mode rejected residual runtime type goal|Strict mode requires a declared or inferable type|No matching typed overload|Declared output type variable|Declared parametric parameter|Arrows are prefix"
     if [ $? -ne 0 ]; then
         echo "FAILURE in $f:"
         echo "Expected type error output"

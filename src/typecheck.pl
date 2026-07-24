@@ -267,7 +267,15 @@ note_candidates(Out, Val) :- ( var(Out)
 ascribe_type(V, T, Gs) :- ( var(T) -> Gs = []
                           ; wildcard_type_t(T) -> Gs = []
                           ; var(V) ->
-                              ( known_singleton(V, K)
+                              ( known_singleton(V, K), var(K)
+                                %the value's only known type is a bare declaration-instance
+                                %variable: narrow it locally WITHOUT binding that variable, so a
+                                %parametric parameter stays universally quantified (its callers
+                                %remain unchecked) while this explicit (the ...) boundary still
+                                %emits the runtime guard - the ascription is honest, not a
+                                %concrete-type requirement leaking into the declaration:
+                                -> put_attr(V, tknown, [T]), ascription_guard(V, T, Gs)
+                              ; known_singleton(V, K)
                                 -> ( type_unify(K, T) -> Gs = []
                                    ; \+ \+ type_unify(T, K)       %the ascribed type fits the known type
                                      -> put_attr(V, tknown, [T]), %(e.g. a union member): narrow to it, checked
@@ -883,6 +891,24 @@ parametric_output_check(F, ExpOut) :- ( var(ExpOut)
                                         -> ( known_candidates(ExpOut, Cs), member(C, Cs), nonvar(C)
                                              -> throw(error(non_parametric_output(F), typecheck)) ; true )
                                          ; throw(error(non_parametric_output(F), typecheck)) ).
+
+%A declared arg type that is a bare type variable claims parametric universality
+%over that position: callers passing any value are unchecked. Snapshot the
+%positions that are still entirely var AFTER head-pattern binding (clause_param_types
+%may already have instantiated some via head literals); a var buried inside a
+%compound type like (List $a) is NOT recorded, since element typing may legitimately
+%bind it:
+parametric_param_snapshot(out(_, ATs), Vars) :- !, include(var, ATs, Vars).
+parametric_param_snapshot(_, []).
+
+%After the body is translated, every snapshotted position must still be unbound
+%(var-var aliasing to another polymorphic function) or a wildcard. If the body
+%forced it to a concrete type the declaration is dishonest - mirror
+%parametric_output_check and reject at compile time:
+parametric_param_check(F, Vars) :- forall(member(T, Vars),
+                                          ( var(T) -> true
+                                          ; wildcard_type_t(T) -> true
+                                          ; throw(error(non_parametric_param(F, T), typecheck)) )).
 
 %Strict mode: every compiled function needs a declared or inferred type
 %(lambdas exempt). Checked after clause translation so inference can run first:

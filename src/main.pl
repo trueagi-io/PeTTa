@@ -20,6 +20,8 @@ prolog:error_message(no_matching_overload(Fun)) -->
     [ 'No matching typed overload for ~p'-[Fun] ].
 prolog:error_message(non_parametric_output(Fun)) -->
     [ 'Declared output type variable of ~p requires a parametric (bottom) implementation'-[Fun] ].
+prolog:error_message(non_parametric_param(Fun, T)) -->
+    [ 'Declared parametric parameter of ~p is used as ~p by its implementation; declare the concrete type instead'-[Fun, T] ].
 prolog:error_message(unknown_newtype(T)) -->
     [ 'brand requires a declared (Newtype ...) name, got ~p'-[T] ].
 prolog:error_message(infix_arrow_syntax(Name, Type)) -->

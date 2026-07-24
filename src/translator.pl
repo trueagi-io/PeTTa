@@ -24,6 +24,9 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
                                                retractall(det_analysis_cache(_, _, _)),  %clause set changed
                                                clause_param_types(F, Args1, DeclOut),
+                                               %Snapshot the declared arg positions that stay bare type variables after
+                                               %head binding; checked below to enforce their claimed universality:
+                                               parametric_param_snapshot(DeclOut, ParamVars),
                                                %Specialized clause copies (ConstrainArgs == false) are instances of
                                                %already-validated clauses: bind their (more specific) param types for
                                                %guard elimination, but skip the determinism/strict/output checks.
@@ -33,6 +36,10 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                                          ; validate_function_determinism(F, Args1, BodyExpr, Prev) ),
                                                begin_clause_inference(F, Args1, Assume, SavedInf),
                                                translate_expr(BodyExpr, GoalsBody, ExpOut),
+                                               %A body that forced a declared parametric parameter to a concrete type
+                                               %broke the universality its declaration claims (skip for specialized copies):
+                                               ( ConstrainArgs == false -> true
+                                                                         ; parametric_param_check(F, ParamVars) ),
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
                                                -> arity(Base, Arity), length(Bound, N), M is (Arity - N) - 1,
                                                   length(ExtraArgs, M), append([Bound,ExtraArgs,[Out]],CallArgs), Goal =.. [Base|CallArgs],
