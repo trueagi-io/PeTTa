@@ -17,3 +17,5 @@
 !(test (isinf-math 0.0) False)
 !(test (min-atom (2 6 7 4 9 3)) 2)
 !(test (max-atom (2 6 7 4 9 3)) 9)
+!(test (isinf-math inf) True)
+!(test (isnan-math nan) True)

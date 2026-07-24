@@ -14,6 +14,7 @@ swrite_exp(Term)  --> { Term =.. [F|Args] }, "(", atom(F), ( { Args == [] } -> [
 seq([X])    --> swrite_exp(X).
 seq([X|Xs]) --> swrite_exp(X), " ", seq(Xs).
 escape_quotes([], []).
+escape_quotes([0'\\|T], [0'\\,0'\\|R]) :- !, escape_quotes(T, R).
 escape_quotes([0'"|T], [0'\\,0'"|R]) :- !, escape_quotes(T, R).
 escape_quotes([H|T], [H|R]) :- escape_quotes(T, R).
 

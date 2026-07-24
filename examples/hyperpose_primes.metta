@@ -1,3 +1,4 @@
+
 (= (find-divisor $n $test-divisor)
    (if (> (* $test-divisor $test-divisor) $n)
        $n
@@ -7,6 +8,10 @@
 
 (= (prime? $n)
    (== $n (find-divisor $n 2)))
+
+;hyperpose should work with a list passed through a variable
+!(test (msort (collapse (let $xs (3 1 2) (hyperpose $xs))))
+       (1 2 3))
 
 ;multi-threaded concurrency running each option till the bitter end:
 !(test (collapse (hyperpose ((prime? 5353725700019)    ;cheap

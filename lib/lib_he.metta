@@ -15,8 +15,13 @@
 (= (assertAlphaEqual $A $B)
    (assert (=alpha $A $B)))
 
-(: unify (-> Atom Atom Atom Atom %Undefined%))
+(= (assertEqualToResult $A $B)
+   (assertEqual $A $B))
 
+(= (assertAlphaEqualToResult $A $B)
+   (assertAlphaEqual $A $B))
+
+(: unify (-> Atom Atom Atom Atom %Undefined%))
 (= (unify $space $pattern $then $else)
    (if (is-space $space)
        (let $temp (cut)

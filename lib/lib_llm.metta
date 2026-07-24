@@ -23,11 +23,13 @@
 !(py-eval "setattr(__import__('builtins'),'make_openai_responses_kwargs',(lambda m,t,e,p:{'model':m,'input':p,'max_output_tokens':t,'reasoning':{'effort':e}})) or 0")
 !(py-eval "setattr(__import__('builtins'),'make_openai_embedding_kwargs',(lambda x:{'model':'text-embedding-3-large','input':x})) or 0")
 
+!(change-state! &openai_client (py-call (openai.OpenAI)))
+
 ;Function to prompt GPT via OpenAI API:
 (= (useGPT $prompt)
    (useGPT gpt-5.2 1000000 medium $prompt))
 (= (useGPT $model $max_tokens $effort $prompt)
-   (let* (($client    (py-call (openai.OpenAI)))
+   (let* (($client    (get-state &openai_client))
           ($responses (py-call (getattr $client "responses")))
           ($create    (py-call (getattr $responses "create")))
           ($kwargs    (py-call (builtins.make_openai_responses_kwargs $model $max_tokens $effort $prompt)))
@@ -48,7 +50,7 @@
           ($z $z))))
 
 (= (useGPTEmbedding $text)
-   (let* (($client     (py-call (openai.OpenAI)))
+   (let* (($client     (get-state &openai_client))
           ($embeddings (py-call (getattr $client "embeddings")))
           ($create     (py-call (getattr $embeddings "create")))
           ($kwargs     (py-call (builtins.make_openai_embedding_kwargs $text)))

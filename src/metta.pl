@@ -1,10 +1,10 @@
 %%%%%%%%%% Dependencies %%%%%%%%%%
-library(X, Path) :- library_path(Base), atomic_list_concat([Base, '/', X], Path).
-library(X, Y, Path) :- library_path(Base), atomic_list_concat([Base, '/../', X, '/', Y], Path).
+library(X, Path) :- standard_library_path(Base), atomic_list_concat([Base, '/', X], Path).
+library(X, Y, Path) :- library_path(Base), atom_concat(_, X, Base), atomic_list_concat([Base, '/', Y], Path).
 :- prolog_load_context(directory, Source),
    directory_file_path(Source, '..', Parent),
    directory_file_path(Parent, 'lib', LibPath),
-   asserta(library_path(LibPath)).
+   asserta(standard_library_path(LibPath)).
 :- autoload(library(uuid)).
 :- use_module(library(random)).
 :- use_module(library(janus)).
@@ -19,8 +19,8 @@ library(X, Y, Path) :- library_path(Base), atomic_list_concat([Base, '/../', X, 
 :- use_module(library(process)).
 :- use_module(library(filesex)).
 :- current_prolog_flag(argv, Argv),
-   ( member(mork, Argv) -> ensure_loaded([parser, translator, specializer, filereader, '../mork_ffi/morkspaces', spaces])
-                         ; ensure_loaded([parser, translator, specializer, filereader, spaces])).
+  ( member(mork, Argv) -> ensure_loaded([ext_points, parser, translator, specializer, filereader, '../mork_ffi/morkspaces', spaces])
+                        ; ensure_loaded([ext_points, parser, translator, specializer, filereader, spaces])).
 
 %%%%%%%%%% Standard Library for MeTTa %%%%%%%%%%
 
@@ -81,8 +81,10 @@ exp(Arg,R) :- R is exp(Arg).
 'acos-math'(A, Out) :- Out is acos(A).
 'atan-math'(A, Out) :- Out is atan(A).
 'isnan-math'(A, Out) :- ( A =:= A -> Out = false ; Out = true ).
-'isinf-math'(A, Out) :- ( A =:= 1.0Inf ; A =:= -1.0Inf -> Out = true ; Out = false ).
+'isinf-math'(A, Out) :- ( ( A =:= 1.0Inf ; A =:= -1.0Inf ) -> Out = true ; Out = false ).
+'min-atom'(List, Out) :- non_list(List), !, Out = [].
 'min-atom'(List, Out) :- min_list(List, Out).
+'max-atom'(List, Out) :- non_list(List), !, Out = [].
 'max-atom'(List, Out) :- max_list(List, Out).
 
 %%% Random Generators: %%%
@@ -111,17 +113,56 @@ empty(_) :- fail.
 'first-from-pair'([A, _], A).
 first([A, _], A).
 'second-from-pair'([_, A], A).
+'unique-atom'(A, B) :- non_list(A), !, B = [].
 'unique-atom'(A, B) :- list_to_set(A, B).
+
+%%% Alpha-equivalence unique atom %%%
+'alpha-unique-atom'(A, B) :- non_list(A), !, B = [].
+'alpha-unique-atom'(A, B) :- alpha_list_to_set(A, B).
+
+alpha_list_to_set(List, Set) :-
+    empty_assoc(Seen0),
+    alpha_list_to_set_assoc(List, Seen0, Set).
+
+alpha_list_to_set_assoc([], _, []).
+alpha_list_to_set_assoc([H|T], SeenIn, R) :-
+    copy_term(H, HCopy),
+    numbervars(HCopy, 0, _),
+    term_hash(HCopy, Key),
+    ( get_assoc(Key, SeenIn, _) ->
+        alpha_list_to_set_assoc(T, SeenIn, R)
+    ;
+        put_assoc(Key, SeenIn, true, SeenOut),
+        R = [H|RT],
+        alpha_list_to_set_assoc(T, SeenOut, RT)
+    ).
+
+%A term that can never become a list, no matter how it gets instantiated:
+non_list(X) :- atomic(X), X \== [].
+non_list(X) :- compound(X), X \= [_|_].
+
+'sort-atom'(List, Sorted) :- non_list(List), !, Sorted = [].
 'sort-atom'(List, Sorted) :- msort(List, Sorted).
+'size-atom'(List, Size) :- non_list(List), !, Size = [].
 'size-atom'(List, Size) :- length(List, Size).
-'car-atom'([H|_], H).
-'cdr-atom'([_|T], T).
+'car-atom'([H|_], H) :- !.
+'car-atom'(_, []).
+'cdr-atom'([_|T], T) :- !.
+'cdr-atom'(_, []).
 decons([H|T], [H|[T]]).
 cons(H, T, [H|T]).
+'index-atom'(_, Index, _) :- nonvar(Index), \+ integer(Index), !, fail.
 'index-atom'(List, Index, Elem) :- nth0(Index, List, Elem).
 member(X, L, true) :- member(X, L).
 'is-member'(X, List, true) :- member(X, List).
 'is-member'(X, List, false) :- \+ member(X, List).
+
+member_alpha(X, [H|_]) :- (var(X) -> var(H) ; true), X = H, !.
+member_alpha(X, [_|T]) :- member_alpha(X, T).
+
+'is-alpha-member'(X, List, true) :- member_alpha(X, List), !.
+'is-alpha-member'(_, _, false).
+
 'exclude-item'(A, L, R) :- exclude(==(A), L, R).
 
 %Multisets:
@@ -130,7 +171,11 @@ member(X, L, true) :- member(X, L).
                                                             ; Out = [H|Rest],
                                                               'subtraction-atom'(T, B, Rest) ).
 'union-atom'(A, B, Out) :- append(A, B, Out).
-'intersection-atom'(A, B, Out) :- intersection(A, B, Out).
+'intersection-atom'(A, B, Out) :- ( non_list(A) ; non_list(B) ), !, Out = [].
+'intersection-atom'([], _, []).
+'intersection-atom'([H|T], B, Out) :- ( select(H, B, BRest) -> Out = [H|Rest],
+                                                              'intersection-atom'(T, BRest, Rest)
+                                                            ; 'intersection-atom'(T, B, Out) ).
 
 %%% Type system: %%%
 get_function_type([F|Args], T) :- nonvar(F), match('&self', [':',F,[->|Ts]], _, _),
@@ -159,6 +204,7 @@ get_type_candidate(X, T) :- match('&self', [':',X,T], T, _).
 'get-metatype'(X, 'Symbol') :- atom(X), !.            % e.g., a
 
 'is-var'(A,R) :- var(A) -> R=true ; R=false.
+'is-ground'(A,R) :- ground(A) -> R=true ; R=false.
 'is-expr'(A,R) :- is_list(A) -> R=true ; R=false.
 'is-space'(A,R) :- atom(A), atom_concat('&', _, A) -> R=true ; R=false.
 
@@ -185,25 +231,34 @@ assert(Goal, true) :- ( call(Goal) -> true
 'format-time'(Format, TimeString) :- get_time(Time), format_time(atom(TimeString), Format, Time).
 
 %%% Python bindings: %%%
+% janus converts Python booleans to @(true)/@(false); normalize them to the
+% language booleans so py-call results compose with if, and, or, ==.
+py_bool_norm('@'(true), true) :- !.
+py_bool_norm('@'(false), false) :- !.
+py_bool_norm(R, R).
 'py-call'(SpecList, Result) :- 'py-call'(SpecList, Result, []).
 'py-call'([Spec|Args], Result, Opts) :- ( string(Spec) -> atom_string(A, Spec) ; A = Spec ),
                                         must_be(atom, A),
                                         ( sub_atom(A, 0, 1, _, '.')         % ".method"
                                           -> sub_atom(A, 1, _, 0, Fun),
                                              Args = [Obj|Rest],
-                                             ( Rest == []
-                                               -> compound_name_arguments(Meth, Fun, [])
-                                                ; Meth =.. [Fun|Rest] ),
-                                             py_call(Obj:Meth, Result, Opts)
+                                             ( py_is_object(Obj)            % on a Python object reference
+                                               -> ( Rest == []
+                                                    -> compound_name_arguments(Meth, Fun, [])
+                                                     ; Meth =.. [Fun|Rest] ),
+                                                  py_call(Obj:Meth, R0, Opts), py_bool_norm(R0, Result)
+                                                ; py_call(builtins:type(Obj), Ty), % on a converted value (str, int, ...)
+                                                  Call =.. [Fun, Obj|Rest],
+                                                  py_call(Ty:Call, R0, Opts), py_bool_norm(R0, Result) )
                                            ; atomic_list_concat([M,F], '.', A) % "mod.fun"
                                              -> ( Args == []
                                                   -> compound_name_arguments(Call0, F, [])
                                                    ; Call0 =.. [F|Args] ),
-                                                py_call(M:Call0, Result, Opts)
+                                                py_call(M:Call0, R0, Opts), py_bool_norm(R0, Result)
                                               ; ( Args == []                      % bare "fun"
                                                   -> compound_name_arguments(Call0, A, [])
                                                    ; Call0 =.. [A|Args] ),
-                                                py_call(builtins:Call0, Result, Opts) ).
+                                                py_call(builtins:Call0, R0, Opts), py_bool_norm(R0, Result) ).
 
 %%% States: %%%
 'bind!'(A, ['new-state', B], C) :- 'change-state!'(A, B, C).
@@ -267,14 +322,17 @@ importer_helper(Space, File) :- atom_string(File, SFile),
 'remove-translator-rule!'(HV, true) :- retractall(translator_rule(HV)).
 
 %%% Registration: %%%
-:- dynamic fun/1.
-register_fun(N) :- (fun(N) -> true ; assertz(fun(N))).
+:- dynamic fun/1, arity/2.
+register_fun(N) :- fun(N), !.
+register_fun(N) :- assertz(fun(N)),
+                   forall((current_predicate(N/Arity), \+ (current_op(_, _, N), Arity =< 2)),
+                          (arity(N, Arity) -> true ; assertz(arity(N, Arity)))).
 :- maplist(register_fun, [superpose, empty, let, 'let*', '+','-','*','/', '%', min, max, 'change-state!', 'get-state', 'bind!',
                           '<','>','==', '!=', '=', '=?', '<=', '>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
-                          'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom',
+                          'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom', 'alpha-unique-atom',
                           repr, repra, parse, 'println!', 'readln!', test, assert, 'mm2-exec', atom_concat, atom_chars, copy_term, term_hash,
-                          foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!',
-                          'add-atom', 'remove-atom', 'get-atoms', match, 'is-var', 'is-expr', 'is-space', 'get-mettatype',
+                          foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'is-alpha-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!',
+                          'add-atom', 'remove-atom', 'get-atoms', match, 'is-var', 'is-ground', 'is-expr', 'is-space', 'get-mettatype',
                           decons, 'decons-atom', 'py-call', 'get-type', 'get-metatype', '=alpha', concat, sread, cons, reverse,
                           '#+','#-','#*','#div','#//','#mod','#min','#max','#<','#>','#=','#\\=','set_hook',
                           'union-atom', 'cons-atom', 'intersection-atom', 'subtraction-atom', 'index-atom', id,

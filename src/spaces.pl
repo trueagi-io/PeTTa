@@ -16,6 +16,7 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                  once(translate_clause(Term, Clause)),
                                  assertz(Clause, Ref),
                                  assertz(translated_from(Ref, Term)),
+                                 metta_on_function_changed(FAtom),
                                  invalidate_specializations(FAtom),
                                  maybe_print_compiled_clause("added function", Term, Clause).
 
@@ -23,19 +24,21 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
 'add-atom'(Space, Term, true) :- add_sexp(Space, Term).
 
 %%Remove a function atom:
-'remove-atom'('&self', Term, Removed) :- Term = [=,[F|Args],Body], !,
-                                         remove_sexp('&self', Term),
-                                         catch(nb_getval(F, Prev), _, Prev = []),
-                                         (   select(fun_meta(Args, Body), Prev, Rest)
-                                             -> ( Rest == [] -> nb_delete(F)
-                                                              ; nb_setval(F, Rest) ) ; true ),
-                                         findall(Ref, translated_from(Ref, Term), Refs),
-                                         forall(member(Ref, Refs), erase(Ref)),
-                                         retractall(translated_from(_, Term)),
-                                         invalidate_specializations(F),
-                                         ( \+ ( current_predicate(F/A), functor(H2, F, A), clause(H2, _, _) )
-                                           -> retractall(fun(F)) ; true ),
-                                         ( Refs = [] -> Removed = false ; Removed = true ).
+'remove-atom'(Space, Term, Removed) :- Term = [=,[F|Args],Body], !,
+                                       remove_sexp(Space, Term),
+                                       catch(nb_getval(F, Prev), _, Prev = []),
+                                       (   select(fun_meta(Args, Body), Prev, Rest)
+                                           -> ( Rest == [] -> nb_delete(F)
+                                                            ; nb_setval(F, Rest) ) ; true ),
+                                       findall(Ref, translated_from(Ref, Term), Refs),
+                                       forall(member(Ref, Refs), erase(Ref)),
+                                       retractall(translated_from(_, Term)),
+                                       metta_on_function_changed(F),
+                                       invalidate_specializations(F),
+                                       ( \+ ( current_predicate(F/A), functor(H2, F, A), clause(H2, _, _) )
+                                         -> retractall(fun(F)), metta_on_function_removed(F)
+                                         ; true ),
+                                       ( Refs = [] -> Removed = false ; Removed = true ).
 
 %Remove all same atoms:
 'remove-atom'(Space, Term, true) :- remove_sexp(Space, Term).
