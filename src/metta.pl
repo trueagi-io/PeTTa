@@ -19,8 +19,9 @@ library(X, Y, Path) :- library_path(Base), atom_concat(_, X, Base), atomic_list_
 :- use_module(library(process)).
 :- use_module(library(filesex)).
 :- current_prolog_flag(argv, Argv),
-   ( member(mork, Argv) -> ensure_loaded([parser, translator, specializer, filereader, '../mork_ffi/morkspaces', spaces])
-                         ; ensure_loaded([parser, translator, specializer, filereader, spaces])).
+   ( member(mork, Argv) -> ensure_loaded([parser, typecheck, translator, specializer, filereader, '../mork_ffi/morkspaces', spaces])
+                         ; ensure_loaded([parser, typecheck, translator, specializer, filereader, spaces])).
+:- seed_builtin_types.
 
 %%%%%%%%%% Standard Library for MeTTa %%%%%%%%%%
 
@@ -301,7 +302,12 @@ retractPredicate(_, false).
 ensure_metta_ext(Path, Path) :- file_name_extension(_, metta, Path), !.
 ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWithExt).
 
-'import!'(Space, File, true) :- catch(importer_helper(Space, File), _, fail).
+%Recoverable import problems (missing file, ...) fail quietly, but a static
+%type/determinism error in the imported module is a compile error of the
+%importing program and must not be swallowed:
+'import!'(Space, File, true) :- catch(importer_helper(Space, File), E,
+                                      ( E = error(_, Ctx), nonvar(Ctx), static_error_ctx(Ctx)
+                                        -> throw(E) ; fail )).
 importer_helper(Space, File) :- atom_string(File, SFile),
                                 working_dir(Base),
                                 ( file_name_extension(ModPath, 'py', SFile)

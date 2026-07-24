@@ -1,0 +1,119 @@
+!(import! &self (library lib_builtin_types))
+
+; Structural tuple types: (STV Number Number) describes the tagged expression
+; (STV 0.5 0.8). Pattern parameters bind their field types, constructed
+; values check structurally, and case patterns narrow - all under --strict.
+
+(: tuple-confidence (-> (STV Number Number) Number))
+(= (tuple-confidence (STV $strength $confidence))
+   $confidence)
+
+!(test (tuple-confidence (STV 0.5 0.8)) 0.8)
+
+(: make-tv (-> (STV Number Number)))
+(= (make-tv) (STV 0.5 0.8))
+
+!(test (tuple-confidence (make-tv)) 0.8)
+
+(: scale-tv (-> (STV Number Number) Number (STV Number Number)))
+(= (scale-tv (STV $s $c) $k) (STV (* $s $k) $c))
+
+!(test (scale-tv (make-tv) 2) (STV 1.0 0.8))
+
+(: particle-id (-> (ParticleDist Number Number) Number))
+(= (particle-id $distribution)
+   (case $distribution
+      (((ParticleDist $id $scale) $id))))
+
+!(test (particle-id (ParticleDist 7 0.5)) 7)
+
+; Untagged tuple element types propagate through cons patterns in heads:
+(: pair-weight-sum (-> (List ($value Number)) Number))
+(= (pair-weight-sum ()) 0.0)
+(= (pair-weight-sum (cons ($val $weight) $tail))
+   (+ $weight (pair-weight-sum $tail)))
+
+!(test (pair-weight-sum ((a 1.5) (b 2.5))) 4.0)
+
+; Destructuring let binds pattern fields from the value's known type:
+(: make-stats (-> (Stats Number Number Number)))
+(= (make-stats) (Stats 1.0 2.0 3))
+
+(: stats-total (-> Number))
+(= (stats-total)
+   (let (Stats $sum $sumsq $count) (make-stats)
+      (+ $sum 1.0)))
+
+!(test (stats-total) 2.0)
+
+; A type variable in tuple head position unified to a primitive stays an
+; untagged pair: ($first Number) -> (Number Number) is not a tag named Number.
+(: numeric-pairs (-> (List ($first Number))))
+(= (numeric-pairs)
+   ((1.0 2.0) (3.0 4.0)))
+
+!(test (numeric-pairs) ((1.0 2.0) (3.0 4.0)))
+
+; Nominal constructor typing - the recommended idiom for named structures:
+; the constructor's declaration both types construction and binds pattern
+; fields, and signatures mention the abstract type name only.
+(: TV Type)
+(: STV (-> Number Number TV))
+
+(: tv-conf (-> TV Number))
+(= (tv-conf (STV $s $c)) $c)
+
+(: half-conf (-> TV TV))
+(= (half-conf (STV $s $c)) (STV $s (/ $c 2)))
+
+!(test (tv-conf (half-conf (STV 0.9 0.8))) 0.4)
+
+; cons is contextually typed without a global declaration: when the head fits
+; the tail's list type, the result is that list type. Heterogeneous cons
+; remains legal (it just stays dynamically typed).
+(: prepend-number (-> Number (List Number) (List Number)))
+(= (prepend-number $head $tail)
+   (cons $head $tail))
+
+!(test (prepend-number 1 (2 3)) (1 2 3))
+
+(: upto (-> Number (List Number)))
+(= (upto $n)
+   (if (== $n 0) () (cons $n (upto (- $n 1)))))
+
+!(test (upto 3) (3 2 1))
+
+; A computed tuple with a variable head types bottom-up: the head's Number
+; type proves the expression is data, so ((+ $v 1.0) $w) : (Number Number)
+; and the cons chain closes.
+(: prepend-weighted-number
+   (-> Number Number (List (Number Number)) (List (Number Number))))
+(= (prepend-weighted-number $value $weight $tail)
+   (cons ((+ $value 1.0) $weight) $tail))
+
+!(test (prepend-weighted-number 1.0 5 ((3.0 4))) ((2.0 5) (3.0 4)))
+
+; empty is bottom: its universally quantified output fits every declared
+; output type without a guard.
+(: maybe-number (-> Bool Number))
+(= (maybe-number True) 1)
+(= (maybe-number False) (empty))
+
+!(test (maybe-number True) 1)
+!(test (collapse (maybe-number False)) ())
+
+; cons destructuring in let* keeps the mapped list's element type:
+; $first : Item, $rest : (List Item), no ascriptions needed.
+!(import! &self (library lib_roman))
+(: Item Type)
+(: Wrap (-> Number Item))
+(: item-val (-> Item Number))
+(= (item-val (Wrap $n)) $n)
+
+(: collect (-> (List Number) Number))
+(= (collect $xs)
+   (let* (($items (map-flat Wrap $xs))
+          ((cons $first $rest) $items))
+      (+ (item-val $first) (size-atom $rest))))
+
+!(test (collect (1 2 3)) 3)

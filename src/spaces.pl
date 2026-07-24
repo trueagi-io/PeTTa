@@ -1,10 +1,12 @@
 %Since both normal add-attom call and function additions needs to add the S-expression:
 add_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
-                               assertz(Term).
+                               assertz(Term),
+                               maybe_cache_type_decl(Space, [Rel|Args]).
 
 %Same but for removal:
 remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
-                                  retractall(Term).
+                                  retractall(Term),
+                                  maybe_uncache_type_decl(Space, [Rel|Args]).
 
 %Add a function atom:
 'add-atom'(Space, Term, true) :- Term = [=,[FAtom|W],_], !,
@@ -16,6 +18,8 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                  once(translate_clause(Term, Clause)),
                                  assertz(Clause, Ref),
                                  assertz(translated_from(Ref, Term)),
+                                 note_late_symbol_uses(Term, Ref),
+                                 recompile_late_uses(FAtom),
                                  invalidate_specializations(FAtom),
                                  maybe_print_compiled_clause("added function", Term, Clause).
 
