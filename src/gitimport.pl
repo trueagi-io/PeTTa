@@ -205,10 +205,18 @@ ensure_git_checkout(Context, LocalDir) :-
 ensure_git_origin(Context, LocalDir, Url) :-
     git_output(Context, 'read origin URL', LocalDir,
                [remote, 'get-url', origin], Actual),
-    ( Actual == Url
+    normalize_git_url(Actual, NormalActual),
+    normalize_git_url(Url, NormalUrl),
+    ( NormalActual == NormalUrl
       -> true
        ; throw(error(domain_error(git_origin, Actual),
                      context(Context, expected(Url)))) ).
+
+normalize_git_url(Url, Normal) :-
+    ( atom_concat(Base, '.git', Url)
+      -> Normal = Base
+       ; Normal = Url
+    ).
 
 ensure_clean_checkout(Context, LocalDir) :-
     git_output(Context, 'check checkout cleanliness', LocalDir,
