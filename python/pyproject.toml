@@ -8,3 +8,6 @@ dependencies = [
     "janus-swi>=1.5.2",
     "pytest>=8.4.2",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
