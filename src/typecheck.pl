@@ -75,6 +75,8 @@ normalize_type(T, TN) :- is_list(T), fn_type_shape(T, ATs, OT, _), !,
                          normalize_type(OT, OTN),
                          append(ATN, [OTN], Xs),
                          TN = [H|Xs].
+normalize_type(T, TN) :- is_list(T), !, maplist(normalize_type, T, TN).
+normalize_type(T, T).
 
 %Explicit determinism markers survive normalization so closure parameters
 %carry their commitment in every mode, not only under --strict-det:
@@ -83,8 +85,6 @@ canonical_arrow('-[deterministic]->', '-[det]->') :- !.
 canonical_arrow('-[nondet]->', '-[nondet]->') :- !.
 canonical_arrow('-[nondeterministic]->', '-[nondet]->') :- !.
 canonical_arrow(_, (->)).
-normalize_type(T, TN) :- is_list(T), !, maplist(normalize_type, T, TN).
-normalize_type(T, T).
 
 %%% Store maintenance, called from add_sexp/remove_sexp and forget_symbol.
 %%% Caching is idempotent so seeded builtins and imports do not duplicate:
@@ -1078,10 +1078,34 @@ body_determinism(F, N, Det) :- catch(nb_getval(F, Metas0), _, Metas0 = []),
                                       -> Det = det ; Det = unspecified )
                                   ; catch(b_getval('$det_stack', St), _, St = []),
                                     b_setval('$det_stack', [F|St]),
-                                    clause_set_determinism(Metas, Det0),
+                                    type_meta_params(F, N, Metas, Metas1),
+                                    clause_set_determinism(Metas1, Det0),
                                     b_setval('$det_stack', St),
                                     Det = Det0,
                                     assertz(det_analysis_cache(F, N, Det)) ).
+
+%A stored clause meta is captured before clause_param_types binds the
+%declared arg types onto the head param vars, so those vars carry no type
+%attribute. The unconditional own-body check (validate_function_determinism)
+%analyzes the ACTUAL body whose vars ARE typed, but a transitive analysis of
+%a callee reads only its untyped stored metas - and a data parameter then
+%looks like a function of unknown determinism. In particular a var-headed
+%tuple ($x ...) built from a data parameter is misread as a dynamic call
+%(unknown) instead of deterministic data construction, so pure list/record
+%helpers analyze as unspecified and wrongly poison any -[det]-> caller.
+%Attach the declared parameter types to a COPY of each meta (never the stored
+%one), mirroring clause_param_types, so the transitive analysis agrees with
+%the direct one. Arrow parameters keep their declared arrow - a plain -> stays
+%unspecified in every mode but --strict-det, exactly as before:
+type_meta_params(F, N, Metas, Metas1) :- ( findall(ATs, fn_decl_arity(F, N, ATs, _), [ATs1])
+                                           -> maplist(type_one_meta(ATs1), Metas, Metas1)
+                                            ; Metas1 = Metas ).
+
+type_one_meta(ATs1, Meta, Meta2) :- copy_term(Meta, Meta2),
+                                    Meta2 = fun_meta(Args, _),
+                                    maplist(bind_meta_param, Args, ATs1).
+
+bind_meta_param(Arg, T) :- ignore(catch(bind_pattern_typed(Arg, T), _, true)).
 
 arity_meta(N, fun_meta(Args, _)) :- length(Args, N).
 
@@ -1107,7 +1131,7 @@ deterministic_expr([Head|Args], Result) :- var(Head), !,
       -> ( K = [A|_], A == '-[det]->' -> combine_determinism_list(Args, Result)
          ; K = [A|_], A == (->), strict_det(true) -> combine_determinism_list(Args, Result)
          ; K = [A|_], A == '-[nondet]->' -> Result = nondeterministic(nondet_closure)
-         ; nonfunction_type(K) -> combine_determinism_list(Args, Result)  %data construction
+         ; \+ is_arrow_type(K) -> combine_determinism_list(Args, Result)  %non-arrow head: data construction
          ; Result = unknown(dynamic_head(Head)) )
        ; Result = unknown(dynamic_head(Head)) ).
 deterministic_expr([collapse, _], ok) :- !.
@@ -1244,6 +1268,7 @@ body_determinism_assuming(F, N, Det) :- catch(nb_getval(F, Metas0), _, Metas0 = 
 %never the stored one:
 assume_det_meta(ATs1, Positions, Meta, Meta2) :- copy_term(Meta, Meta2),
                                                  Meta2 = fun_meta(Args, _),
+                                                 maplist(bind_meta_param, Args, ATs1),
                                                  assume_det_positions(Positions, ATs1, Args).
 
 assume_det_positions([], _, _).
