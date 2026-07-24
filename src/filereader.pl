@@ -1,10 +1,10 @@
 :- use_module(library(readutil)). % read_file_to_string/3
 :- use_module(library(pcre)). % re_replace/4
-:- ensure_loaded(loadstate).
 :- current_prolog_flag(argv, Args), ( (memberchk(silent, Args) ; memberchk('--silent', Args) ; memberchk('-s', Args))
                                       -> assertz(silent(true)) ; assertz(silent(false)) ).
-:- thread_local working_dir/1.
+:- dynamic working_dir/1.
 :- dynamic translated_from/2.
+:- dynamic metta_source_state/2.
 
 push_working_dir(Filename) :- file_directory_name(Filename, Dir0),
                               ( absolute_file_name(Dir0, Dir, [file_type(directory), file_errors(fail)])
@@ -17,9 +17,11 @@ pop_working_dir.
 
 %Read Filename into string S and process it (S holds MeTTa code):
 load_metta_file(Filename, Results) :- load_metta_file(Filename, Results, '&self').
-load_metta_file(Filename, Results, Space) :- catch(load_metta_file_impl(Filename, Results, Space),
-                                                   Error,
-                                                   rethrow_metta_file_error(Filename, Error)).
+load_metta_file(Filename, Results, Space) :-
+    with_mutex(metta_loader,
+               catch(load_metta_file_impl(Filename, Results, Space),
+                     Error,
+                     rethrow_metta_file_error(Filename, Error))).
 
 load_metta_file_impl(Filename, Results, Space) :-
     load_metta_file_impl(Filename, Results, Space, compile).
@@ -39,18 +41,19 @@ load_imported_metta_file(Filename, Results, Space) :-
           rethrow_metta_file_error(Filename, Error)).
 
 load_imported_metta_file_impl(Filename, Results, Space) :-
-    claim_coordinated_load(metta_source(Filename), source, Action),
-    run_claimed_source_load(Action, Filename, Results, Space).
+    ( metta_source_state(Filename, _)
+      -> load_metta_file_impl(Filename, Results, Space, populate)
+       ; assertz(metta_source_state(Filename, loading)),
+         run_new_source_load(Filename, Results, Space) ).
 
-run_claimed_source_load(skip, Filename, Results, Space) :-
-    load_metta_file_impl(Filename, Results, Space, populate).
-run_claimed_source_load(wait(Queue), Filename, Results, Space) :-
-    await_coordinated_load(Queue),
-    load_metta_file_impl(Filename, Results, Space, populate).
-run_claimed_source_load(load, Filename, Results, Space) :-
-    run_coordinated_load(load, metta_source(Filename), source,
-                         load_metta_file_impl(Filename, Results, Space,
-                                              compile)).
+run_new_source_load(Filename, Results, Space) :-
+    catch(( once(load_metta_file_impl(Filename, Results, Space, compile))
+            -> retractall(metta_source_state(Filename, _)),
+               assertz(metta_source_state(Filename, loaded))
+             ; retractall(metta_source_state(Filename, _)), fail ),
+          Error,
+          ( retractall(metta_source_state(Filename, _)),
+            throw(Error) )).
 
 rethrow_metta_file_error(_, Error) :- Error = error(_, context(_, _)), !,
                                       throw(Error).
@@ -61,7 +64,8 @@ rethrow_metta_file_error(_, Error) :- throw(Error).
 %Extract function definitions, call invocations, and S-expressions part of &self space:
 process_metta_string(S, Results) :- process_metta_string(S, Results, '&self').
 process_metta_string(S, Results, Space) :-
-    process_metta_string(S, Results, Space, compile).
+    with_mutex(metta_loader,
+               process_metta_string(S, Results, Space, compile)).
 process_metta_string(S, Results, Space, CompileMode) :-
     string_codes(S, Cs),
     strip(Cs, 0, Codes),

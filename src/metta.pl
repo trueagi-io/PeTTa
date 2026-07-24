@@ -341,12 +341,24 @@ resolve_python_import_path(File, CanonPath) :-
       -> true
        ; throw_missing_import(File) ).
 
-% Import claims are atomic.  Recursive entry from the owner breaks cycles;
-% unrelated threads wait for the owner's exact success, failure, or exception.
+:- dynamic metta_import_state/3.
+
+% The entire loader graph runs under the recursive metta_loader mutex, so these
+% per-space markers only need to distinguish cycles, completed loads, and retry.
 import_once(Space, CanonPath, Goal) :-
-    Key = metta_import(Space, CanonPath),
-    claim_coordinated_load(Key, import, Action),
-    run_coordinated_load(Action, Key, import, Goal).
+    ( metta_import_state(Space, CanonPath, _)
+      -> true
+       ; assertz(metta_import_state(Space, CanonPath, loading)),
+         run_new_import(Space, CanonPath, Goal) ).
+
+run_new_import(Space, CanonPath, Goal) :-
+    catch(( once(Goal)
+            -> retractall(metta_import_state(Space, CanonPath, _)),
+               assertz(metta_import_state(Space, CanonPath, loaded))
+             ; retractall(metta_import_state(Space, CanonPath, _)), fail ),
+          Error,
+          ( retractall(metta_import_state(Space, CanonPath, _)),
+            throw(Error) )).
 
 python_module_names(CanonPath, ModuleKey, ModuleName) :-
     crypto_data_hash(CanonPath, Hash, [algorithm(sha256)]),
