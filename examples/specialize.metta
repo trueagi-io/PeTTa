@@ -8,7 +8,7 @@
 
 !(test (map-flat2 ((1 2 3) (+ 1))) (2 3 4))
 
-(: map-flat3 (-> Expression %Undefined%))
+(: map-flat3 (-> Atom %Undefined%))
 (= (map-flat3 ($f ())) ())
 (= (map-flat3 ($f (cons $x $xs))) (cons ($f $x) (map-flat3 ($f $xs))))
 
@@ -16,7 +16,7 @@
 
 !(test (map-flat3 (p1 (1 2))) (2 3))
 
-(: map-flat4 (-> Expression %Undefined%))
+(: map-flat4 (-> Atom %Undefined%))
 (= (map-flat4 ($v ($f ()))) ())
 (= (map-flat4 ($v ($f (cons $x $xs)))) (cons ($f $x) (map-flat4 ($v ($f $xs)))))
 

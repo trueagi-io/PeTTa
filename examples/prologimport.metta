@@ -40,7 +40,7 @@
 ;%%% DIRECTLY WORK WITH PREDICATES AND PREDICATE AS FUNCTION
 
 ;Let's go further, we want to define a Prolog clause as MeTTa S-expressions and assert it:
-(: Predicate (-> Expression %Undefined%))
+(: Predicate (-> Atom %Undefined%))
 
 ;Assert Prolog predicate (hello world)
 !(assertaPredicate (Predicate (hello world)))

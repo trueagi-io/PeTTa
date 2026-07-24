@@ -1,4 +1,4 @@
-(: wu1 (-> Number Expression Expression))
+(: wu1 (-> Number Atom %Undefined%))
 (= (wu1 $a $b)
    (42 $a $b))
 
