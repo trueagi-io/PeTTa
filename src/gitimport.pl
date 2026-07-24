@@ -1,8 +1,8 @@
 :- use_module(library(filesex)).
 :- use_module(library(process)).
 :- use_module(library(random)).
+:- ensure_loaded(loadstate).
 
-:- dynamic acquired_git_dep/2.
 :- dynamic git_library_path/2.
 
 % Runtime git-import! is a core primitive.  Declarative git-dependency forms use
@@ -43,16 +43,27 @@ acquire_git_declaration(Args) :-
 % A declarative URL has one revision per process.  This prevents two manifests
 % from silently retargeting the same checkout beneath already-loaded code.
 acquire_git_dependency(Url, Rev, Build, Base) :-
-    ( acquired_git_dep(Url, Previous)
-      -> ( Previous == Rev
-           -> true
-            ; throw(error(domain_error(conflicting_git_dependency, Url),
-                          context('git-dependency', two_revisions(Previous, Rev)))) )
-       ; acquire_pinned_repository('git-dependency', Url, Build, Base, Rev,
-                                   Name, LocalDir),
-         register_git_library_path(Name, LocalDir),
-         assertz(acquired_git_dep(Url, Rev)),
-         acquire_manifest_dependencies(LocalDir) ).
+    claim_git_dependency(Url, Rev, Action),
+    run_git_dependency_action(Action, Url, Rev, Build, Base).
+
+acquired_git_dep(Url, Rev) :-
+    coordinated_load_state(git_dependency(Url), Rev, loaded).
+
+claim_git_dependency(Url, Rev, Action) :-
+    claim_coordinated_load(git_dependency(Url), Rev, Action).
+
+run_git_dependency_action(conflict(Previous), Url, Rev, _, _) :-
+    throw(error(domain_error(conflicting_git_dependency, Url),
+                context('git-dependency', two_revisions(Previous, Rev)))).
+run_git_dependency_action(Action, Url, Rev, Build, Base) :-
+    run_coordinated_load(Action, git_dependency(Url), Rev,
+                         acquire_git_dependency_body(Url, Rev, Build, Base)).
+
+acquire_git_dependency_body(Url, Rev, Build, Base) :-
+    acquire_pinned_repository('git-dependency', Url, Build, Base, Rev,
+                              Name, LocalDir),
+    register_git_library_path(Name, LocalDir),
+    acquire_manifest_dependencies(LocalDir).
 
 % A checkout can declare transitive pinned dependencies in deps.metta.
 acquire_manifest_dependencies(LocalDir) :-

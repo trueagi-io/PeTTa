@@ -11,10 +11,7 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                  add_sexp(Space, Term),
                                  length(W, N),
                                  Arity is N + 1,
-                                 assertz(arity(FAtom,Arity)),
-                                 %Arity before register_fun/1: late registration recompiles
-                                 %definitions that used FAtom, and the translator needs arity/2.
-                                 register_fun(FAtom),
+                                 register_function_signature(FAtom, Arity),
                                  once(translate_clause(Term, Clause)),
                                  assertz(Clause, Ref),
                                  assertz(translated_from(Ref, Term)),

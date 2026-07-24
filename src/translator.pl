@@ -24,7 +24,10 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                nb_setval(F, [fun_meta(Args1, BodyExpr) | Prev]),
                                                translate_expr(BodyExpr, GoalsBody, ExpOut),
                                                (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
-                                               -> arity(Base, Arity), length(Bound, N), M is (Arity - N) - 1,
+                                               -> length(Bound, N),
+                                                  MinimumArity is N + 1,
+                                                  setof(A, (arity(Base, A), A > MinimumArity), [Arity|_]),
+                                                  M is (Arity - N) - 1,
                                                   length(ExtraArgs, M), append([Bound,ExtraArgs,[Out]],CallArgs), Goal =.. [Base|CallArgs],
                                                   append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs)
                                                ; FinalGoals= GoalsBody , HeadArgs = Args1, Out = ExpOut ),

@@ -8,6 +8,7 @@ library(X, Y, Path) :- git_library_path(X, Base),
    directory_file_path(Parent, 'lib', LibPath),
    asserta(standard_library_path(LibPath)).
 :- autoload(library(uuid)).
+:- use_module(library(crypto)).
 :- use_module(library(random)).
 :- use_module(library(janus)).
 :- use_module(library(error)).
@@ -313,11 +314,12 @@ python_import_file(File) :- import_file_string(File, SFile),
                             file_name_extension(_, py, SFile).
 
 resolve_existing_import_path(Base, RequestedPath, CanonPath) :-
-    absolute_file_name(RequestedPath, CanonPath,
-                       [relative_to(Base), access(read), file_errors(fail)]), !.
-resolve_existing_import_path(_, RequestedPath, CanonPath) :-
-    absolute_file_name(RequestedPath, CanonPath,
-                       [access(read), file_errors(fail)]), !.
+    ( is_absolute_file_name(RequestedPath)
+      -> absolute_file_name(RequestedPath, CanonPath,
+                            [access(read), file_errors(fail)])
+       ; absolute_file_name(RequestedPath, CanonPath,
+                            [relative_to(Base), access(read), file_errors(fail)]) ),
+    !.
 
 throw_missing_import(File) :-
     throw(error(existence_error(source_sink, File), context('import!', File))).
@@ -339,42 +341,45 @@ resolve_python_import_path(File, CanonPath) :-
       -> true
        ; throw_missing_import(File) ).
 
-:- dynamic metta_import_state/3.
+% Import claims are atomic.  Recursive entry from the owner breaks cycles;
+% unrelated threads wait for the owner's exact success, failure, or exception.
+import_once(Space, CanonPath, Goal) :-
+    Key = metta_import(Space, CanonPath),
+    claim_coordinated_load(Key, import, Action),
+    run_coordinated_load(Action, Key, import, Goal).
 
-% A loading entry breaks cycles; a loaded entry makes later imports no-ops.
-% Failed loads remove their entry so callers can repair the source and retry.
-claim_import(Space, CanonPath, skip) :- metta_import_state(Space, CanonPath, loaded), !.
-claim_import(Space, CanonPath, skip) :- metta_import_state(Space, CanonPath, loading), !.
-claim_import(Space, CanonPath, load) :- assertz(metta_import_state(Space, CanonPath, loading)).
+python_module_names(CanonPath, ModuleKey, ModuleName) :-
+    crypto_data_hash(CanonPath, Hash, [algorithm(sha256)]),
+    atom_concat('_petta_import_', Hash, ModuleKey),
+    file_base_name(CanonPath, BaseName),
+    file_name_extension(ModuleName, _, BaseName).
 
-clear_import_state(Space, CanonPath) :- retractall(metta_import_state(Space, CanonPath, _)).
-
-mark_import_loaded(Space, CanonPath) :- clear_import_state(Space, CanonPath),
-                                        assertz(metta_import_state(Space, CanonPath, loaded)).
-
-run_new_import(Space, CanonPath, Goal) :-
-    catch(( once(Goal)
-            -> mark_import_loaded(Space, CanonPath)
-             ; clear_import_state(Space, CanonPath), fail ),
+load_python_source(CanonPath) :-
+    python_module_names(CanonPath, ModuleKey, ModuleName),
+    py_call(sys:modules:get(ModuleName), PreviousModule),
+    py_call(importlib:util:spec_from_file_location(ModuleKey, CanonPath), Spec),
+    py_call(importlib:util:module_from_spec(Spec), Module),
+    py_call(sys:modules:'__setitem__'(ModuleKey, Module), _),
+    py_call(sys:modules:'__setitem__'(ModuleName, Module), _),
+    catch(py_call(Spec:loader:exec_module(Module), _),
           Error,
-          ( clear_import_state(Space, CanonPath), throw(Error) )).
+          ( restore_python_module(ModuleKey, ModuleName, PreviousModule),
+            throw(Error) )).
 
-import_once(Space, CanonPath, Goal) :- claim_import(Space, CanonPath, Action),
-                                       ( Action = skip -> true
-                                                       ; run_new_import(Space, CanonPath, Goal) ).
+restore_python_module(ModuleKey, ModuleName, PreviousModule) :-
+    catch(py_call(sys:modules:pop(ModuleKey), _), _, true),
+    ( PreviousModule == @(none)
+      -> catch(py_call(sys:modules:pop(ModuleName), _), _, true)
+       ; py_call(sys:modules:'__setitem__'(ModuleName, PreviousModule), _) ).
 
 'import!'(Space, File, true) :- importer_helper(Space, File).
 importer_helper(Space, File) :-
     ( python_import_file(File)
       -> resolve_python_import_path(File, CanonPath),
-         file_directory_name(CanonPath, Dir),
-         file_base_name(CanonPath, BaseName),
-         file_name_extension(ModuleName, _, BaseName),
-         import_once(Space, CanonPath,
-                     ( py_call(sys:path:append(Dir), _),
-                       py_call(builtins:'__import__'(ModuleName), _) ))
+         import_once('$python', CanonPath, load_python_source(CanonPath))
        ; resolve_metta_import_path(File, CanonPath),
-         import_once(Space, CanonPath, load_metta_file(CanonPath, _, Space)) ).
+         import_once(Space, CanonPath,
+                     load_imported_metta_file(CanonPath, _, Space)) ).
 
 :- dynamic translator_rule/1.
 'add-translator-rule!'(HV, true) :- ( translator_rule(HV)

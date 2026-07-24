@@ -6,3 +6,4 @@
 
 !(test (collapse (match &import-space-a (import-space-marker) present)) (present))
 !(test (collapse (match &import-space-b (import-space-marker) present)) (present))
+!(test (collapse (import-space-function)) (one-result))

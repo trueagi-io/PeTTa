@@ -100,4 +100,36 @@ if run_prog "$proj/conflict.metta" "$fixture/run6.log"; then
 fi
 grep -q conflicting_git_dependency "$fixture/run6.log"
 
+# A failed transitive acquisition must not mark its parent as loaded.  Make the
+# leaf remote available only after the first attempt, then retry in the same
+# Prolog process.
+retry_leaf_src="$fixture/retry_leaf_src"
+mkdir -p "$retry_leaf_src"
+git -C "$retry_leaf_src" init -q
+git -C "$retry_leaf_src" config user.email test@example.invalid
+git -C "$retry_leaf_src" config user.name "PeTTa test"
+printf '(= (retry-leaf-result) retry-ok)\n' > "$retry_leaf_src/retry.metta"
+git -C "$retry_leaf_src" add .
+git -C "$retry_leaf_src" commit -qm retry-leaf
+retry_leaf_sha=$(git -C "$retry_leaf_src" rev-parse HEAD)
+git clone -q --bare "$retry_leaf_src" "$fixture/retry-leaf.git.ready"
+
+retry_parent_src="$fixture/retry_parent_src"
+retry_base="$fixture/retry-imports"
+mkdir -p "$retry_parent_src"
+git -C "$retry_parent_src" init -q
+git -C "$retry_parent_src" config user.email test@example.invalid
+git -C "$retry_parent_src" config user.name "PeTTa test"
+printf '(git-dependency "file://%s" "%s" "" "%s")\n' \
+    "$fixture/retry-leaf.git" "$retry_leaf_sha" "$retry_base" \
+    > "$retry_parent_src/deps.metta"
+git -C "$retry_parent_src" add .
+git -C "$retry_parent_src" commit -qm retry-parent
+retry_parent_sha=$(git -C "$retry_parent_src" rev-parse HEAD)
+git clone -q --bare "$retry_parent_src" "$fixture/retry-parent.git"
+
+swipl -q -g "consult('$ROOT/src/main.pl'),(catch(acquire_git_dependency('file://$fixture/retry-parent.git','$retry_parent_sha','','$retry_base'),_,fail)->throw(error(expected_first_failure,none));true),rename_file('$fixture/retry-leaf.git.ready','$fixture/retry-leaf.git'),acquire_git_dependency('file://$fixture/retry-parent.git','$retry_parent_sha','','$retry_base'),halt"
+test -d "$retry_base/retry-parent/.git"
+test -d "$retry_base/retry-leaf/.git"
+
 printf 'git dependency checks passed\n'
