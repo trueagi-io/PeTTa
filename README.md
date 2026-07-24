@@ -99,8 +99,8 @@ rejects conflicting brands but generates no check (a role has no runtime
 witness). Declared relation schemas restore brands on `match`. Use
 `(the KB ...)` instead when you want the representation checked at runtime.
 
-**Determinism arrows.** `(: f (A B -[det]-> C))` (or the chained form
-`(A -[det]-> B)`) declares a deterministic function: the compiler validates
+**Determinism arrows.** `(: f (-[det]-> A B C))` — prefix, like `->` and
+every other MeTTa form — declares a deterministic function: the compiler validates
 that its clauses cannot overlap and its body is deterministic, then commits to
 the first matching clause — guaranteeing choicepoint-free execution and
 constant-memory deep recursion via last-call optimization

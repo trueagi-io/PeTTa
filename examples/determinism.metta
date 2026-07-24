@@ -1,8 +1,8 @@
-(: choose (Number -[nondet]-> Number))
+(: choose (-[nondet]-> Number Number))
 (= (choose $x)
    (superpose ($x (+ $x 1))))
 
-(: choose-once (Number -[det]-> Number))
+(: choose-once (-[det]-> Number Number))
 (= (choose-once $x)
    (once (choose $x)))
 

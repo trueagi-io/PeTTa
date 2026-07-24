@@ -92,7 +92,7 @@
 (: &&& (-> (-> $a $b) (-> $a $c) $a Expression))
 (= (&&& $f1 $f2 $arg) (($f1 $arg) ($f2 $arg)))
 
-(: &^& ((-> $a $b) (-> $a $b) $a -[nondet]-> $b))
+(: &^& (-[nondet]-> (-> $a $b) (-> $a $b) $a $b))
 (= (&^& $f1 $f2 $arg) (superpose (($f1 $arg) ($f2 $arg))))
 
 ;Error handling
@@ -124,9 +124,9 @@
 (: tail (-> (List $a) %Undefined%))
 (= (tail $xs) (cons $x $xs))
 
-(: mylast ($a -[nondet]-> %Undefined%))
+(: mylast (-[nondet]-> $a %Undefined%))
 (= (mylast $x) (union-atom $xs ($x)))
-(: init ((List $a) -[nondet]-> %Undefined%))
+(: init (-[nondet]-> (List $a) %Undefined%))
 (= (init $xs) (union-atom $xs ($x)))
 
 (: rcons (-> (List $a) $a (List $a)))
@@ -141,15 +141,15 @@
 
 ; Pair utilities: results are pairs whose heads may themselves be applied,
 ; so outputs stay dynamic and determinism is unprovable for the appliers.
-(: first ((-> $a $c) ($a $b) -[nondet]-> %Undefined%))
+(: first (-[nondet]-> (-> $a $c) ($a $b) %Undefined%))
 (= (first $f ($a $b)) (($f $a) $b))
-(: second ((-> $b $c) ($a $b) -[nondet]-> %Undefined%))
+(: second (-[nondet]-> (-> $b $c) ($a $b) %Undefined%))
 (= (second $f ($a $b)) ($a ($f $b)))
 
 (: cns (-> ($a $b) %Undefined%))
 (= (cns ($a $b)) (cons $a $b))
 
-(: flip (($a $b) -[nondet]-> %Undefined%))
+(: flip (-[nondet]-> ($a $b) %Undefined%))
 (= (flip ($a $b)) ($b $a))
 
 ;(= (prog1 (cons $x $xs)) $x)

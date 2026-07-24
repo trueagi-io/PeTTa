@@ -1,4 +1,4 @@
-(: f2 (Atom -[det]-> Atom))
+(: f2 (-[det]-> Atom Atom))
 (= (f2 a) a)
 (= (f2 b) b)
 

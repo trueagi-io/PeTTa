@@ -28,9 +28,9 @@
    ( memberchk('--oracle', Argv) -> assertz(oracle_mode(true)) ; assertz(oracle_mode(false)) ),
    ( memberchk('--no-det-cut', Argv) -> assertz(suppress_det_cut(true)) ; assertz(suppress_det_cut(false)) ).
 
-%%% Arrow shapes: prefix (-> A B) and infix determinism arrows (A -[det]-> B).
-%%% Under --strict-det a plain -> is a determinism commitment: functions are
-%%% deterministic unless declared -[nondet]->.
+%%% Arrow shapes: prefix, like every MeTTa form - (-> A B), (-[det]-> A B),
+%%% (-[nondet]-> A B). Under --strict-det a plain -> is a determinism
+%%% commitment: functions are deterministic unless declared -[nondet]->.
 plain_arrow_det(Det) :- ( strict_det(true) -> Det = det ; Det = unspecified ).
 
 arrow_det('->', Det) :- plain_arrow_det(Det).
@@ -40,24 +40,16 @@ arrow_det('-[nondet]->', nondet).
 arrow_det('-[nondeterministic]->', nondet).
 
 fn_type_shape(Type, ArgTypes, OutType, Det) :- is_list(Type), Type = [Arrow|Xs],
-                                               Arrow == (->), !,
-                                               plain_arrow_det(Det),
+                                               nonvar(Arrow), atom(Arrow), arrow_det(Arrow, Det), !,
                                                append(ArgTypes, [OutType], Xs).
-%Juxtaposed infix form (A B -[det]-> C): a single arrow before the output type:
-fn_type_shape(Type, ArgTypes, OutType, Det) :- is_list(Type),
-                                               append(ArgTypes, [Arrow, OutType], Type),
-                                               nonvar(Arrow), arrow_det(Arrow, Det),
-                                               ArgTypes \== [],
-                                               \+ ( member(X, ArgTypes), nonvar(X), arrow_det(X, _) ), !.
-%Chained infix form (A -[det]-> B -[nondet]-> C): arrows between every element:
-fn_type_shape(Type, ArgTypes, OutType, Det) :- is_list(Type), Type = [First, Arrow|_],
-                                               nonvar(Arrow), arrow_det(Arrow, _),
-                                               \+ (nonvar(First), arrow_det(First, _)),
-                                               infix_fn_parts(Type, ArgTypes, OutType, Det).
 
-infix_fn_parts([A, Arrow, B], [A], B, Det) :- nonvar(Arrow), arrow_det(Arrow, Det), !.
-infix_fn_parts([A, Arrow|Rest], [A|As], Out, Det) :- nonvar(Arrow), arrow_det(Arrow, _),
-                                                     infix_fn_parts(Rest, As, Out, Det).
+%An arrow atom anywhere but the head of its expression is the abandoned infix
+%syntax; rejected loudly because it would otherwise silently parse as a
+%value/tuple type and drop the arrow:
+infix_arrow_misuse(T) :- is_list(T), T = [_|Rest],
+                         member(X, Rest), nonvar(X),
+                         ( atom(X) -> arrow_det(X, _) ; infix_arrow_misuse(X) ), !.
+infix_arrow_misuse(T) :- is_list(T), T = [H|_], nonvar(H), infix_arrow_misuse(H).
 
 %Normalize nested arrow types to canonical prefix form. Nondeterministic
 %arrows keep their marker so closure parameters carry the commitment:
@@ -91,7 +83,9 @@ maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C
                                                                               ; assertz(declared_newtype(Name, RN)) ).
 maybe_cache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term = [C, Name, Type],
                                         C == (:), atom(Name)
-                                        -> ( nonvar(Type), fn_type_shape(Type, ATs, OT, Det)
+                                        -> ( nonvar(Type), infix_arrow_misuse(Type)
+                                             -> throw(error(infix_arrow_syntax(Name, Type), typecheck))
+                                           ; nonvar(Type), fn_type_shape(Type, ATs, OT, Det)
                                              -> maplist(normalize_type, ATs, ATN),
                                                 normalize_type(OT, OTN),
                                                 retractall(inferred_fn_type(Name, _, _)),  %declaration supersedes inference
@@ -1073,6 +1067,7 @@ deterministic_call_expr([Fun|Args], Result) :- atom(Fun), !,
                                                ; Det == det -> combine_determinism_list(Args, Result)
                                                ; underapplied_closure(Fun, N) -> combine_determinism_list(Args, Result)
                                                ; Result = unknown(undetermined_call(Fun)) ).
+deterministic_call_expr(Expr, unknown(dynamic_call(Expr))).
 
 %Underapplication builds a closure instead of calling (reduce case 1):
 %constructing the partial is deterministic - the closure's own determinism
@@ -1081,7 +1076,6 @@ deterministic_call_expr([Fun|Args], Result) :- atom(Fun), !,
 underapplied_closure(Fun, N) :- CallArity is N + 1,
                                 \+ arity(Fun, CallArity),
                                 arity(Fun, Known), Known > CallArity, !.
-deterministic_call_expr(Expr, unknown(dynamic_call(Expr))).
 
 combine_determinism_list([], ok).
 combine_determinism_list([Expr|Exprs], Result) :- deterministic_expr(Expr, First),

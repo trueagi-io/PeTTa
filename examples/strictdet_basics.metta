@@ -14,7 +14,7 @@
 !(test (countdown 5) 0)
 
 ; Explicit nondeterminism: allowed, and visible in the type.
-(: pick (Number -[nondet]-> Number))
+(: pick (-[nondet]-> Number Number))
 (= (pick $n) (superpose (1 2 $n)))
 
 !(test (collapse (pick 9)) (1 2 9))
@@ -26,7 +26,7 @@
 
 ; A nondet closure poisons the application point: wrapping it in a det
 ; function is rejected, declaring the wrapper nondet is fine.
-(: spread ((Number -[nondet]-> Number) Number -[nondet]-> Number))
+(: spread (-[nondet]-> (-[nondet]-> Number Number) Number Number))
 (= (spread $f $n) ($f $n))
 
 !(test (collapse (spread pick 7)) (1 2 7))
