@@ -38,14 +38,88 @@ parse(Str, R) :- sread(Str, R).
 '%'(A,B,R)  :- R is A mod B.
 '<'(A,B,R)  :- (A<B -> R=true ; R=false).
 '>'(A,B,R)  :- (A>B -> R=true ; R=false).
-'=='(A,B,R) :- (A==B -> R=true ; R=false).
-'!='(A,B,R) :- (A==B -> R=false ; R=true).
+'=='(A,B,R) :- (A==B -> R=true
+               ; float(A) -> ((float(B) -> A =:= B ; number(B), exact_equal(A,B)) -> R=true ; R=false)
+               ; float(B) -> (number(A), exact_equal(B,A) -> R=true ; R=false)
+               ; compound(A) -> (compound(B), tree_equal(A,B,1024,S),
+                                  (S == 0 -> graph_equal(A,B) ; true) -> R=true ; R=false)
+               ; R=false).
+'!='(A,B,R) :- ('=='(A,B,true) -> R=false ; R=true).
 '='(A,B,R) :-  (A=B -> R=true ; R=false).
 '=?'(A,B,R) :- (\+ \+ A=B -> R=true ; R=false).
 '=alpha'(A,B,R) :- (A =@= B -> R=true ; R=false).
 '=@='(A,B,R) :- (A =@= B -> R=true ; R=false).
 '<='(A,B,R) :- (A =< B -> R=true ; R=false).
 '>='(A,B,R) :- (A >= B -> R=true ; R=false).
+%Numbers compare by exact value at every depth; other leaves keep SWI's identity.
+%NaN keeps SWI's reflexive identity too, so the native == fast path is sound.
+%After it fails, only mixed float comparisons or two compounds can still match.
+%A float against an integer or a rational: cmpr is exact, where =:= would round the other to a float.
+exact_equal(F,N) :- F =:= F, 0 =:= cmpr(F,N).
+%The walk returns what is left of its budget.  When the budget runs out it stops descending and returns 0,
+%a leaf that differs still fails it, and the graph comparison below decides.  Neither side is ever a
+%variable, so list cells are taken apart in the clause head, where a unification never scans the rest of
+%the list again; a unification in a body does, when occurs_check is on.  An element or argument that both
+%sides share is skipped.  A tail is not tested for sharing, which would cost a call per cell: a shared
+%tail is only reached when everything before it is equal in value.
+%Leaf tests stay inline in both walks: different nonnumeric atoms need no helper call.
+tree_equal([X|Xs],[Y|Ys],S0,S) :- !,
+    ( S0 == 0 -> S = 0
+    ; S1 is S0-1,
+      ( atomic(X) -> S2 = S1,
+        ( X == Y -> true
+        ; float(X) -> (float(Y) -> X =:= Y ; number(Y), exact_equal(X,Y))
+        ; float(Y), number(X), exact_equal(Y,X) )
+      ; var(X) -> X == Y, S2 = S1
+      ; same_term(X,Y) -> S2 = S1
+      ; compound(Y), tree_equal(X,Y,S1,S2) ),
+      ( compound(Xs) -> compound(Ys), tree_equal(Xs,Ys,S2,S)
+      ; var(Xs) -> Xs == Ys, S = S2
+      ; S = S2, '=='(Xs,Ys,true) ) ).
+tree_equal(A,B,S0,S) :-
+    ( S0 == 0 -> S = 0
+    ; S1 is S0-1, compound_name_arity(A,F,N), compound_name_arity(B,F,N), args_equal(1,N,A,B,S1,S) ).
+%K counts the arguments left: K == 0 needs no call, where I > N would.
+args_equal(I,K,A,B,S0,S) :-
+    ( K == 0 -> S = S0
+    ; arg(I,A,X), arg(I,B,Y),
+      ( atomic(X) -> S1 = S0,
+        ( X == Y -> true
+        ; float(X) -> (float(Y) -> X =:= Y ; number(Y), exact_equal(X,Y))
+        ; float(Y), number(X), exact_equal(Y,X) )
+      ; var(X) -> X == Y, S1 = S0
+      ; same_term(X,Y) -> S1 = S0
+      ; compound(Y), tree_equal(X,Y,S0,S1) ),
+      I1 is I+1, K1 is K-1, args_equal(I1,K1,A,B,S1,S) ).
+%Past the budget, terms that share no subterm are trees after all, walked again with a negative budget,
+%which never runs out.  Others go to ==/2, which already compares cyclic and shared terms as graphs, once
+%every finite float in them is replaced by its exact value: '$factorize_term' cuts both terms into trees at their
+%shared subterms (in place, undone by \+ \+), the trees are mapped, and the factors are tied back.
+graph_equal(A,B) :- \+ \+ ( '$factorize_term'(A-B, S, Fs),
+                            ( Fs == [] -> tree_equal(A,B,-1,_)
+                            ; exact_term(S-Fs, Mapped), tied_equal(Mapped) ) ).
+tied_equal(P-Es) :- tie_factors(Es, P), pair_equal(P).
+pair_equal(X-Y) :- X == Y.
+exact_term(X, E) :- var(X), !, E = X.
+exact_term(X, E) :- float(X), !, ( X =:= X, \+ float_class(X, infinite) -> E is rational(X) ; E = X ).
+exact_term(X, E) :- atomic(X), !, E = X.
+exact_term([X|Xs], [E|Es]) :- !, exact_term(X, E), exact_term(Xs, Es).
+exact_term(X, E) :- compound_name_arity(X, F, N), compound_name_arity(E, F, N), exact_args(N, X, E).
+%Every compound output is fresh. Set a slot to a constant before attaching its subtree:
+%setarg on an unbound slot would unify and rescan that subtree under occurs_check.
+exact_args(0, _, _) :- !.
+exact_args(N, X, E) :- arg(N, X, A), setarg(N, E, []), exact_term(A, B), setarg(N, E, B), N1 is N-1, exact_args(N1, X, E).
+%Unification would tie the factors back only where the occurs_check flag allows, so setarg does it: each
+%factor variable is bound to a marker, and every argument that holds a marker is set to that factor.
+tie_factors(Es, P) :- length(Es, N), functor(Fs, factors, N), foldl(mark_factor(M, Fs), Es, 1, _),
+                      tie_args(P, M, Fs), tie_args(Fs, M, Fs).
+mark_factor(M, Fs, V=E, I, I1) :- V = '$factor'(M, I), arg(I, Fs, E), I1 is I+1.
+tie_args(T, M, Fs) :- compound(T), compound_name_arity(T, F, N), N > 0, !,
+                      ( F == '[|]', N == 2 -> tie_cell(T, T, M, Fs) ; tie_args(1, N, T, M, Fs) ).
+tie_args(_, _, _).
+tie_cell([H|R], L, M, Fs) :- tie_arg(H, 1, L, M, Fs), tie_arg(R, 2, L, M, Fs).
+tie_args(K, N, T, M, Fs) :- arg(K, T, A), tie_arg(A, K, T, M, Fs), ( K < N -> K1 is K+1, tie_args(K1, N, T, M, Fs) ; true ).
+tie_arg(A, K, T, M, Fs) :- ( nonvar(A), A = '$factor'(M0, I), M0 == M -> arg(I, Fs, E), setarg(K, T, E) ; tie_args(A, M, Fs) ).
 min(A,B,R)  :- R is min(A,B).
 max(A,B,R)  :- R is max(A,B).
 exp(Arg,R) :- R is exp(Arg).
