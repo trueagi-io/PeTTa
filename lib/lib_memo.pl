@@ -450,10 +450,14 @@ update_total_bytes_add(Bytes) :-
 
 memo_store(Fun, Arity, Gen, AVs, CachedResults) :-
     memo_unique_limit(Max),
-    get_memo_queue_state(Fun, Arity, Count, Head, Tail),
+    get_memo_queue_state(Fun, Arity, Count, _, Tail),
     % Check global size limit first
     entry_size(AVs, CachedResults, NewBytes),
     evict_global_space(NewBytes),
+    % Re-read Head/Tail: evict_global_space may have evicted entries
+    % and incremented Head, so we must not overwrite that with the stale
+    % values bound by get_memo_queue_state/4 above.
+    get_memo_queue_state(Fun, Arity, _, Head, Tail),
     memo_strategy(Strategy),
     ( Count < Max
     -> Count1 is Count + 1,
