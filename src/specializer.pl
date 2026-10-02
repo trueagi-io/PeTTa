@@ -25,7 +25,7 @@ normalize_specialization_key(Term, Normalized) :-
 
 %Specialize a call by creating and translating a specialized version of the MeTTa code:
 specialize_call(HV, AVs, Out, Goal) :- %1. Retrieve a copy of all meta-clauses stored for HV:
-                                       catch(nb_getval(HV, MetaList0), _, fail),
+                                       findall(Meta, function_metadata(HV, Meta), MetaList0),
                                        copy_term(MetaList0, MetaList),
                                        %2. Copy all clause variables eligible for specialization across all meta-clauses:
                                        bagof(HoVar, ArgsNorm^BodyExpr^HoBinds^HoBindsPerArg^
@@ -115,7 +115,7 @@ forget_symbol(Name) :- retractall('&self'(=, [Name|_], _)),
                        metta_on_function_removed(Name),
                        retractall(arity(Name,_)),
                        retractall(fun(Name)),
-                       catch(nb_delete(Name), _, true),
+                       retractall(function_metadata(Name, _)),
                        retractall(ho_specialization(Name,_)).
 
 %Invalidate all specializations:
