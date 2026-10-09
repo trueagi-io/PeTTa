@@ -450,10 +450,14 @@ update_total_bytes_add(Bytes) :-
 
 memo_store(Fun, Arity, Gen, AVs, CachedResults) :-
     memo_unique_limit(Max),
-    get_memo_queue_state(Fun, Arity, Count, Head, Tail),
+    get_memo_queue_state(Fun, Arity, Count, _, Tail),
     % Check global size limit first
     entry_size(AVs, CachedResults, NewBytes),
     evict_global_space(NewBytes),
+    % Re-read Head/Tail: evict_global_space may have evicted entries
+    % and incremented Head, so we must not overwrite that with the stale
+    % values bound by get_memo_queue_state/4 above.
+    get_memo_queue_state(Fun, Arity, _, Head, Tail),
     memo_strategy(Strategy),
     ( Count < Max
     -> Count1 is Count + 1,
@@ -567,10 +571,21 @@ args_worth_caching(AVs) :-
     \+ args_too_complex(AVs).
 
 % Canonical cache key: quantize floats, then normalize variable identities.
+% strip_petta_swrite_attrs/1 is needed because PeTTa's printer attaches a
+% petta_swrite_name attribute to unbound variables in order to give them
+% stable display names; that attribute survives copy_term/2 and numbervars/3
+% would otherwise reject the term as containing attributed variables.
 canonicalize_args_key(AVs, KeyAVs) :-
     quantize_term(AVs, Quantized),
     copy_term(Quantized, KeyAVs),
+    strip_petta_swrite_attrs(KeyAVs),
     numbervars(KeyAVs, 0, _).
+
+% Remove petta_swrite_name attributes from any attributed variables in Term.
+% Safe to call on any term; no-op when no such attributes are present.
+strip_petta_swrite_attrs(Term) :-
+    term_attvars(Term, AttVars),
+    maplist([V]>>del_attr(V, petta_swrite_name), AttVars).
 
 with_memo_call_context(Fun, Arity, Goal) :-
     ( metta_memo_call_ctx(ParentFun, ParentArity)
@@ -655,7 +670,12 @@ memo_probe_results(Fun, AVs, ProbeResults) :-
         ( call(RawGoal),
           copy_term((AVs, Result), (SolvedAVs, SolvedResult))
         ),
-        ProbeResults).
+        ProbeResults),
+    % Strip petta_swrite_name attributes from probe results so they don't
+    % leak into cached answers (see canonicalize_args_key/2 for context).
+    maplist([answer(SA,SR)]>>(strip_petta_swrite_attrs(SA),
+                              strip_petta_swrite_attrs(SR)),
+            ProbeResults).
 
 % Ground calls should not re-unify raw input args on replay, because
 % float quantization intentionally maps slightly different inputs to one key.
@@ -667,7 +687,10 @@ memo_probe_ground_results(Fun, AVs, ProbeResults) :-
         ( call(RawGoal),
           copy_term(Result, SolvedResult)
         ),
-        ProbeResults).
+        ProbeResults),
+    % Strip petta_swrite_name attributes from probe results so they don't
+    % leak into cached answers (see canonicalize_args_key/2 for context).
+    maplist([answer(SR)]>>strip_petta_swrite_attrs(SR), ProbeResults).
 
 cache_lookup(Fun, Arity, CurGen, KeyAVs, CachedResults) :-
     metta_memo_entry(Fun, Arity, CurGen, KeyAVs, CachedResults).
