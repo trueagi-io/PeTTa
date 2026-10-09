@@ -1,5 +1,9 @@
 !(import! &self (library lib_patrick))
 
+(: quad-step
+   (-[det]-> Number
+             (Number Number Number)
+             (Number Number Number)))
 (= (quad-step $dummy ($t $i $sum))
    (if (== $i $t)
        ( (+ $t 1) 1 (+ $sum (* $t $i)) )

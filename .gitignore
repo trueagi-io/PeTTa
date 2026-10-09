@@ -1,7 +1,11 @@
 __pycache__/
 repos/
+*.py[cod]
 
 # Python build artifacts
 build/
 dist/
 *.egg-info/
+
+# git-import! clone target
+repos/
