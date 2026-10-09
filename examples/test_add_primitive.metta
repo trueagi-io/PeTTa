@@ -2,5 +2,4 @@
 !(add-atom &space 42)
 !(add-atom &space (A B))
 
-; This will list all atoms currently in the space
-!(match &space $x $x)
+!(test (collapse (match &space $x $x)) ("Hello" 42 (A B)))
