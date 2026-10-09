@@ -181,6 +181,48 @@ note_bound_consumed(V, Kind) :- b_getval('$det_head_scope', scope(_, _, Args)),
                                 nth1(Pos, Args, A), A == V, !,
                                 analysis_emit(required_bound(Pos, Kind)).
 
+%A call to an effect-polymorphic function that is det or semidet where it
+%stands: its closure arguments instantiate the effect to a committed one, and
+%its clause selection is det. Test is what the commitment rests on at runtime:
+%true when the selection is proven statically, is_list(Value) when it is det
+%once that argument is a proper list - a fold over a function's result, say,
+%whose spine the checker cannot see. The test walks the list once before the
+%call walks it again. A proof that would consume a boundness validation did
+%not publish relies on a check the clause lacks, so it does not count. The
+%proof read each named closure argument's effect, so a change to one
+%recompiles the caller:
+committed_call_site(Fun, Args, Values, Test) :-
+    atom(Fun), length(Args, N),
+    effect_poly_decl(Fun, N, _, _, Positions),
+    ( committed_instance(Fun, N, Args)
+      -> Test = true
+    ; nth0(Idx, Args, _, Rest),
+      put_attr(List, proper_list_cert, true),
+      nth0(Idx, ListArgs, List, Rest),
+      committed_instance(Fun, N, ListArgs)
+      -> nth0(Idx, Values, Value),
+         Test = is_list(Value) ),
+    forall(( member(pos(Idx, M, _), Positions), nth0(Idx, Args, Arg),
+             named_closure(Arg, M, Closure) ),
+           analysis_emit(dependency(effect(Closure)))).
+
+committed_instance(Fun, N, Args) :-
+    ( catch(b_getval('$compiling_clause', clause(F, Params, Body)), _, fail)
+      -> length(Params, Arity), det_enforced_flag(F, Arity, Enf)
+    ; Params = [], Body = [], Enf = false ),
+    analysis_collect(with_det_enforced(Enf,
+                         with_det_head_vars(Params, Body,
+                             effect_poly_call_determinism(Fun, N, Args, Det))),
+                     Events),
+    committed_det(Det),
+    forall(member(required_bound(Pos, Kind), Events),
+           det_bound_proviso(F, Arity, Pos, Kind)),
+    forall(( member(Event, Events), Event \= required_bound(_, _) ),
+           analysis_emit(Event)).
+
+named_closure(F, M, F/M) :- atom(F).
+named_closure(partial(F, Bound), M, F/N) :- length(Bound, B), N is M + B.
+
 publish_det_proof_requirements(F, N, Proof) :-
     analysis_proof_requirements(Proof, Bounds),
     forall(member(bound(Pos, Kind), Bounds),

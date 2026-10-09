@@ -77,6 +77,14 @@ with_compiling_caller(F, N, Goal) :-
           -> b_setval('$compiling_caller', Previous)
         ; b_setval('$compiling_caller', none) )).
 
+%The clause whose body is being translated, for analyses that read the body's
+%determinism context (committed_call_site/2):
+with_compiling_clause(F, Params, Body, Goal) :-
+    catch(b_getval('$compiling_clause', Previous), _, Previous = none),
+    setup_call_cleanup(b_setval('$compiling_clause', clause(F, Params, Body)),
+                       Goal,
+                       b_setval('$compiling_clause', Previous)).
+
 current_compiling_caller(F, N) :-
     catch(b_getval('$compiling_caller', F/N), _, fail).
 translate_clause_core(Input, (Head :- BodyConj), ConstrainArgs) :-
@@ -124,7 +132,8 @@ translate_clause_core(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                %spliced in before the commit cut below (goal-term position unchanged).
                                                det_boundness_checks(F, Args1, DetChecks),
                                                begin_clause_inference(F, Args1, Assume, SavedInf),
-                                               translate_declared_body(F, DeclOut, BodyExpr, GoalsBody, ExpOut),
+                                               with_compiling_clause(F, Args1, BodyExpr,
+                                                                     translate_declared_body(F, DeclOut, BodyExpr, GoalsBody, ExpOut)),
                                                %A body that forced a declared parametric parameter to a concrete type
                                                %broke the universality its declaration claims (skip for specialized copies):
                                                ( ConstrainArgs == false -> true
@@ -767,7 +776,7 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
              translate_expr(TailExpr, expected(Expected), GsTail, Tail),
              check_call_arg(declared, HV, Tail, Expected, TailChecks),
              append([GsH, GsHead, GsTail, TailChecks], Inner),
-             build_direct_call(HV, [Head, Tail], Out, Inner, [], Goals),
+             build_direct_call(HV, [Head, Tail], [Head, Tail], Out, Inner, [], Goals),
              set_out_type(Out, Expected)
         %--- Non-determinism ---:
         ; special_builtin_form(HV, T, superpose_literal),
@@ -1276,7 +1285,8 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
                   overload_out_guard(MultiDecl, Fun, Out, OT, Extra),
                   ( MultiDecl == false, arith_inline(Fun, AVs, Out, ArithGs)
                     -> append(Inner, ArithGs, Goals)
-                     ; build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) ),
+                     ; append(Bound, Args, Src),
+                       build_call_or_partial(Fun, Src, AVs, Out, Inner, Extra, Goals) ),
                   ( ArgStatus == verified
                     -> set_call_out_type(Out, ATs, OT)
                   ; true )
@@ -1291,25 +1301,25 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
              append(Bound, AVs0, AVs),
              apply_call_args(declared, Fun, AVs, PTs, GuardGs),
              append([GsH, GsT, GuardGs], Inner),
-             build_direct_call(Fun, AVs, Out, Inner, [], Goals)
+             build_direct_call(Fun, AVs, AVs, Out, Inner, [], Goals)
         ; assumed_self_decl(Fun, NTotal, PTs, OutTv)
           -> translate_args(Args, GsT, AVs0),                      %self-recursion under the provisional type
              append(Bound, AVs0, AVs),                             %(before the store: earlier clauses' inference
              apply_call_args(inferred, Fun, AVs, PTs, GuardGs),    %is stale while later clauses widen it)
              append([GsH, GsT, GuardGs], Inner),
-             build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
+             build_call_or_partial(Fun, AVs, AVs, Out, Inner, [], Goals),
              ( var(Out) -> add_known_type(Out, OutTv) ; true )
         ; findall(it(IATs, IOT), inferred_decl_arity(Fun, NTotal, IATs, IOT), [it(IATs, IOT)])
           -> translate_args(Args, GsT, AVs0),                      %inferred type: knowledge only, never rejects
              append(Bound, AVs0, AVs),
              apply_call_args(inferred, Fun, AVs, IATs, GuardGs),
              append([GsH, GsT, GuardGs], Inner),
-             build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
+             build_call_or_partial(Fun, AVs, AVs, Out, Inner, [], Goals),
              set_out_type(Out, IOT)
         ; translate_args(Args, GsT, AVs0),                         %no type information
           append(Bound, AVs0, AVs),
           append(GsH, GsT, Inner),
-          build_call_or_partial(Fun, AVs, Out, Inner, [], Goals),
+          build_call_or_partial(Fun, AVs, AVs, Out, Inner, [], Goals),
           ( untyped_call_out(Fun, AVs, Out) -> true ; true ) ).
 
 %Most calls retain ordinary bottom-up argument translation. Narrowly, at a
@@ -1470,7 +1480,7 @@ callable_expression_value(partial(Fun, Bound)) :- atom(Fun), ground(Bound).
 overload_branch(Fun, AVs, Out, ft(ATs, OT), Branch) :- maplist(overload_branch_guard(Fun), AVs, ATs, Gss),
                                                        append(Gss, GuardGs),
                                                        overload_out_guard(true, Fun, Out, OT, Extra),
-                                                       build_direct_call(Fun, AVs, Out, GuardGs, Extra, BranchGoals),
+                                                       build_direct_call(Fun, AVs, AVs, Out, GuardGs, Extra, BranchGoals),
                                                        goals_list_to_conj(BranchGoals, Branch).
 
 overload_out_guard(MultiDecl, Fun, Out, OT, Extra) :- ( MultiDecl == true, ground(OT), \+ wildcard_type_t(OT)
@@ -1527,23 +1537,36 @@ cmp_native('==', A, B, (A == B)).
 cmp_native('!=', A, B, (A \== B)).
 
 %Generate actual function call or partial if arity not complete:
-build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- ( maybe_specialize_call(Fun, AVs, Out, Goal)
-                                                               -> oracle_det_wrap(Fun, AVs, Out, Goal, Goal1),
-                                                                  append(Inner, [catch(call(Goal1), _, fail)|Extra], Goals)
-                                                                ; build_direct_call(Fun, AVs, Out, Inner, Extra, Goals) ).
+%Src are the call's arguments as the determinism analysis reads them: the
+%source expressions where the caller has them, otherwise the values AVs.
+build_call_or_partial(Fun, Src, AVs, Out, Inner, Extra, Goals) :- ( maybe_specialize_call(Fun, AVs, Out, Goal)
+                                                                    -> commit_call(Fun, Src, AVs, Out, Goal, Goal1),
+                                                                       append(Inner, [catch(call(Goal1), _, fail)|Extra], Goals)
+                                                                     ; build_direct_call(Fun, Src, AVs, Out, Inner, Extra, Goals) ).
 
-build_direct_call(Fun, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
-                                                         Arity is N + 1,
-                                                         ( ( current_predicate(Fun/Arity) ; catch(arity(Fun, Arity), _, fail) ),
-                                                           \+ ( current_op(_, _, Fun), Arity =< 2 )
-                                                           -> resolve_memoization(Fun, AVs, Out, Goal0),
-                                                              %--oracle-det: count this call's solutions
-                                                              oracle_det_wrap(Fun, AVs, Out, Goal0, Goal),
-                                                              append(Inner, [Goal|Extra], Goals)
-                                                         ; incomplete_application_kind(Fun, Arity, partial)
-                                                           -> Out = partial(Fun, AVs),
-                                                              append(Inner, Extra, Goals)
-                                                            ; append(Inner, [throw_function_overapplication(Fun, N)|Extra], Goals) ).
+build_direct_call(Fun, Src, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
+                                                              Arity is N + 1,
+                                                              ( ( current_predicate(Fun/Arity) ; catch(arity(Fun, Arity), _, fail) ),
+                                                                \+ ( current_op(_, _, Fun), Arity =< 2 )
+                                                                -> resolve_memoization(Fun, AVs, Out, Goal0),
+                                                                   commit_call(Fun, Src, AVs, Out, Goal0, Goal),
+                                                                   append(Inner, [Goal|Extra], Goals)
+                                                              ; incomplete_application_kind(Fun, Arity, partial)
+                                                                -> Out = partial(Fun, AVs),
+                                                                   append(Inner, Extra, Goals)
+                                                                 ; append(Inner, [throw_function_overapplication(Fun, N)|Extra], Goals) ).
+
+%A det function commits to its clause with the clause-entry cut. An
+%effect-polymorphic function cannot: its determinism is its closure argument's.
+%Nor does SWI's clause indexing make it det, since its predicate is dynamic and
+%its first argument is that closure, so a fold leaves a choice point on the
+%clause it ends on. A call site that proves the instance det or semidet commits
+%the call instead, behind a runtime list test where the proof needs one.
+%--oracle-det counts the call's solutions rather than pruning them:
+commit_call(Fun, Src, AVs, Out, Goal0, Goal) :- ( oracle_det_mode(false), committed_call_site(Fun, Src, AVs, Test)
+                                                  -> ( Test == true -> Goal = once(Goal0)
+                                                     ; Goal = ( Test -> once(Goal0) ; Goal0 ) )
+                                                   ; oracle_det_wrap(Fun, AVs, Out, Goal0, Goal) ).
 
 %Selectively translate non-Atom args while Atom args stay as data input:
 translate_args_by_type([], _, [], []) :- !.
