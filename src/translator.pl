@@ -1132,9 +1132,19 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
         %expression data construction, compiled and typed as such:
         ; translate_args(T, GsT, AVs),
           append(GsH, GsT, Inner),
-          ( var(HV), AVs == []               %singleton ($x) is data, never an application
-            -> Out = [HV],
-               Goals = Inner
+          %A singleton ($x) calls $x when its type is a nullary arrow, is a
+          %one-element list when its type is known otherwise (a declared $a
+          %included), and is dispatched at runtime when its type is only an
+          %inference assumption:
+          ( var(HV), AVs == []
+            -> ( known_singleton(HV, K), nonvar(K), K = [H, OutT], arrow_atom(H)
+                 -> closure_apply_goal(HV, [], Out, Goal),
+                    append(Inner, [Goal], Goals),
+                    ( var(Out), var(OutT) -> add_known_type(Out, OutT) ; set_out_type(Out, OutT) )
+               ; known_singleton(HV, K), ( nonvar(K) ; param_promise_var(K) )
+                 -> Out = [HV],
+                    Goals = Inner
+               ; append(Inner, [reduce([HV], Out)], Goals) )
           ; translate_closure_call(HV, AVs, Inner, Goals, Out) -> true
           ; var(HV), known_singleton(HV, K), nonfunction_type(K)
             -> Out = [HV|AVs],
