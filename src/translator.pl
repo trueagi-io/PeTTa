@@ -269,6 +269,9 @@ translate_expr([H0|T0], Goals, Out) :-
              append(GsH, CleanConjs, GsMid),
              append(GsMid, [include([XVar]>>(CondConj, CondGoal), L, Out)], Goals)
         ; HV == '|->', T = [Args, Body] -> next_lambda_name(F),
+                                           %A failed specialization must also discard its private anonymous functions.
+                                           ( nb_current('$spec_created', _), \+ fun(F), \+ current_predicate(F/_)
+                                             -> remember_specialization_symbol(F) ; true ),
                                            % find free (non-argument) variables in Body
                                            term_variables(Body, AllVars),
                                            term_variables(Args, ArgVars),

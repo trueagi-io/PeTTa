@@ -1,17 +1,38 @@
 :- dynamic ho_specialization/2.
 :- dynamic ho_specialization_failed/3.
 
-%Maybe specializes HV(AVs) if not already ongoing, and if specialization fails, nothing changes and specneeded is restored.
-%Re-specializing a function already being specialized is refused: its key must differ from the ongoing one
-%(same keys are memoized via ho_specialization), and ever-growing keys - e.g. a recursive call wrapping its
-%higher-order argument, (= (evolve $r $g) (evolve (twice $r) $g)) - would otherwise diverge at compile time:
-maybe_specialize_call(HV, AVs, Out, Goal) :- catch(nb_getval('$spec_stack', Stack), _, Stack = []),
-                                             \+ memberchk(HV, Stack),
-                                             setup_call_cleanup( (catch(nb_getval(specneeded,Prev),_,Prev = []), nb_setval(specneeded,false),
-                                                                  nb_setval('$spec_stack', [HV|Stack])),
-                                                                 specialize_call(HV, AVs, Out, Goal),
-                                                                 (nb_setval('$spec_stack', Stack),
-                                                                  (Prev == true -> nb_setval(specneeded,Prev) ; true)) ).
+%Reuse an existing specialization, including one being compiled. A recursive request for a new key
+%of the same function is refused below, so growing keys such as (evolve (twice $r) $g) cannot make
+%translation diverge:
+maybe_specialize_call(HV, AVs, Out, Goal) :-
+    catch(nb_getval('$spec_stack', Stack), _, Stack = []),
+    ( Stack == [] -> nb_linkval('$spec_created', []) ; true ),
+    nb_getval('$spec_created', Before),
+    setup_call_catcher_cleanup(
+        ( catch(nb_getval(specneeded, Prev), _, Prev = []),
+          nb_setval(specneeded, false), nb_setval('$spec_stack', [HV|Stack]) ),
+        specialize_call(HV, AVs, Out, Goal),
+        Catcher,
+        ( ( Catcher == exit -> true ; forget_specialization_symbols(Before), nb_setval(specneeded, Prev) ),
+          ( Stack == [] -> nb_delete('$spec_created') ; true ),
+          nb_setval('$spec_stack', Stack),
+          ( Prev == true -> nb_setval(specneeded, Prev) ; true ) ) ).
+
+%Keep only symbols created by this attempt; nested successes still belong to their outer attempt.
+remember_specialization_symbol(Name) :-
+    nb_getval('$spec_created', Before),
+    nb_linkval('$spec_created', [Name|Before]).
+
+forget_specialization_symbols(Before) :-
+    nb_getval('$spec_created', Created),
+    forget_specialization_symbols(Created, Before),
+    nb_linkval('$spec_created', Before).
+
+forget_specialization_symbols(Created, Before) :- Created == Before, !.
+forget_specialization_symbols([Name|Created], Before) :-
+    forget_symbol(Name),
+    retractall(ho_specialization(_, Name)),
+    forget_specialization_symbols(Created, Before).
 
 % Build a stable, variant-normalized specialization key.
 %
@@ -40,9 +61,12 @@ specialize_call(HV, AVs, Out, Goal) :- %1. Retrieve a copy of all meta-clauses s
                                        Arity is N + 1,
                                        \+ ho_specialization_failed(HV, Arity, CleanBindSet),
                                        format(atom(SpecName), "~w_Spec_~w",[HV, CleanBindSet]),
-                                       %4. Specialize, but only if not already specialized:
+                                       %4. Specialize, but only if not already specialized. While HV is being specialized, a nested call
+                                       %   calls the specialization its key already has, such as the one being made, and makes no new one:
                                        ( ho_specialization(HV, SpecName)
+                                         ; nb_getval('$spec_stack', [HV|Outer]), memberchk(HV, Outer), !, nb_setval(specneeded, false), fail
                                          ; ( %4.1. Otherwise register the specialization:
+                                             remember_specialization_symbol(SpecName),
                                              register_fun(SpecName),
                                              assertz(ho_specialization(HV, SpecName)),
                                              assertz(arity(SpecName, Arity)),
@@ -61,10 +85,8 @@ specialize_call(HV, AVs, Out, Goal) :- %1. Retrieve a copy of all meta-clauses s
                                                  add_sexp('&self', Input),
                                                  format(atom(Label), "metta specialization (~w)", [SpecName]),
                                                  maybe_print_compiled_clause(Label, Input, Clause) ))
-                                               %4.6 Ok specialized, but if we did not succeed ensure the specialization is retracted:
+                                               %4.6 Remember a refused key; the enclosing attempt cleans up its generated symbols:
                                                -> true ; ( silent(true) -> true ; format("Not specialized ~w~n", [SpecName/Arity]) ),
-                                                         forget_symbol(SpecName),
-                                                         retractall(ho_specialization(HV, SpecName)),
                                                          ( ho_specialization_failed(HV, Arity, CleanBindSet)
                                                            -> true
                                                             ; assertz(ho_specialization_failed(HV, Arity, CleanBindSet)) ),
@@ -111,7 +133,7 @@ specializable_arg(Arg) :- nonvar(Arg),
 forget_symbol(Name) :- retractall('&self'(=, [Name|_], _)),
                        retractall('&self'(:, Name, _)),
                        findall(Ref, ( current_predicate(Name/A), functor(H, Name, A), clause(H, _, Ref) ), Refs),
-                       forall(member(R, Refs), erase(R)),
+                       forall(member(R, Refs), (erase(R), retractall(translated_from(R, _)))),
                        metta_on_function_removed(Name),
                        retractall(arity(Name,_)),
                        retractall(fun(Name)),
