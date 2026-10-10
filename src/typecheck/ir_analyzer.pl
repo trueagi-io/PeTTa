@@ -5,14 +5,12 @@
             analysis_card/2,
             analysis_state/2,
             analysis_effects/2,
-            analysis_obligations/2,
             analysis_diagnostics/2,
             analysis_trace/2,
             analysis_result_has_fact/2,
             analysis_edge_state/4,
             analysis_node_card/3,
-            analysis_node_state/3,
-            refine_result/6
+            analysis_node_state/3
           ]).
 
 /** <module> Flow-sensitive interpretation of the relational checker IR
@@ -35,11 +33,10 @@ of metadata is never interpreted as determinism.
 
 An analysis is the closed record
 
-    analysis(ResultId, Card, State, Effects,
-             Obligations, Diagnostics, Trace)
+    analysis(ResultId, Card, State, Effects, Diagnostics, Trace)
 
-Trace entries expose the exact states on true/false or match-success/failure
-edges.  This is the compatibility seam used by translation: a branch consumes
+Trace entries expose the exact states on the true/false edges of tests and
+the cardinality of each node.  Translation consumes them: a branch consumes
 the same analysis which proved its cardinality and result facts instead of
 running another source walker.
 */
@@ -58,35 +55,31 @@ analyze_ir(IR, State0, Analysis) :-
 %!  analyze_ir(+IR, +State0, +Options, -Analysis) is det.
 
 analyze_ir(IR, State0, Options,
-           analysis(Result, Card, State, Effects,
-                    Obligations, Diagnostics, Trace)) :-
+           analysis(Result, Card, State, Effects, Diagnostics, Trace)) :-
     close_state(State0, InitialState),
     ir_nodes(IR, Nodes),
     index_nodes(Nodes, Definitions),
     Ctx = context(Options, Definitions),
     ( consistent_flow(InitialState, reachable(ConsistentState))
       -> analyze_node(IR, ConsistentState, Ctx,
-                      out(Reach, Result0, Card0, State1, Effects0,
-                          Obligations0, Diagnostics0, Trace0))
+                      out(Reach, Result0, Card0, State1, Effects0, Diagnostics0, Trace0))
     ; Reach = no, ir_result(IR, Result0), card_zero(Card0),
-      State1 = InitialState, Effects0 = [], Obligations0 = [],
+      State1 = InitialState, Effects0 = [],
       Diagnostics0 = [inconsistent_initial_state], Trace0 = [] ),
     ( Reach == yes
       -> Result = Result0, Card = Card0, State = State1
     ; ir_result(IR, RootResult),
       Result = RootResult, card_zero(Card), State = InitialState ),
     sort(Effects0, Effects),
-    sort(Obligations0, Obligations),
     sort(Diagnostics0, Diagnostics),
     reverse(Trace0, Trace), !.
 
-analysis_result(analysis(Result, _, _, _, _, _, _), Result).
-analysis_card(analysis(_, Card, _, _, _, _, _), Card).
-analysis_state(analysis(_, _, State, _, _, _, _), State).
-analysis_effects(analysis(_, _, _, Effects, _, _, _), Effects).
-analysis_obligations(analysis(_, _, _, _, Obligations, _, _), Obligations).
-analysis_diagnostics(analysis(_, _, _, _, _, Diagnostics, _), Diagnostics).
-analysis_trace(analysis(_, _, _, _, _, _, Trace), Trace).
+analysis_result(analysis(Result, _, _, _, _, _), Result).
+analysis_card(analysis(_, Card, _, _, _, _), Card).
+analysis_state(analysis(_, _, State, _, _, _), State).
+analysis_effects(analysis(_, _, _, Effects, _, _), Effects).
+analysis_diagnostics(analysis(_, _, _, _, Diagnostics, _), Diagnostics).
+analysis_trace(analysis(_, _, _, _, _, Trace), Trace).
 
 analysis_result_has_fact(Analysis, Fact) :-
     analysis_result(Analysis, Result),
@@ -105,56 +98,35 @@ analysis_node_card(Analysis, NodeId, Card) :-
     analysis_trace(Analysis, Trace),
     member(node(NodeId, Card, _), Trace), !.
 
-%!  refine_result(+IR, +TestId, +Truth, +State0, +Options, -State) is semidet.
-%
-%   Apply only the facts established on one result edge.  Failure means that
-%   edge is unreachable.  Full analyses record these states in their trace;
-%   this entry point is useful for small compatibility queries and tests.
-
-refine_result(IR, TestId, Truth, State0, Options, State) :-
-    close_state(State0, ClosedState),
-    consistent_flow(ClosedState, reachable(ConsistentState)),
-    ir_nodes(IR, Nodes),
-    index_nodes(Nodes, Definitions),
-    refine_test(TestId, Truth, ConsistentState,
-                context(Options, Definitions), reachable(State)).
-
-
 % -- Node interpretation --------------------------------------------------
 
 analyze_node(value(Id, Flavor), State, _,
-             out(yes, Id, card(1,1), State, [], [], [],
+             out(yes, Id, card(1,1), State, [], [],
                  [node(Id, card(1,1), State)])) :-
     ( Flavor == source_var ; Flavor = pattern_var(_) ), !.
 analyze_node(value(Id, literal(Value)), State0, _, Out) :- !,
     literal_facts(Value, Facts),
     add_facts_flow(reachable(State0), Id, Facts, Flow),
-    flow_out(Flow, Id, card(1,1), [], [], [], Out0),
+    flow_out(Flow, Id, card(1,1), [], [], Out0),
     trace_node(Out0, Id, Out).
 
 analyze_node(opaque(_, clause(_, _, BodyId),
                     [construct(_, head_patterns, Patterns), Body]),
              State0, Ctx, Out) :- !,
-    assume_head_patterns(Patterns, State0, Ctx, HeadFlow,
-                         HeadObligations, HeadDiagnostics, HeadTrace),
+    assume_head_patterns(Patterns, State0, Ctx, HeadFlow, HeadDiagnostics),
     ( HeadFlow = reachable(HeadState)
       -> analyze_node(Body, HeadState, Ctx,
-                      out(Reach, _, Card, State, Effects, Obligations0,
-                          Diagnostics0, Trace0)),
-         append(HeadObligations, Obligations0, Obligations),
+                      out(Reach, _, Card, State, Effects, Diagnostics0, Trace)),
          append(HeadDiagnostics, Diagnostics0, Diagnostics),
-         append(Trace0, HeadTrace, Trace),
-         Out = out(Reach, BodyId, Card, State, Effects, Obligations,
-                   Diagnostics, Trace)
+         Out = out(Reach, BodyId, Card, State, Effects, Diagnostics, Trace)
     ; card_zero(Zero),
-      Out = out(no, BodyId, Zero, State0, [], HeadObligations,
-                HeadDiagnostics, HeadTrace) ).
+      Out = out(no, BodyId, Zero, State0, [], HeadDiagnostics, []) ).
 
 analyze_node(sequence(Nodes, Result), State0, Ctx, Out) :- !,
     analyze_sequence(Nodes, State0, Ctx,
-                     out(Reach, _, Card, State, Effects, Obligations,
+                     out(Reach, _, Card, State, Effects,
                          Diagnostics, Trace)),
-    Out0 = out(Reach, Result, Card, State, Effects, Obligations,
+    Out0 = out(Reach, Result, Card, State, Effects,
                Diagnostics, Trace),
     trace_node(Out0, Result, Out).
 
@@ -180,90 +152,70 @@ analyze_node(try_match(ValueId, Pattern, Then, Else, Result),
     alias_out_result(ThenOut0, Result, ThenOut),
     alias_out_result(ElseOut0, Result, ElseOut),
     merge_exclusive_outs(ThenOut, ElseOut, Result, Out0),
-    edge_trace_match(ValueId, Pattern, success, SuccessFlow, STrace),
-    edge_trace_match(ValueId, Pattern, failure, FailureFlow, FTrace),
-    prepend_trace(STrace, Out0, Out1),
-    prepend_trace(FTrace, Out1, Out2),
-    trace_node(Out2, Result, Out).
+    trace_node(Out0, Result, Out).
 
 analyze_node(call(Id, F, Args), State0, Ctx, Out) :- !,
     call_owned_children(F, Args, OwnedChildren),
-    analyze_children(OwnedChildren, State0, Ctx, ArgsOut),
+    analyze_sequence(OwnedChildren, State0, Ctx, ArgsOut),
     analyze_call_after_args(Id, F, Args, ArgsOut, Ctx, Out0),
     trace_node(Out0, Id, Out).
 
-analyze_node(reify(Id, Relation), State0, _, Out) :- !,
+analyze_node(reify(Id, _), State0, _, Out) :- !,
     add_facts_flow(reachable(State0), Id,
                    [type('Bool'), proper_bool, ground, nonvar], Flow),
-    flow_out(Flow, Id, card(1,1), [pure], [], [], Out0),
-    relation_diagnostic(Relation, Diagnostics),
-    append_out_diagnostics(Out0, Diagnostics, Out1),
-    trace_node(Out1, Id, Out).
-
-analyze_node(construct(Id, head_patterns, Patterns), State0, Ctx, Out) :- !,
-    assume_head_patterns(Patterns, State0, Ctx, Flow,
-                         Obligations, Diagnostics, Trace),
-    flow_out(Flow, Id, card(1,1), [], Obligations, Diagnostics,
-             out(Reach, Id, Card, State, Effects, Obs, Diags, _)),
-    Out = out(Reach, Id, Card, State, Effects, Obs, Diags,
-              [node(Id, Card, State)|Trace]).
+    flow_out(Flow, Id, card(1,1), [pure], [], Out0),
+    trace_node(Out0, Id, Out).
 
 analyze_node(construct(Id, Kind, Children), State0, Ctx, Out) :- !,
-    analyze_children(Children, State0, Ctx, ChildrenOut),
+    analyze_sequence(Children, State0, Ctx, ChildrenOut),
     construct_after_children(Id, Kind, Children, ChildrenOut, Ctx, Out0),
     trace_node(Out0, Id, Out).
 
 analyze_node(once(Expr, Result), State0, Ctx, Out) :- !,
     analyze_node(Expr, State0, Ctx,
-                 out(Reach, InnerResult, InnerCard, State0a, Effects, Obligations,
+                 out(Reach, InnerResult, InnerCard, State0a, Effects,
                      Diagnostics, Trace)),
     card_once(InnerCard, Card),
     ( Reach == yes
       -> alias_one_way(State0a, InnerResult, Result, State)
     ; State = State0a ),
-    Out0 = out(Reach, Result, Card, State, Effects, Obligations, Diagnostics,
+    Out0 = out(Reach, Result, Card, State, Effects, Diagnostics,
                Trace),
     trace_node(Out0, Result, Out).
 
 analyze_node(collect(Expr, Result), State0, Ctx, Out) :- !,
     analyze_node(Expr, State0, Ctx,
-                 out(_, _, _, _, Effects, Obligations, Diagnostics, Trace)),
+                 out(_, _, _, _, Effects, Diagnostics, Trace)),
     % Collection contains copies of inner bindings; they do not refine the
     % surrounding variables.  Only effects and the constructed list escape.
     add_facts_flow(reachable(State0), Result,
                    [expr, proper_list, nonvar], reachable(State)),
-    Out0 = out(yes, Result, card(1,1), State, Effects, Obligations,
+    Out0 = out(yes, Result, card(1,1), State, Effects,
                Diagnostics, Trace),
     trace_node(Out0, Result, Out).
 
 analyze_node(opaque(Id, no_match, []), State, _,
-             out(no, Id, card(0,0), State, [], [], [],
+             out(no, Id, card(0,0), State, [], [],
                  [node(Id, card(0,0), State)])) :- !.
 analyze_node(opaque(Id, no_else, []), State, _,
-             out(no, Id, card(0,0), State, [], [], [],
+             out(no, Id, card(0,0), State, [], [],
                  [node(Id, card(0,0), State)])) :- !.
 analyze_node(opaque(Id, quote(Payload), []), State0, _, Out) :- !,
     literal_facts(Payload, Facts),
     add_facts_flow(reachable(State0), Id, Facts, Flow),
-    flow_out(Flow, Id, card(1,1), [pure], [], [], Out0),
+    flow_out(Flow, Id, card(1,1), [pure], [], Out0),
     trace_node(Out0, Id, Out).
 analyze_node(opaque(Id, Tag, _Children), State0, _Ctx, Out) :-
     % An unsupported form's children are syntax, not an evaluation-order
-    % promise.  In particular a lambda body must not refine variables in the
-    % enclosing sequence merely because it occurs below |->.  Keep the input
-    % state unchanged and model only the opaque operation itself; a later IR
-    % extension for Tag can replace this clause with its real control flow.
-    Out0 = out(yes, Id, card(0,many), State0, [opaque], [],
+    % promise (a lambda body below |-> must not refine the enclosing
+    % sequence), so the input state passes through unchanged.
+    Out0 = out(yes, Id, card(0,many), State0, [opaque],
                [unsupported(Tag)], []),
     trace_node(Out0, Id, Out).
 
 
-% Analyze owned children in evaluation order.
-analyze_children(Children, State0, Ctx, Out) :-
-    analyze_sequence(Children, State0, Ctx, Out).
-
 analyze_sequence([], State, _,
-                 out(yes, none, card(1,1), State, [], [], [], [])) :- !.
+                 out(yes, none, card(1,1), State, [], [], [])) :- !.
 analyze_sequence([Node|Nodes], State0, Ctx, Out) :-
     analyze_node(Node, State0, Ctx, First),
     sequence_tail(First, Nodes, Ctx, Out).
@@ -272,21 +224,19 @@ call_owned_children(F, Args, [F|Args]) :-
     nonvar(F), ir_result(F, _), !.
 call_owned_children(_, Args, Args).
 
-sequence_tail(out(no, Result, Card, State, Effects, Obligations,
+sequence_tail(out(no, Result, Card, State, Effects,
                   Diagnostics, Trace), _, _,
-              out(no, Result, Card, State, Effects, Obligations,
+              out(no, Result, Card, State, Effects,
                   Diagnostics, Trace)) :- !.
 sequence_tail(First, [], _, First) :- !.
-sequence_tail(out(yes, _, CardA, StateA, EffectsA, ObligationsA,
+sequence_tail(out(yes, _, CardA, StateA, EffectsA,
                   DiagnosticsA, TraceA), Nodes, Ctx,
-              out(Reach, Result, Card, State, Effects, Obligations,
+              out(Reach, Result, Card, State, Effects,
                   Diagnostics, Trace)) :-
     analyze_sequence(Nodes, StateA, Ctx,
-                     out(Reach, Result, CardB, State, EffectsB,
-                         ObligationsB, DiagnosticsB, TraceB)),
+                     out(Reach, Result, CardB, State, EffectsB, DiagnosticsB, TraceB)),
     card_seq(CardA, CardB, Card),
     append(EffectsA, EffectsB, Effects),
-    append(ObligationsA, ObligationsB, Obligations),
     append(DiagnosticsA, DiagnosticsB, Diagnostics),
     append(TraceB, TraceA, Trace).
 
@@ -294,13 +244,12 @@ sequence_tail(out(yes, _, CardA, StateA, EffectsA, ObligationsA,
 % -- Calls ---------------------------------------------------------------
 
 analyze_call_after_args(Id, _, _,
-                        out(no, _, Card, State, Effects, Obligations,
+                        out(no, _, Card, State, Effects,
                             Diagnostics, Trace), _,
-                        out(no, Id, Card, State, Effects, Obligations,
+                        out(no, Id, Card, State, Effects,
                             Diagnostics, Trace)) :- !.
 analyze_call_after_args(Id, F, Args,
-                        out(yes, _, ArgsCard, State0, Effects0,
-                            Obligations, Diagnostics0, Trace), Ctx, Out) :-
+                        out(yes, _, ArgsCard, State0, Effects0, Diagnostics0, Trace), Ctx, Out) :-
     maplist(ir_result, Args, ArgIds),
     resolve_application(F, ArgIds, State0, Ctx, Resolution),
     apply_call_resolution(Resolution, Id, F, ArgIds, State0,
@@ -309,7 +258,7 @@ analyze_call_after_args(Id, F, Args,
     append(Effects0, CallEffects, Effects),
     append(Diagnostics0, CallDiagnostics, Diagnostics),
     ( Card = card(0,0) -> Reach = no ; Reach = yes ),
-    Out = out(Reach, Id, Card, State, Effects, Obligations, Diagnostics, Trace).
+    Out = out(Reach, Id, Card, State, Effects, Diagnostics, Trace).
 
 resolve_application(F, ArgIds, State, _, summary(Posts, Card, Effects)) :-
     atom(F), length(ArgIds, N),
@@ -379,21 +328,20 @@ data_application_facts(F, ArgIds, State, Facts) :-
 % -- Constructors and patterns ------------------------------------------
 
 construct_after_children(Id, Kind, _Children,
-                         out(no, _, Card, State, Effects, Obligations,
+                         out(no, _, Card, State, Effects,
                              Diagnostics, Trace), _,
-                         out(no, Id, Card, State, Effects, Obligations,
+                         out(no, Id, Card, State, Effects,
                              Diagnostics, Trace)) :- !,
     Kind = Kind.
 construct_after_children(Id, Kind, Children,
-                         out(yes, _, ChildrenCard, State0, Effects,
-                             Obligations, Diagnostics, Trace), Ctx, Out) :-
+                         out(yes, _, ChildrenCard, State0, Effects, Diagnostics, Trace), Ctx, Out) :-
     maplist(ir_result, Children, ChildIds),
     constructor_facts(Kind, ChildIds, State0, Ctx, Facts),
     add_facts_flow(reachable(State0), Id, Facts, Flow),
     ( Flow = reachable(State)
-      -> Out = out(yes, Id, ChildrenCard, State, Effects, Obligations,
+      -> Out = out(yes, Id, ChildrenCard, State, Effects,
                    Diagnostics, Trace)
-    ; Out = out(no, Id, card(0,0), State0, Effects, Obligations,
+    ; Out = out(no, Id, card(0,0), State0, Effects,
                 Diagnostics, Trace) ).
 
 constructor_facts(data, ChildIds, State, _, Facts) :- !,
@@ -430,33 +378,24 @@ list_constructor_facts(Prefix, ChildIds, State, Facts) :-
     ; ShapeFacts = Facts0 ),
     Facts = [proper_list_length(Length)|ShapeFacts].
 
-assume_head_patterns([], State, _, reachable(State), [], [], []).
-assume_head_patterns([Pattern|Patterns], State0, Ctx, Flow,
-                     Obligations, Diagnostics, Trace) :-
-    assume_head_pattern(Pattern, State0, Ctx, FirstFlow,
-                        FirstObligations, FirstDiagnostics, FirstTrace),
+assume_head_patterns([], State, _, reachable(State), []).
+assume_head_patterns([Pattern|Patterns], State0, Ctx, Flow, Diagnostics) :-
+    assume_head_pattern(Pattern, State0, Ctx, FirstFlow, FirstDiagnostics),
     ( FirstFlow = reachable(State1)
-      -> assume_head_patterns(Patterns, State1, Ctx, Flow,
-                              RestObligations, RestDiagnostics, RestTrace),
-         append(FirstObligations, RestObligations, Obligations),
-         append(FirstDiagnostics, RestDiagnostics, Diagnostics),
-         append(RestTrace, FirstTrace, Trace)
+      -> assume_head_patterns(Patterns, State1, Ctx, Flow, RestDiagnostics),
+         append(FirstDiagnostics, RestDiagnostics, Diagnostics)
     ; Flow = unreachable,
-      Obligations = FirstObligations,
-      Diagnostics = FirstDiagnostics,
-      Trace = FirstTrace ).
+      Diagnostics = FirstDiagnostics ).
 
 assume_head_pattern(construct(ValueId, typed_pattern(TypeRef), [Pattern]),
-                    State0, Ctx, Flow, [], Diagnostics,
-                    [head_pattern(ValueId, Flow)]) :- !,
+                    State0, Ctx, Flow, Diagnostics) :- !,
     ( resolve_type_ref(TypeRef, Ctx, Type)
       -> add_facts_flow(reachable(State0), ValueId, [type(Type)], Typed),
          flow_pattern_success(Typed, ValueId, Pattern, Ctx, Flow),
          Diagnostics = []
     ; Flow = reachable(State0),
       Diagnostics = [unresolved_type(TypeRef)] ).
-assume_head_pattern(Pattern, State0, Ctx, Flow, [], [],
-                    [head_pattern(ValueId, Flow)]) :-
+assume_head_pattern(Pattern, State0, Ctx, Flow, []) :-
     ir_result(Pattern, ValueId),
     pattern_success(ValueId, Pattern, State0, Ctx, Flow).
 
@@ -479,8 +418,6 @@ pattern_reachability(_, value(_, pattern_var(fresh)), _, yes, no) :- !.
 pattern_reachability(ValueId, value(PatternId, pattern_var(existing)), _,
                      yes, CanFail) :- !,
     ( ValueId == PatternId -> CanFail = no ; CanFail = yes ).
-% Compatibility for manually constructed/older IR fixtures.
-pattern_reachability(_, value(_, source_var), _, yes, no) :- !.
 pattern_reachability(ValueId, value(_, literal(Value)), State,
                      CanSucceed, CanFail) :- !,
     literal_match_reachability(ValueId, Value, State, CanSucceed, CanFail).
@@ -718,108 +655,91 @@ opposite_bool(false, true).
 % -- Flow/result combination --------------------------------------------
 
 analyze_flow_node(unreachable, Node, _,
-                  out(no, Result, card(0,0), unreachable, [], [], [], [])) :-
+                  out(no, Result, card(0,0), unreachable, [], [], [])) :-
     ir_result(Node, Result), !.
 analyze_flow_node(reachable(State), Node, Ctx, Out) :-
     analyze_node(Node, State, Ctx, Out).
 
-alias_out_result(out(no, _, Card, State, Effects, Obligations,
+alias_out_result(out(no, _, Card, State, Effects,
                      Diagnostics, Trace), Result,
-                 out(no, Result, Card, State, Effects, Obligations,
+                 out(no, Result, Card, State, Effects,
                      Diagnostics, Trace)) :- !.
-alias_out_result(out(yes, From, Card, State0, Effects, Obligations,
+alias_out_result(out(yes, From, Card, State0, Effects,
                      Diagnostics, Trace), Result,
-                 out(yes, Result, Card, State, Effects, Obligations,
+                 out(yes, Result, Card, State, Effects,
                      Diagnostics, Trace)) :-
     alias_one_way(State0, From, Result, State).
 
-merge_exclusive_outs(out(no, _, _, _, EffectsA, ObligationsA,
+merge_exclusive_outs(out(no, _, _, _, EffectsA,
                          DiagnosticsA, TraceA),
-                     out(no, _, _, _, EffectsB, ObligationsB,
+                     out(no, _, _, _, EffectsB,
                          DiagnosticsB, TraceB), Result,
-                     out(no, Result, card(0,0), state([]), Effects,
-                         Obligations, Diagnostics, Trace)) :- !,
-    merge_lists(EffectsA, EffectsB, Effects),
-    merge_lists(ObligationsA, ObligationsB, Obligations),
-    merge_lists(DiagnosticsA, DiagnosticsB, Diagnostics),
+                     out(no, Result, card(0,0), state([]), Effects, Diagnostics, Trace)) :- !,
+    append(EffectsA, EffectsB, Effects),
+    append(DiagnosticsA, DiagnosticsB, Diagnostics),
     append(TraceB, TraceA, Trace).
-merge_exclusive_outs(out(no, _, _, unreachable, EffectsA, ObligationsA,
+merge_exclusive_outs(out(no, _, _, unreachable, EffectsA,
                          DiagnosticsA, TraceA),
                      Right, Result, Out) :- !,
-    merge_unreachable_metadata(Right, Result, EffectsA, ObligationsA,
-                               DiagnosticsA, TraceA, Out).
+    merge_unreachable_metadata(Right, Result, EffectsA, DiagnosticsA, TraceA,
+                               Out).
 merge_exclusive_outs(Left,
-                     out(no, _, _, unreachable, EffectsB, ObligationsB,
+                     out(no, _, _, unreachable, EffectsB,
                          DiagnosticsB, TraceB), Result, Out) :- !,
-    merge_unreachable_metadata(Left, Result, EffectsB, ObligationsB,
-                               DiagnosticsB, TraceB, Out).
-merge_exclusive_outs(out(yes, _, Card, State, EffectsA, ObligationsA,
+    merge_unreachable_metadata(Left, Result, EffectsB, DiagnosticsB, TraceB,
+                               Out).
+merge_exclusive_outs(out(yes, _, Card, State, EffectsA,
                          DiagnosticsA, TraceA),
-                     out(no, _, _, _, EffectsB, ObligationsB,
+                     out(no, _, _, _, EffectsB,
                          DiagnosticsB, TraceB), Result,
-                     out(yes, Result, JoinedCard, State, Effects, Obligations,
+                     out(yes, Result, JoinedCard, State, Effects,
                          Diagnostics, Trace)) :- !,
-    card_exclusive(Card, card(0,0), JoinedCard),
-    merge_lists(EffectsA, EffectsB, Effects),
-    merge_lists(ObligationsA, ObligationsB, Obligations),
-    merge_lists(DiagnosticsA, DiagnosticsB, Diagnostics),
+    card_join(Card, card(0,0), JoinedCard),
+    append(EffectsA, EffectsB, Effects),
+    append(DiagnosticsA, DiagnosticsB, Diagnostics),
     append(TraceB, TraceA, Trace).
 merge_exclusive_outs(Left, Right, Result, Out) :-
-    Left = out(no, _, _, _, _, _, _, _), !,
+    Left = out(no, _, _, _, _, _, _), !,
     merge_exclusive_outs(Right, Left, Result, Out).
-merge_exclusive_outs(out(yes, _, CardA, StateA, EffectsA, ObligationsA,
+merge_exclusive_outs(out(yes, _, CardA, StateA, EffectsA,
                          DiagnosticsA, TraceA),
-                     out(yes, _, CardB, StateB, EffectsB, ObligationsB,
+                     out(yes, _, CardB, StateB, EffectsB,
                          DiagnosticsB, TraceB), Result,
-                     out(yes, Result, Card, State, Effects, Obligations,
+                     out(yes, Result, Card, State, Effects,
                          Diagnostics, Trace)) :-
-    card_exclusive(CardA, CardB, Card),
+    card_join(CardA, CardB, Card),
     state_join(StateA, StateB, State),
-    merge_lists(EffectsA, EffectsB, Effects),
-    merge_lists(ObligationsA, ObligationsB, Obligations),
-    merge_lists(DiagnosticsA, DiagnosticsB, Diagnostics),
+    append(EffectsA, EffectsB, Effects),
+    append(DiagnosticsA, DiagnosticsB, Diagnostics),
     append(TraceB, TraceA, Trace).
 
 merge_unreachable_metadata(
-    out(Reach, _, Card, State, Effects0, Obligations0, Diagnostics0, Trace0),
-    Result, Effects1, Obligations1, Diagnostics1, Trace1,
-    out(Reach, Result, Card, State, Effects, Obligations, Diagnostics, Trace)) :-
-    merge_lists(Effects0, Effects1, Effects),
-    merge_lists(Obligations0, Obligations1, Obligations),
-    merge_lists(Diagnostics0, Diagnostics1, Diagnostics),
+    out(Reach, _, Card, State, Effects0, Diagnostics0, Trace0),
+    Result, Effects1, Diagnostics1, Trace1,
+    out(Reach, Result, Card, State, Effects, Diagnostics, Trace)) :-
+    append(Effects0, Effects1, Effects),
+    append(Diagnostics0, Diagnostics1, Diagnostics),
     append(Trace1, Trace0, Trace).
 
-flow_out(unreachable, Result, _, Effects, Obligations, Diagnostics,
-         out(no, Result, card(0,0), state([]), Effects, Obligations,
+flow_out(unreachable, Result, _, Effects, Diagnostics,
+         out(no, Result, card(0,0), state([]), Effects,
              Diagnostics, [])) :- !.
-flow_out(reachable(State), Result, Card, Effects, Obligations, Diagnostics,
-         out(yes, Result, Card, State, Effects, Obligations,
+flow_out(reachable(State), Result, Card, Effects, Diagnostics,
+         out(yes, Result, Card, State, Effects,
              Diagnostics, [])).
 
-trace_node(out(Reach, Result, Card, State, Effects, Obligations,
+trace_node(out(Reach, Result, Card, State, Effects,
                Diagnostics, Trace0), Id,
-           out(Reach, Result, Card, State, Effects, Obligations,
+           out(Reach, Result, Card, State, Effects,
                Diagnostics, [node(Id, Card, State)|Trace0])).
 
 prepend_trace([], Out, Out).
 prepend_trace([Entry|Entries],
-              out(R, I, C, S, E, O, D, Trace), Out) :-
-    prepend_trace(Entries, out(R, I, C, S, E, O, D, [Entry|Trace]), Out).
-
-append_out_diagnostics(out(R, I, C, S, E, O, D0, T), More,
-                       out(R, I, C, S, E, O, D, T)) :-
-    append(D0, More, D).
+              out(R, I, C, S, E, D, Trace), Out) :-
+    prepend_trace(Entries, out(R, I, C, S, E, D, [Entry|Trace]), Out).
 
 edge_trace(_, _, unreachable, []).
 edge_trace(Id, Truth, reachable(State), [edge(Id, Truth, State)]).
-
-edge_trace_match(_, _, _, unreachable, []).
-edge_trace_match(ValueId, Pattern, Kind, reachable(State),
-                 [match_edge(ValueId, PatternId, Kind, State)]) :-
-    ir_result(Pattern, PatternId).
-
-merge_lists(A, B, Merged) :- append(A, B, Merged).
-
 
 % -- Fact closure and consistency ---------------------------------------
 
@@ -939,11 +859,9 @@ consistent_flow(State, Flow) :-
     ( inconsistent_state(State) -> Flow = unreachable
     ; Flow = reachable(State) ).
 
-% add_facts_flow/4 receives an already-consistent reachable state and changes
-% only one immutable value entry.  Therefore only that entry can become newly
-% contradictory; rescanning every prior ID after each fact insertion made
-% consistency quadratic in long clauses.  Whole-state checks remain at input,
-% joins and alias operations.
+% The input state is consistent and only one value entry changed, so only that
+% entry can become contradictory; whole-state checks happen at input, joins
+% and alias operations.
 consistent_value_flow(State, Id, Flow) :-
     ( inconsistent_value(State, Id) -> Flow = unreachable
     ; Flow = reachable(State) ).
@@ -977,19 +895,19 @@ inconsistent_value(State, Id) :-
     state_fact_matches(State, Id, literal(Value)),
     state_fact_matches(State, Id, domain(Domain)),
     ground(Value), ground(Domain),
-    \+ variant_member_local(Value, Domain), !.
+    \+ variant_member(Value, Domain), !.
 
 state_value_id(state(Entries), Id) :- member(entry(Id, _), Entries).
 
 domain_all_excluded([], _).
 domain_all_excluded([Value|Values], Excluded) :-
-    variant_member_local(Value, Excluded),
+    variant_member(Value, Excluded),
     domain_all_excluded(Values, Excluded).
 
 state_domain_excludes(State, Id, Value) :-
     state_fact_matches(State, Id, domain(Domain)),
     ground(Domain),
-    \+ variant_member_local(Value, Domain).
+    \+ variant_member(Value, Domain).
 
 domain_exhausted_after(State, Id, ExtraExcluded) :-
     state_fact_matches(State, Id, domain(Domain)),
@@ -1016,10 +934,8 @@ alias_ids(State0, A, B, State) :-
     alias_one_way(State0, A, B, State1),
     alias_one_way(State1, B, A, State).
 
-% Runtime identity does not erase nominal views of the same value.  A branded
-% Proof can be identical to the Atom from which it was branded, so propagating
-% type facts across == spuriously widens/narrows legacy types.  Unification
-% retains full aliasing; identity shares only value/shape facts.
+% A branded Proof can be identical to the Atom it was branded from, so ==
+% shares only value/shape facts, not type facts; unification shares both.
 alias_ids_without_types(State0, A, B, State) :-
     alias_one_way_without_types(State0, A, B, State1),
     alias_one_way_without_types(State1, B, A, State).
@@ -1035,14 +951,6 @@ alias_one_way(State0, From, To, State) :-
     state_facts(State0, From, Facts),
     add_state_facts(Facts, To, State0, State).
 
-variant_dedup([], []).
-variant_dedup([X|Xs], Ys) :-
-    ( variant_member_local(X, Xs)
-      -> variant_dedup(Xs, Ys)
-    ; Ys = [X|Rest], variant_dedup(Xs, Rest) ).
-
-variant_member_local(X, [Y|_]) :- X =@= Y, !.
-variant_member_local(X, [_|Ys]) :- variant_member_local(X, Ys).
 
 
 % -- Context and definition helpers -------------------------------------
@@ -1071,11 +979,6 @@ refinable_definition(value(_, literal(_))).
 refinable_definition(call(_, _, _)).
 refinable_definition(reify(_, _)).
 refinable_definition(construct(_, _, _)).
-
-relation_diagnostic(Relation, []) :-
-    compound(Relation), functor(Relation, Name, 2),
-    memberchk(Name, [unify, unifiable, identical, not_identical, variant]), !.
-relation_diagnostic(Relation, [unknown_relation(Relation)]).
 
 
 % Module-local resolver fixtures are intentionally outside begin_tests/1 so
@@ -1163,10 +1066,11 @@ test(inconsistent_initial_state_is_unreachable) :-
     var(X).
 
 test(source_variable_bool_edge_is_recorded) :-
-    lower_expr(X, IR, Id, _),
+    lower_expr([if, X, a, b], IR, _, Env),
+    env_var_id(Env, X, Id),
     state_empty(S0),
-    findall(State, refine_result(IR, Id, true, S0, [], State), States),
-    States = [State],
+    analyze_ir(IR, S0, Analysis),
+    analysis_edge_state(Analysis, Id, true, State),
     state_has_fact(State, Id, literal(true)),
     state_has_fact(State, Id, proper_bool),
     var(X).
@@ -1200,11 +1104,14 @@ test(cons_pattern_does_not_make_improper_tail_proper) :-
     var(H), var(T).
 
 test(is_var_true_edge_rejects_known_nonvar) :-
-    Source = ['is-var', X],
-    lower_expr(Source, IR, TestId, Env),
+    Source = [if, ['is-var', X], a, b],
+    lower_expr(Source, IR, _, Env),
     env_var_id(Env, X, XId),
     state_empty(S0), state_add_fact(S0, XId, nonvar, S1),
-    \+ refine_result(IR, TestId, true, S1, [], _).
+    analyze_ir(IR, S1, Analysis),
+    analysis_trace(Analysis, Trace),
+    \+ memberchk(edge(_, true, _), Trace),
+    memberchk(edge(_, false, _), Trace).
 
 test(dynamic_head_failure_short_circuits_call) :-
     lower_expr([[empty], 1], IR, _, _),

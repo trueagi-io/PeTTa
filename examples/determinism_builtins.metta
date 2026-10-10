@@ -1,4 +1,4 @@
-; The determinism of a builtin is whatever builtin_call_determinism/3 records
+; The determinism of a builtin is whatever the builtin registry records
 ; and nothing else, so the table has to carry every builtin that genuinely is
 ; deterministic or legitimate proofs disappear. It is also the ONLY thing the
 ; checker knows about them, so every entry has to be true under the calling

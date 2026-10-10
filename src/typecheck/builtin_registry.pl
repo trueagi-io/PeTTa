@@ -14,22 +14,14 @@
             validate_builtin_registry_schema/0,
             validate_builtin_registry_unique/0,
             validate_builtin_registry_hooks/0,
-            validate_builtin_registry_signatures/0,
             validate_builtin_registration_coverage/0,
             validate_builtin_implementation_coverage/0
           ]).
 
-%%% Declarative registry for language-visible builtins and compiler forms.
-%
-% One record owns the cross-cutting metadata that used to be repeated in the
-% signature file, determinism table, contextual output rules and translator.
-% Procedural implementations remain in their subject files; the registry names
-% their hooks and the load-time validator below proves every named hook exists.
-%
-% Owns builtin_spec/6, its consumer views, explicit exemptions, and registry
-% consistency validation. Consumes named hook predicates, declaration views,
-% and runtime builtin registration through explicitly qualified user-module
-% callbacks. This leaf is a real SWI-Prolog module; it owns no checker stores.
+%%% Declarative registry for language-visible builtins and compiler forms: one
+%%% record per builtin carries its signature, determinism, contextual output
+%%% rule and lowering. Procedural implementations stay in their subject files;
+%%% the load-time validator below proves every named hook exists.
 %
 % builtin_spec(
 %     Name/MeTTaArity,
@@ -43,9 +35,18 @@
 %                 unspecified),
 %     lowering(generic|special(Hook))).
 %
-% `variadic` is used instead of an integer only for compiler forms whose source
-% arity is open. Type variables in signature records are ordinary fresh Prolog
-% variables; no binding is shared between registry lookups.
+% `variadic` marks compiler forms whose source arity is open. Type variables in
+% signature records are fresh per lookup.
+%
+% Cardinality is the only determinism knowledge the checker has about a
+% builtin, and an unlisted one is `unspecified`. An entry describes the
+% predicate (N MeTTa arguments plus the result) under the weakest calling
+% convention: any argument may be unbound or ill-typed (the residual guard
+% accepts an unbound variable), so a (List T) position may hold an open list,
+% and the result may already be bound. An exception is not a solution: det is
+% exactly one solution for every instantiation, semidet at most one. Relational
+% modes are real (append/3 inverts, length/2 enumerates shapes, bool/1
+% enumerates), so such builtins are not det.
 
 % Arithmetic and numeric comparisons.
 builtin_spec('+'/2, implementation(metta), typing(signature(unspecified, ['Number','Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(special(arithmetic_native))).
@@ -132,6 +133,10 @@ builtin_spec('is-space'/1, implementation(metta), typing(signature(unspecified, 
 
 % Lists and tuples. `contextual` means the output type is supplied by the
 % named procedural rule in clause_checks.pl instead of a global declaration.
+% A signature would be consulted before that rule and replace what the
+% argument knows: (cdr-atom $xs) on a (List Choice) would come back as
+% (List %Undefined%), and a global (List $item) for append would reject legal
+% heterogeneous lists. The rules keep element types and reject nothing.
 builtin_spec(cons/2, implementation(metta), typing(contextual(cons_list)), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
 builtin_spec('cons-atom'/2, implementation(metta), typing(contextual(cons_list)), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
 builtin_spec('decons-atom'/1, implementation(metta), typing(untyped), evaluation(eager), cardinality(fixed(semidet)), lowering(generic)).
@@ -192,6 +197,9 @@ builtin_spec(callPredicate/1, implementation(metta), typing(untyped), evaluation
 builtin_spec(assertaPredicate/1, implementation(metta), typing(untyped), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
 builtin_spec(assertzPredicate/1, implementation(metta), typing(untyped), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
 builtin_spec(retractPredicate/1, implementation(metta), typing(untyped), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
+% Trusted foreign promises: determinism arrows for Prolog predicates called
+% through (callPredicate (Predicate (g ...))). No MeTTa clauses exist for these
+% symbols, so the arrows are believed, not validated.
 builtin_spec(assertz/2, implementation(foreign_promise), typing(signature(det, [_A,_B], 'Bool')), evaluation(eager), cardinality(unspecified), lowering(generic)).
 builtin_spec(erase/1, implementation(foreign_promise), typing(signature(det, [_], 'Bool')), evaluation(eager), cardinality(unspecified), lowering(generic)).
 builtin_spec(heap_size/1, implementation(external), typing(signature(unspecified, [_], 'Number')), evaluation(eager), cardinality(unspecified), lowering(generic)).
@@ -252,9 +260,8 @@ builtin_spec(the/2, implementation(compiler), typing(untyped), evaluation(specia
 builtin_spec(quote/1, implementation(compiler), typing(untyped), evaluation(special), cardinality(compiler_derived), lowering(special(quote))).
 builtin_spec(catch/1, implementation(compiler), typing(untyped), evaluation(special), cardinality(compiler_derived), lowering(special(catch))).
 
-% Explicit exemptions from registration completeness. These names are kept in
-% register_fun's compatibility list but do not implement the MeTTa
-% N-arguments-plus-result convention.
+% Exemptions from registration completeness: names in register_fun's list that
+% do not implement the N-arguments-plus-result convention.
 builtin_registration_exemption(concat, legacy_name_without_predicate).
 builtin_registration_exemption('get-mettatype', legacy_name_without_predicate).
 builtin_registration_exemption('mm2-exec', optional_mork_runtime).
@@ -340,7 +347,6 @@ validate_builtin_registry :-
     validate_builtin_registry_schema,
     validate_builtin_registry_unique,
     validate_builtin_registry_hooks,
-    validate_builtin_registry_signatures,
     validate_builtin_registration_coverage,
     validate_builtin_implementation_coverage.
 
@@ -382,37 +388,38 @@ validate_builtin_registry_unique :-
 validate_builtin_registry_unique :-
     throw(error(duplicate_builtin_registry_key, builtin_registry)).
 
+%Every named hook must have a dispatch clause of its own: a clause keyed by
+%the rule name, a deterministic_expr_core/2 clause for a conditional builtin's
+%exact form, or a lowering test for the hook in the translator.
 validate_builtin_registry_hooks :-
     forall(builtin_argument_rule(_, _, Rule),
-           ( user:builtin_argument_rule_defined(Rule)
+           ( clause(user:builtin_argument_rule_verdict(Key, _, _, _), _), Key == Rule
              -> true
              ; throw(error(undefined_builtin_argument_rule(Rule), builtin_registry)) )),
-    forall(builtin_conditional_rule(_, _, Rule),
-           ( user:builtin_conditional_rule_defined(Rule)
+    forall(builtin_conditional_rule(F, N, Rule),
+           ( clause(user:deterministic_expr_core([Key|Args], _), _), Key == F,
+             is_list(Args), length(Args, N)
              -> true
              ; throw(error(undefined_builtin_conditional_rule(Rule), builtin_registry)) )),
     forall(builtin_contextual_typing(_, _, Hook),
-           ( user:builtin_contextual_typing_rule_defined(Hook)
+           ( clause(user:builtin_contextual_output_rule(Key, _, _), _), Key == Hook
              -> true
              ; throw(error(undefined_builtin_contextual_typing_rule(Hook), builtin_registry)) )),
+    source_file(user:translate_expr(_, _, _), Translator),
+    findall(Hook,
+            ( source_file(user:Head, Translator),
+              clause(user:Head, Body),
+              sub_term(Test, Body), nonvar(Test),
+              lowering_test(Test, Hook), atom(Hook) ),
+            Lowered),
     forall(builtin_codegen_hook(_, _, Hook),
-           ( user:builtin_codegen_rule_defined(Hook)
+           ( memberchk(Hook, Lowered)
              -> true
              ; throw(error(undefined_builtin_codegen_rule(Hook), builtin_registry)) )).
 
-validate_builtin_registry_signatures :-
-    forall(builtin_signature(F, _, Det, Args, Out),
-           ( user:declared_fn_type(F, A2, O2, D2),
-             (Args-Out-Det) =@= (A2-O2-D2)
-             -> true
-             ; throw(error(registry_signature_missing_from_builtin_types(F, Args, Out, Det),
-                           builtin_registry)) )),
-    forall(user:declared_fn_type(F, Args, Out, Det),
-           ( builtin_signature(F, _, D2, A2, O2),
-             (Args-Out-Det) =@= (A2-O2-D2)
-             -> true
-             ; throw(error(builtin_types_signature_missing_from_registry(F, Args, Out, Det),
-                           builtin_registry)) )).
+lowering_test(special_builtin_form(_, _, Hook), Hook).
+lowering_test(builtin_codegen_hook(_, _, Hook), Hook).
+lowering_test(builtin_codegen_symbol(_, Hook), Hook).
 
 validate_builtin_registration_coverage :-
     forall(user:fun(F),

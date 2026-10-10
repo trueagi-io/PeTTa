@@ -1,4 +1,4 @@
-; add-atom/remove-atom are keyed semidet (builtin_call_determinism/3): their
+; add-atom/remove-atom are keyed semidet (the builtin registry): their
 ; second clause reads the atom as a list and FAILS on a non-list argument, so a
 ; call whose argument shape is unknown may fail. But when the argument is a
 ; MANIFEST non-empty expression written at the call site, the =.. succeeds,

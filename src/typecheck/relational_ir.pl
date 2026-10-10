@@ -1,13 +1,11 @@
 :- module(relational_ir,
           [ lower_expr/4,
             lower_expr_with_origins/5,
-            lower_clause/4,
             lower_clause_with_origins/5,
             ir_result/2,
             ir_children/2,
             ir_node/2,
             ir_nodes/2,
-            ir_kind/2,
             env_var_id/3,
             origin_result_id/3
           ]).
@@ -48,14 +46,12 @@ lower_expr_with_origins(Source, IR, Result, Env, Origins) :-
         Origins),
     reverse(RevEnv, Env).
 
-%!  lower_clause(+SourceClause, -IR, -ClauseId, -Environment) is det.
+%!  lower_clause_with_origins(+SourceClause, -IR, -ClauseId, -Environment,
+%!                            -Origins) is det.
 %
 %   A clause is a compilation boundary, not an expression node.  It is kept in
 %   the permitted opaque node, while its argument patterns and body are normal
 %   relational IR children.
-
-lower_clause(Source, IR, ClauseId, Env) :-
-    lower_clause_with_origins(Source, IR, ClauseId, Env, _).
 
 lower_clause_with_origins(Source, IR, ClauseId, Env, Origins) :-
     with_origin_scope(lower_clause_core(Source, IR, ClauseId, Env), Origins).
@@ -66,7 +62,7 @@ lower_clause_core(Source, IR, ClauseId, Env) :-
     -> fresh_id(ClauseId, state(1, []), S1),
        fresh_id(HeadId, S1, S2),
        length(Args, Arity),
-       lower_clause_patterns(F, Arity, Args, ArgIRs, ArgIds, S2, S3),
+       lower_clause_patterns(F, Arity, Args, 0, ArgIRs, ArgIds, S2, S3),
        lower_expr_(Body, BodyIR, BodyId, S3, state(_, RevEnv)),
        IR = opaque(ClauseId, clause(F, ArgIds, BodyId),
                    [construct(HeadId, head_patterns, ArgIRs), BodyIR]),
@@ -79,9 +75,6 @@ lower_clause_core(Source, IR, ClauseId, Env) :-
 % `declared_arg(F, Arity, Index)` rather than consulting any declaration store
 % here.  Arity is part of the identity: the same symbol may have declarations
 % at several arities.
-lower_clause_patterns(F, Arity, Args, IRs, Ids, S0, S) :-
-    lower_clause_patterns(F, Arity, Args, 0, IRs, Ids, S0, S).
-
 lower_clause_patterns(_, _, [], _, [], [], S, S).
 lower_clause_patterns(F, Arity, [P|Ps], Index,
                       [construct(Id, typed_pattern(declared_arg(F, Arity, Index)),
@@ -177,7 +170,7 @@ lower_expr_core([LetStar, Binds, Body], IR, Result, S0, S) :-
 lower_expr_core([Progn|Exprs], sequence(IRs, Result), Result, S0, S) :-
     Progn == progn, !,
     lower_exprs(Exprs, IRs, Ids, S0, S),
-    ( last_id(Ids, Result) -> true
+    ( last(Ids, Result) -> true
     ; throw(error(domain_error(nonempty_sequence, [Progn|Exprs]), lower_expr/4))
     ).
 lower_expr_core([Prog1|Exprs], sequence(IRs, Result), Result, S0, S) :-
@@ -390,8 +383,6 @@ intern_source_var(Var, Id, state(N, Env), state(N1, [binding(Id, Var)|Env])) :-
     Id = id(N),
     N1 is N + 1.
 
-last_id([Id], Id) :- !.
-last_id([_|Ids], Id) :- last_id(Ids, Id).
 
 %!  env_var_id(+Environment, +SourceVar, -Id) is semidet.
 
@@ -440,19 +431,6 @@ ir_result(try_match(_, _, _, _, Result), Result).
 ir_result(once(_, Result), Result).
 ir_result(collect(_, Result), Result).
 ir_result(opaque(Id, _, _), Id).
-
-%!  ir_kind(+IR, -Kind) is semidet.
-
-ir_kind(value(_, Flavor), value(Flavor)).
-ir_kind(construct(_, Kind, _), construct(Kind)).
-ir_kind(call(_, F, _), call(F)).
-ir_kind(reify(_, Relation), reify(Name)) :- functor(Relation, Name, _).
-ir_kind(sequence(_, _), sequence).
-ir_kind(branch(_, _, _, _), branch).
-ir_kind(try_match(_, _, _, _, _), try_match).
-ir_kind(once(_, _), once).
-ir_kind(collect(_, _), collect).
-ir_kind(opaque(_, Tag, _), opaque(Tag)).
 
 %!  ir_children(+IR, -Children) is det.
 
@@ -637,7 +615,7 @@ test(variable_head_list_pattern_is_positional) :-
     HeadId \== TailId.
 
 test(clause_shape) :-
-    lower_clause([=, [f, X], [data, X, 1]], IR, ClauseId, Env),
+    lower_clause_with_origins([=, [f, X], [data, X, 1]], IR, ClauseId, Env, _),
     IR = opaque(ClauseId, clause(f, [XId], BodyId),
                 [construct(_, head_patterns,
                            [construct(XId, typed_pattern(declared_arg(f, 1, 0)),
@@ -649,7 +627,7 @@ test(clause_shape) :-
 test(inspection_helpers) :-
     lower_expr([once, [collapse, [f, 1]]], IR, Result, _),
     ir_result(IR, Result),
-    ir_kind(IR, once),
+    IR = once(_, _),
     ir_nodes(IR, Nodes),
     member(collect(_, _), Nodes),
     member(call(_, f, _), Nodes), !.

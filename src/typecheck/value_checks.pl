@@ -1,10 +1,5 @@
-%%% Static and deferred value checking.
-%
-% Owns value candidate typing, literals/closures/lists/tuples checks, residual
-% call-site guard construction, and deferred runtime requirement enforcement.
-% Consumes the type language and attributes, canonical declarations, inference,
-% determinism/effect queries, checker modes, and oracle hooks. It owns no
-% persistent declaration or analysis store.
+%%% Static and deferred value checking: candidate typing of values, call-site
+%%% guard construction, and runtime requirement enforcement.
 %
 %%% Static typing of values (translated call results, literals, closures):
 value_candidate_types(V, ['Number']) :- number(V), !.
@@ -29,21 +24,11 @@ value_candidate_types(partial(F, B), Cs) :- !,
                                                   bound_args_match(B, PTs),
                                                   append(RTs, [OT], Xs) ), Cs).
 value_candidate_types([], [['List', _]]) :- !.
-%A constructor application (STV 0.5 0.8) has the constructor's output type,
-%but only when its fields do not contradict the constructor's signature -
-%otherwise the value is unknown and the (runtime or strict) guard decides.
-%
-%is_list/1 before length/2 is load-bearing, not defensive. A head pattern
-%written with a variable tail - (cons Premises $p), which constrain_args/3
-%compiles to the PARTIAL list ['Premises'|$p] - reaches here, and length/2 on
-%a partial list is a GENERATOR: it proposes N = 0, 1, 2, ... forever, and
-%since fn_decl_arity/4 fails for each one nothing ever cuts the loop. It ran
-%out to a 76-million-element term (35s, 2.2GB, stack overflow) on a two-line
-%file. A term whose tail is still unbound is not an n-argument constructor
-%application - its arity is not known yet - so this clause simply does not
-%apply to it, and it falls through to the "no candidate types" answer, which
-%is the honest one. is_list/1 is also cycle-safe, so a rational tree (an
-%inferred self-referential value) fails here rather than looping.
+%A constructor application (STV 0.5 0.8) has the constructor's output type
+%when its fields do not contradict the signature; otherwise it is unknown and
+%the guard decides. is_list/1 is load-bearing: a head pattern with a variable
+%tail, (cons Premises $p), arrives as a partial list, on which length/2 would
+%generate lengths forever. It also fails on a rational tree instead of looping.
 value_candidate_types([H|Args], Cs) :- atom(H), is_list(Args), length(Args, N), fn_decl_arity(H, N, _, _), !,
                                 findall(OT, ( fn_decl_arity(H, N, ATs, OT),
                                               bound_args_match(Args, ATs) ), Cs).
@@ -56,13 +41,8 @@ value_single_type(V, T) :- ( var(V) -> known_singleton(V, T)
 det_arrow_head(Det, H) :- nonvar(Det), arrow_atom_det(H, Det), !.
 det_arrow_head(_, (->)).
 
-%The arrow head a declared symbol carries when it is used as a VALUE. The
-%builtin table OVERRIDES the declared determinism (table_det_override/4, shared
-%with the direct-call and oracle sites), then det_arrow_head/2 turns the
-%effective determinism into the head atom. Without the override, a signature
-%could make the same builtin look different in closure position than it does
-%at a direct call. An undeclared builtin already got this right through
-%inferred_arrow_head/3; the declaration was the only thing hiding the table:
+%The arrow head of a declared symbol used as a value: the builtin table
+%overrides the declared determinism, as at a direct call (table_det_override/4).
 value_arrow_head(F, N, Det, H) :- table_det_override(F, N, Det, Eff), det_arrow_head(Eff, H).
 
 bound_args_match(B, PTs) :- \+ \+ maplist(arg_soft_ok, B, PTs).
@@ -82,7 +62,7 @@ check_value(V, T, St) :- ( V == true ; V == false ), !,
                          ; prim_mismatch_status('Bool', T, St) ).
 check_value(V, T, St) :- var(T), !, ( value_single_type(V, VT) -> T = VT ; true ), St = ok.
 check_value(_, T, ok) :- foreign_type(T), !.
-check_value(_, T, St) :- wildcard_type_t(T), !, St = ok.
+check_value(_, T, St) :- wildcard_type(T), !, St = ok.
 check_value(V, T, St) :- is_union(T), !, T = ['|'|Ms],
                          ( member(M, Ms), check_value(V, M, SM), SM == ok -> St = ok
                          ; forall(member(M, Ms), check_value(V, M, mismatch)) -> St = mismatch
@@ -103,11 +83,9 @@ check_value(V, T, St) :- is_arrow_type(T), !,
                          ; ( number(V) ; string(V) ) -> St = mismatch
                          ; St = unknown ).
 
-%Structural tuple types (Tag T1 ... Tn): the value must carry the same tag
-%and arity, and its fields check recursively. A primitive or wildcard atom in
-%head position is a type, not a tag - ($a Number) unified to (Number Number)
-%is an untagged pair, handled by the next clause. See tagged_tuple_type/3 for
-%when a head atom is a tag and when it is the first field's type:
+%Structural tuple types (Tag T1 ... Tn): the value must carry the same tag and
+%arity, and its fields check recursively. See tagged_tuple_type/3 for when a
+%head atom is a tag and when it is the first field's type:
 check_value(V, T, St) :- tagged_tuple_type(T, Tag, FieldTs), !,
                          ( is_list(V) -> ( V = [VTag|Fields], VTag == Tag, same_length(Fields, FieldTs)
                                            -> tuple_fields_status(Fields, FieldTs, St)
@@ -146,10 +124,9 @@ check_named_value(V, T, St) :-
                          ; member(C, Cs), refinement_pair(C, T) -> St = unknown
                          ; St = mismatch ).
 
-%A constructor application every declaration of which is definitely
-%contradicted by some field can never have any type. In particular a field
-%branded with a different newtype is unfixable at runtime - brands are
-%erased - so it must reject at compile time, not degrade to a guard:
+%A constructor application whose every declaration is definitely contradicted
+%by some field has no type. A field with a different brand cannot be caught at
+%runtime (brands are erased), so it rejects at compile time:
 constructed_definite_mismatch(V) :- is_list(V), V = [H|Args], atom(H),
                                     length(Args, N), fn_decl_arity(H, N, _, _),
                                     forall(fn_decl_arity(H, N, ATs, _),
@@ -169,21 +146,12 @@ tuple_fields_status([F|Fs], [T|Ts], St) :- elem_status(F, T, S1),
                                              ; S1 == unknown -> St = unknown
                                              ; St = S2 ) ).
 
-%Arrow types of closures over inferred (undeclared) functions:
-%Inference makes no determinism claim by itself, but the clause-set analysis
-%(the same transitive-evidence rule calls use) may PROVE one. That proof is
-%worth exactly as much in every mode - --strict-det exists to force a
-%determinism claim out of you, not to be a precondition for checking one you
-%already wrote - so it runs unconditionally and, when it commits to det or
-%semidet, the inferred arrow carries that real head. A committed head fits
-%every slot a plain -> fits (see det_level_fits/2), so this only ever admits
-%more. With no committed proof the old behaviour stands: conservatively
-%nondet under --strict-det, an uncommitted plain -> otherwise.
-committed_determinism(det).
-committed_determinism(semidet).
-
+%Arrow types of closures over inferred (undeclared) functions. The clause-set
+%analysis may prove a determinism commitment in any mode, and a committed head
+%fits every slot a plain -> fits, so this only admits more. Without a committed
+%proof the arrow is nondet under --strict-det and a plain -> otherwise.
 inferred_arrow_head(F, N, H) :-
-    ( catch(( function_call_determinism(F, N, D), committed_determinism(D) ), _, fail)
+    ( catch(( function_call_determinism(F, N, D), committed_det(D) ), _, fail)
       -> det_arrow_head(D, H)
     ; strict_det(true) -> det_arrow_head(nondet, H)
     ; H = (->) ).
@@ -204,7 +172,7 @@ inferred_value_candidates(partial(F, B), Cs) :- !,
 inferred_value_candidates(_, []).
 
 %Slow completion of the primitive fast paths above:
-prim_mismatch_status(P, T, St) :- ( wildcard_type_t(T) -> St = ok
+prim_mismatch_status(P, T, St) :- ( wildcard_type(T) -> St = ok
                                   ; is_union(T) -> ( T = ['|'|Ms], member(M, Ms), type_compat_soft(P, M)
                                                      -> St = ok ; St = mismatch )
                                   ; atom(T), declared_newtype(T, R) -> prim_mismatch_status(P, R, St)
@@ -243,27 +211,15 @@ candidate_not_branded(C) :-
          \+ declared_newtype(C, _)
     ; true ).
 
-%%% Tagged vs positional structural tuple types.
-%
-% A type of shape (H T1 ... Tn) is read in one of two ways, and the reading is
-% driven by H's DECLARATION rather than by "H looks like a name":
-%
-%   TAGGED - the value must be the expression (H V1 ... Vn), carrying the
-%   literal atom H, with Vi : Ti. Chosen when H is a declared constructor of
-%   exactly n arguments - fn_decl_arity(H, n, _, _), the same discipline
-%   structural_pattern_fields/4 uses - or when H carries NO type declaration
-%   at all (an anonymous structural tag: (Stats Number Number Number)).
-%
-%   POSITIONAL - the value is any n+1 element expression whose i-th element
-%   has the i-th listed type, H included. Chosen when the head is not an atom
-%   (($v Number)), is a primitive or wildcard type ((Number Number)), or is an
-%   atom DECLARED as something other than an n-ary constructor - typically a
-%   type name, (: Statement Type). Naming a declared type in head position can
-%   only mean "field 1 has this type", so (Statement KBContext Proof TV) is a
-%   4-field record, not a tuple tagged with the atom Statement.
-%
-% Consequence for users: declare the field types of a positional tuple. An
-% undeclared head atom keeps the legacy tagged reading.
+%%% A type (H T1 ... Tn) is read according to H's declaration:
+%   TAGGED - the value is (H V1 ... Vn) with Vi : Ti. Chosen when H is a
+%   declared constructor of exactly n arguments, or has no declaration at all
+%   (an anonymous structural tag: (Stats Number Number Number)).
+%   POSITIONAL - the value is any n+1 element expression whose i-th element has
+%   the i-th type, H included. Chosen when the head is not an atom, is a
+%   primitive or wildcard type ((Number Number)), or is declared as something
+%   other than an n-ary constructor, typically a type name: (Statement KBContext
+%   Proof TV) is a 4-field record.
 tagged_tuple_type(T, Tag, FieldTs) :- nonvar(T), T = [Tag|FieldTs],
                                       atom(Tag), user_atom_type(Tag),
                                       \+ special_compound_type(T),
@@ -303,46 +259,26 @@ arg_soft_ok(AV, T) :- ( var(AV) -> ( known_singleton(AV, K) -> copy_term(K, K2),
 decl_survives(AVs, ft(ATs, _)) :- \+ \+ maplist(arg_soft_ok, AVs, ATs).
 
 arg_statically_ok(AV, T) :- \+ \+ ( var(AV) -> ( known_singleton(AV, K) -> type_unify(K, T)
-                                               ; ( var(T) -> true ; wildcard_type_t(T) ) )
+                                               ; ( var(T) -> true ; wildcard_type(T) ) )
                                              ; check_value(AV, T, ok) ).
 
-%%% Effectful call-site argument checking, one arg.
-%
-% The Mode is the PROVENANCE of the required type, and it decides what failing
-% to establish that type at the call site may cost:
-%
-%   declared - the type is a promise the author wrote down, so it is a
-%   requirement: a static mismatch is a compile error and anything unresolved
-%   becomes a runtime guard.
-%
-%   inferred - the type was reconstructed from how the callee's body happens
-%   to USE the parameter, which is not the same thing as what the callee
-%   REQUIRES of it. In
-%
+%%% Effectful call-site argument checking, one arg. Mode is the provenance of
+%%% the required type:
+%   declared - a promise the author wrote: a static mismatch is a compile
+%   error and anything unresolved becomes a runtime guard.
+%   inferred - reconstructed from how the callee's body uses the parameter,
+%   which is not what it requires: in
 %       (= (score $current $cand) (if (== $current none) $cand (max $cand $current)))
-%
-%   $current is inferred Number from the else branch, but the function
-%   explicitly handles none and (score none 0.42) is a correct program. A
-%   requirement is therefore only imposed where the compiler can see the value
-%   is definitely of an incompatible type; where it merely cannot tell - an
-%   undeclared atom like none, an untyped variable - inference stays silent
-%   rather than demanding a type the callee never asked for. This is the
-%   README's contract: inferred types add knowledge, they do not reject
-%   programs that would otherwise run.
-%
-%   The definite-conflict guard is kept deliberately. It is what still catches
-%   (f "a") against an inferred (= (f $x) (+ $x 1)): inference ELIDED the
-%   guard inside f's body, so with no check at all that call quietly computes
-%   98 (SWI reads a one-character string as its character code) instead of
-%   raising a type error. Dropping a false rejection must not buy a silent
-%   wrong answer.
+%   $current is inferred Number, yet (score none 0.42) is correct. Only a
+%   definite conflict is rejected, which still catches (f "a") against an
+%   inferred (= (f $x) (+ $x 1)) whose body guard inference elided.
 check_call_arg(Mode, Fun, AV, T, Gs) :- ( var(AV)
                                           -> ( known_singleton(AV, K)
-                                               -> ( nonvar(T), wildcard_type_t(T) -> Gs = []  %wildcards carry no knowledge
+                                               -> ( nonvar(T), wildcard_type(T) -> Gs = []  %wildcards carry no knowledge
                                                   ; type_unify(K, T) -> oracle_arg_check(AV, T, Gs)
-                                                  %conflicting brands cannot be deferred to a runtime
-                                                  %guard - newtypes are erased there - so they reject
-                                                  %now, but only on a promised type:
+                                                  %brands are erased at runtime, so a
+                                                  %conflicting brand on a promised type
+                                                  %rejects now:
                                                   ; atom(T), declared_newtype(T, _), atom(K), declared_newtype(K, _)
                                                     -> ( Mode == declared
                                                          -> throw(error(type_conflict(existing(K), required(T)), typecheck))
@@ -350,7 +286,7 @@ check_call_arg(Mode, Fun, AV, T, Gs) :- ( var(AV)
                                                   ; taint_assumption(AV),  %known conflict: runtime error carries the value
                                                     type_guard(Fun, AV, T, Gs) )
                                              ; var(T) -> Gs = []
-                                             ; wildcard_type_t(T) -> Gs = []
+                                             ; wildcard_type(T) -> Gs = []
                                              %an untyped value is not evidence of a wrong one:
                                              ; Mode == inferred -> Gs = []
                                              ; type_guard(Fun, AV, T, Gs) )
@@ -365,7 +301,7 @@ check_call_arg(Mode, Fun, AV, T, Gs) :- ( var(AV)
 
 %Open structured types (e.g. (List $a)) still guard their outer shape; only a
 %fully unconstrained type variable needs no check at all:
-type_guard(Fun, AV, T, Gs) :- ( nonvar(T), \+ wildcard_type_t(T)
+type_guard(Fun, AV, T, Gs) :- ( nonvar(T), \+ wildcard_type(T)
                                 -> ( undecidable_arrow_commitment(T)
                                      -> throw(error(determinism_conflict(Fun, unproven_closure(AV, T)), determinism))
                                    ; strict_mode(true),
@@ -381,13 +317,9 @@ type_guard(Fun, AV, T, Gs) :- ( nonvar(T), \+ wildcard_type_t(T)
                                         guard_goal(AV, T, G), Gs = [G] )
                                  ; Gs = [] ).
 
-%A runtime type check cannot count a closure's solutions: nothing it can
-%inspect distinguishes a det function from a nondet one. So a determinism
-%COMMITMENT in a required arrow type is undischargeable at runtime and must
-%not be deferred to a guard - the same reason a conflicting newtype brand
-%rejects rather than guards (brands are erased at runtime, determinism was
-%never there in the first place). Reaching type_guard/4 with such a type means
-%the commitment could not be established statically, so it is rejected here.
+%A runtime check cannot count a closure's solutions, so a determinism
+%commitment in a required arrow type cannot be deferred to a guard; reaching
+%type_guard/4 with one means it could not be established statically.
 undecidable_arrow_commitment(T) :- is_arrow_type(T), T = [H|_], arrow_atom_det(H, L),
                                    committed_det(L).
 
@@ -405,11 +337,9 @@ apply_call_args(Mode, Fun, AVs, ATs, Gs) :-
         ( maplist(check_call_arg(Mode, Fun), AVs, ATs, Gss),
           append(Gss, Gs) )).
 
-%Open nominal atom types may overlap: one value can carry several declarations.
-%When the same runtime variable fills such positions, strict compilation must
-%not turn the unresolved intersection into a dead call.  Preserve the ordinary
-%runtime boundary check for that one intrinsically dynamic case; primitive,
-%newtype, parametric and unrelated obligations retain the normal strict rule.
+%Open nominal atom types may overlap, so one runtime variable may fill several
+%such positions. Strict compilation keeps the runtime boundary check for that
+%one intrinsically dynamic case instead of rejecting the call.
 open_nominal_intersection_obligations(AVs, ATs, Obligations) :-
     open_nominal_intersection_obligations_(AVs, ATs, AVs, ATs, 0, Os0),
     variant_union(Os0, [], Obligations).
@@ -425,7 +355,7 @@ open_nominal_intersection_obligations_([V|Vs], [T|Ts], AVs, ATs, I, Os) :-
     open_nominal_intersection_obligations_(Vs, Ts, AVs, ATs, I2, Rest).
 
 open_nominal_atom_type(T) :-
-    atom(T), \+ primitive_type(T), \+ wildcard_type_t(T),
+    atom(T), \+ primitive_type(T), \+ wildcard_type(T),
     \+ declared_newtype(T, _),
     \+ declared_type_alias(T, _),
     \+ declared_foreign_type(T, _),
@@ -450,9 +380,8 @@ open_nominal_intersection_types(V, Types) :-
     findall(T, (member(obligation(V0, T), Obligations), V0 == V), Ts0),
     sort(Ts0, Types).
 
-%The ordinary interface remains goal-only. The status-bearing form is used by
-%trusted library calls: suppressing a guard is allowed there, but it is not
-%static evidence from which the declared result may be certified.
+%Trusted library calls may suppress a guard, but that is not static evidence
+%from which the declared result may be certified:
 apply_call_args_status(Mode, Fun, AVs, ATs, Gs, Status) :-
     apply_call_args(Mode, Fun, AVs, ATs, Gs),
     ( trusted_guard_waiver(Fun),
@@ -461,8 +390,7 @@ apply_call_args_status(Mode, Fun, AVs, ATs, Gs, Status) :-
     ; Status = verified ).
 
 %Library declarations are verified promises only across an untyped caller
-%boundary.  A declaration on the enclosing function is an explicit opt-in to
-%ordinary boundary enforcement, irrespective of the callee's origin.
+%boundary; a declared enclosing function opts into ordinary enforcement.
 trusted_guard_waiver(Fun) :-
     trusted_library_decl(Fun),
     current_compiling_caller(Caller, Arity),
@@ -472,7 +400,7 @@ trusted_guard_waiver(Fun) :-
 trusted_unverified_call(Fun, Args) :-
     trusted_guard_waiver(Fun),
     length(Args, N),
-    findall(ATs, fn_decl_arity(Fun, N, ATs, _), [ATs]),
+    unique_fn_decl(Fun, N, ATs, _),
     paired_unverified_obligation(Args, ATs).
 
 paired_unverified_obligation([AV|AVs], [T|Ts]) :-
@@ -495,7 +423,7 @@ runtime_type_ok(V, 'Number') :- number(V), !.
 runtime_type_ok(V, 'String') :- string(V), !.
 runtime_type_ok(V, 'Bool') :- ( V == true ; V == false ), !.
 runtime_type_ok(_, T) :- var(T), !.
-runtime_type_ok(_, T) :- wildcard_type_t(T), !.
+runtime_type_ok(_, T) :- wildcard_type(T), !.
 runtime_type_ok(V, T) :- list_type(T, ET), !,
                          runtime_list_ok(V, ET).
 runtime_type_ok(V, T) :- is_arrow_type(T), !,
@@ -523,9 +451,8 @@ runtime_type_ok(V, T) :- setup_call_cleanup(nb_setval('$in_typecheck', true),
                                             ( 'get-type'(V, T) *-> true ; 'get-metatype'(V, T) ),
                                             nb_setval('$in_typecheck', false)).
 
-%Arrow guards require positive callable evidence. An arbitrary atom is valid
-%MeTTa data and reduce/2 would return its application-shaped term unchanged;
-%that fallback must not satisfy a function type.
+%Arrow guards require positive callable evidence: reduce/2 returns an
+%arbitrary atom's application unchanged, which must not satisfy a function type.
 runtime_callable_at_arrow_arity(V, T) :-
     T = [_|Tail],
     length(Tail, TailLen),
@@ -549,7 +476,7 @@ runtime_list_ok([E|Es], ET) :- ( var(E) -> constrain_var_type(E, ET) ; runtime_t
 %checked), or a value atom declared T:
 nominal_value_ok(V, T) :- is_list(V), V = [Ctor|Fields], atom(Ctor), !,
                           length(Fields, N),
-                          findall(ATs-OT, fn_decl_arity(Ctor, N, ATs, OT), [FieldTs-OT1]),
+                          unique_fn_decl(Ctor, N, FieldTs, OT1),
                           OT1 == T,
                           runtime_tuple_ok(Fields, FieldTs).
 nominal_value_ok(V, T) :- atom(V), declared_value_type(V, VT), VT == T.

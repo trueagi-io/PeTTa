@@ -5,18 +5,16 @@
             with_unified_recompile_analysis/2,
             with_unified_edge_facts/3,
             with_unified_preanalyzed_form/1,
-            current_unified_clause_analysis/5,
             current_unified_source_variable/1,
             unified_builtin_call_card/2,
             unified_function_result_fact/3,
-            unified_function_summary/6,
             unified_checker_invalidate_event/1
           ]).
 
-/** <module> Sole adapter between the unified analyzer and legacy compilation
+/** <module> Sole adapter between the unified analyzer and the translator
 
 This module may query PeTTa's canonical declaration/function stores and may
-project already-computed edge facts into the old code generator.  It must not
+project already-computed edge facts into the code generator.  It must not
 contain a second recursive source checker.  All control-flow, cardinality and
 result-shape decisions come from `ir_analyzer` records.
 */
@@ -45,35 +43,28 @@ with_unified_file_analysis(ParsedForms, Goal) :-
     ; solve_file_analysis(
           Pending, Summaries, ClauseRecords, CacheEntries),
       current_bridge_generation(Generation),
-      setup_call_cleanup(
-          begin_nested_mutation_log(SavedMutations),
-          ( setup_call_cleanup(
-                push_bridge_scope(
-                    scope(Generation, Summaries, ClauseRecords), Saved),
-                call(Goal),
-                pop_bridge_scope(Saved)),
-            nested_mutation_events(Events) ),
-          restore_nested_mutation_log(SavedMutations)),
+      with_b_value('$unified_nested_mutations', [], [],
+          ( with_bridge_scope(scope(Generation, Summaries, ClauseRecords),
+                call(Goal)),
+            b_getval('$unified_nested_mutations', Events0),
+            sort(Events0, Events) )),
       publish_or_refresh_cache_entries(
           Generation, Pending, CacheEntries, Events) ).
 
-% A nested file is solved while its caller's batch summaries are still in
-% scope.  Its prevalidated clause events intentionally do not invalidate that
-% same nested scope, but they can change how the enclosing file's calls are
-% classified.  Invalidate the outer generation once at the nested batch
-% boundary so its completion recomputes, rather than publishing, the analysis
-% made before the import ran.
+% A nested file is solved while its caller's batch summaries are in scope, and
+% its clauses can change how the enclosing file's calls are classified.
+% Invalidate the outer generation once at the nested boundary, so the outer
+% completion recomputes rather than publishes its pre-import analysis.
 invalidate_enclosing_file_scope([]) :- !.
 invalidate_enclosing_file_scope(_) :-
     raw_bridge_scope(_), !,
     bump_bridge_generation.
 invalidate_enclosing_file_scope(_).
 
-% Dependency invalidation may rebuild several functions, each with several
-% clauses.  Analyze that changed set together, expanding its direct-call
-% closure only where no valid closed summary remains.  Unchanged callees are
-% resolved from the persistent cache.  Clause records stay invocation-local;
-% closed summaries are published only after the rebuild goal succeeds.
+% Dependency invalidation may rebuild several functions: analyze the changed
+% set together, expanding its direct-call closure only where no valid closed
+% summary remains. Closed summaries are published only after the rebuild
+% succeeds.
 with_unified_recompile_analysis([], Goal) :- !,
     call(Goal).
 with_unified_recompile_analysis(Functions, Goal) :-
@@ -85,10 +76,8 @@ with_unified_recompile_analysis(Functions, Goal) :-
       clause_records_from_results(Sources, ClauseResults, Records),
       summary_cache_entries(Summaries, Relevant, CacheEntries),
       current_bridge_generation(Generation),
-      setup_call_cleanup(
-          push_bridge_scope(scope(Generation, Summaries, Records), Saved),
-          call(Goal),
-          pop_bridge_scope(Saved)),
+      with_bridge_scope(scope(Generation, Summaries, Records),
+          call(Goal)),
       publish_cache_entries_if_current(Generation, CacheEntries) ).
 
 recompile_clause_sources(Functions, Universe, Sources) :-
@@ -100,57 +89,36 @@ source_owned_by(Functions, clause_source(F, _, _)) :-
 
 with_unified_clause_analysis(Source, Goal) :-
     ( bridge_scope(scope(_, _, Records)),
-      record_for_source(Records, Source, Record)
+      scope_record(Records, Source, Record)
       -> with_current_clause(Record, Goal)
-    ; bridge_scope(scope(_, _, Records)),
-      aligned_record_for_source(Records, Source, Record)
-      -> with_current_clause(Record, Goal)
-    ; raw_bridge_scope(scope(_, _, StaleRecords)),
-      record_for_source(StaleRecords, Source, StaleRecord),
-      current_stored_summaries(Source, Summaries, ClauseResults),
-      solver_record_or_refresh(
-          Source, ClauseResults, StaleRecord, Summaries, FreshRecord)
+    ; % A nested import or runtime mutation invalidated the batch summaries
+      % but not this occurrence's IR, or the batch scope has ended
+      % (recompilation): reanalyze against fresh summaries of the current
+      % stored call closure.
+      ( raw_bridge_scope(scope(_, _, StaleRecords)),
+        scope_record(StaleRecords, Source, StaleRecord),
+        current_stored_summaries(Source, Summaries, ClauseResults),
+        ( clause_record_from_results(Source, ClauseResults, SolverRecord)
+          -> FreshRecord = SolverRecord
+        ; refresh_clause_record(StaleRecord, Summaries, FreshRecord) )
+      ; stored_clause_source(Source),
+        current_stored_summaries(Source, Summaries, ClauseResults),
+        ( clause_record_from_results(Source, ClauseResults, SolverRecord)
+          -> FreshRecord = SolverRecord
+        ; fresh_clause_record(Source, Summaries, FreshRecord) ) )
       -> current_bridge_generation(Generation),
-         % A nested import or runnable mutation invalidates batch summaries,
-         % but the occurrence's already-lowered IR is still valid. Recompute
-         % the current stored call closure and reanalyze this clause against
-         % those fresh, scoped summaries while its code is generated.
-         setup_call_cleanup(
-             push_bridge_scope(
-                 scope(Generation, Summaries, [FreshRecord]), ScopeSaved),
-             with_current_clause(FreshRecord, Goal),
-             pop_bridge_scope(ScopeSaved))
-    ; raw_bridge_scope(scope(_, _, StaleRecords)),
-      aligned_record_for_source(StaleRecords, Source, StaleRecord),
-      current_stored_summaries(Source, Summaries, ClauseResults),
-      solver_record_or_refresh(
-          Source, ClauseResults, StaleRecord, Summaries, FreshRecord)
-      -> current_bridge_generation(Generation),
-         setup_call_cleanup(
-             push_bridge_scope(
-                 scope(Generation, Summaries, [FreshRecord]), ScopeSaved),
-             with_current_clause(FreshRecord, Goal),
-             pop_bridge_scope(ScopeSaved))
-    ; stored_clause_source(Source),
-      current_stored_summaries(Source, Summaries, ClauseResults),
-      solver_record_or_fresh(
-          Source, ClauseResults, Summaries, FreshRecord)
-      -> current_bridge_generation(Generation),
-         % Dependency recompilation may happen after the source file's batch
-         % scope has ended. Rebuild the current stored call closure instead of
-         % trusting invalidated persistent or batch summaries.
-         setup_call_cleanup(
-             push_bridge_scope(
-                 scope(Generation, Summaries, [FreshRecord]), ScopeSaved),
-             with_current_clause(FreshRecord, Goal),
-             pop_bridge_scope(ScopeSaved))
+         with_bridge_scope(scope(Generation, Summaries, [FreshRecord]),
+                           with_current_clause(FreshRecord, Goal))
     ; call(Goal) ).
 
-% Compiler-generated clauses (currently lambdas) are not members of the
-% parsed file batch, but their bodies need the same edge isolation as ordinary
-% clauses.  Give one such clause an ephemeral record using the active batch's
-% already-solved call summaries.  The record is nested under, and restores,
-% the enclosing clause record; it is never added to a persistent cache.
+%An exact occurrence first, else a variant aligned to this source term:
+scope_record(Records, Source, Record) :-
+    ( record_for_source(Records, Source, Record)
+    ; aligned_record_for_source(Records, Source, Record) ).
+
+% Compiler-generated clauses (lambdas) are outside the parsed batch but need
+% the same edge isolation: give one an ephemeral record over the active
+% batch's summaries, nested under and restoring the enclosing record.
 with_unified_ad_hoc_clause_analysis(Source, Goal) :-
     ( current_analysis_summaries(Summaries),
       try_lower_source_clause(Source, lowered(IR, Env, Origins)),
@@ -181,17 +149,6 @@ refresh_clause_record(clause_record(Source, IR, Env, Origins, _), Summaries,
                       clause_record(Source, IR, Env, Origins, Analysis)) :-
     analyze_lowered_clause(IR, Summaries, Analysis).
 
-solver_record_or_refresh(Source, ClauseResults, StaleRecord, Summaries,
-                         FreshRecord) :-
-    ( clause_record_from_results(Source, ClauseResults, SolverRecord)
-      -> FreshRecord = SolverRecord
-    ; refresh_clause_record(StaleRecord, Summaries, FreshRecord) ).
-
-solver_record_or_fresh(Source, ClauseResults, Summaries, FreshRecord) :-
-    ( clause_record_from_results(Source, ClauseResults, SolverRecord)
-      -> FreshRecord = SolverRecord
-    ; fresh_clause_record(Source, Summaries, FreshRecord) ).
-
 stored_clause_source(Source) :-
     catch(user:translated_from(Ref, Stored), _, fail),
     clause_property(Ref, predicate(_)),
@@ -201,12 +158,6 @@ fresh_clause_record(Source, Summaries,
                     clause_record(Source, IR, Env, Origins, Analysis)) :-
     try_lower_source_clause(Source, lowered(IR, Env, Origins)),
     analyze_lowered_clause(IR, Summaries, Analysis).
-
-with_current_clause(Record, Goal) :-
-    setup_call_cleanup(
-        push_current_clause(Record, Saved),
-        call(Goal),
-        pop_current_clause(Saved)).
 
 with_unified_edge_facts(SourceCondition, Truth, Goal) :-
     ( current_unified_clause_analysis(_, _, Env, Origins, Analysis),
@@ -218,13 +169,7 @@ with_unified_edge_facts(SourceCondition, Truth, Goal) :-
     ; call(Goal) ).
 
 with_unified_preanalyzed_form(Goal) :-
-    ( catch(b_getval('$unified_source_form', Saved0), _, fail)
-      -> Saved = Saved0
-    ; Saved = false ),
-    setup_call_cleanup(
-        b_setval('$unified_source_form', true),
-        call(Goal),
-        b_setval('$unified_source_form', Saved)).
+    with_b_value('$unified_source_form', false, true, Goal).
 
 current_unified_clause_analysis(Source, IR, Env, Origins, Analysis) :-
     catch(b_getval('$unified_current_clause', Record), _, fail),
@@ -233,26 +178,21 @@ current_unified_clause_analysis(Source, IR, Env, Origins, Analysis) :-
 current_unified_source_variable(Var) :-
     var(Var),
     current_unified_clause_analysis(_, _, Env, _, _),
-    member(binding(_, Stored), Env),
-    Stored == Var, !.
+    env_var_id(Env, Var, _).
 
-% Project the cardinality proved for this source builtin call.  Nonground
-% source identity is exact, but Prolog's `==` cannot distinguish separately
-% built compounds which share the same variables.  Therefore every matching
-% origin must carry the same card before the legacy walker may consume it.
-% This is deliberately restricted to registered builtins: user-function
-% summaries may contain their declared contract while that same contract is
-% still being validated, whereas builtin modes are independent semantic facts.
+% Project the cardinality proved for this source builtin call. Prolog's ==
+% cannot tell apart separately built compounds sharing variables, so every
+% matching origin must carry the same card. Restricted to registered builtins:
+% a user-function summary may contain the declared contract still being
+% validated.
 unified_builtin_call_card(SourceCall, Card) :-
     nonvar(SourceCall),
     SourceCall = [F|Args], atom(F), is_list(Args),
     length(Args, Arity),
     once(builtin_spec(F/Arity, _, _, _, _, _)),
     current_unified_clause_analysis(_, IR, _, Origins, Analysis),
-    % A node-local upgrade must not hide fallibility elsewhere in its
-    % enclosing control construct (notably a repeated-variable let pattern).
-    % The legacy walker still checks every argument/call; this retained body
-    % card is the independent proof that the upgraded path is globally total.
+    % A node-local upgrade must not hide fallibility elsewhere in the clause
+    % (a repeated-variable let pattern): the whole body must be total.
     analysis_card(Analysis, card(1,1)),
     findall(Id,
             ( origin_result_id(Origins, SourceCall, Id),
@@ -278,8 +218,6 @@ unified_function_result_fact(F, N, Fact) :-
     member(Stored, Facts),
     Stored =@= Fact, !.
 
-% Compatibility view retained for legacy certificate consumers.  The cache
-% owns its rows and never exposes clause records or attributed variables.
 unified_function_summary(F, N, Card, Facts, Effects, Diagnostics) :-
     unified_summary_cache_lookup(
         F, N,
@@ -293,10 +231,9 @@ maybe_invalidate_active_scope(clause_changed(_, prevalidated)) :- !.
 maybe_invalidate_active_scope(clause_changed(_, derived)) :- !.
 maybe_invalidate_active_scope(declaration_changed(F/_, added)) :-
     catch(user:ho_specialization(_, F), _, fail), !.
-% Higher-order specializations are compiler artifacts.  Unified summaries are
-% derived from the original MeTTa clauses and never rely on those generated
-% symbols, so deleting an obsolete specialization must clear dormant cache
-% rows without invalidating an in-flight source-analysis scope.
+% Higher-order specializations are compiler artifacts that summaries never
+% rely on, so removing one clears dormant cache rows without invalidating an
+% in-flight scope.
 maybe_invalidate_active_scope(generated_specialization_removed(_)) :- !.
 % Ordinary source forms belong to the batch being compiled. Runtime mutation
 % from a runnable does not enter this scope and invalidates the generation.
@@ -311,7 +248,6 @@ record_nested_scope_mutation(Event) :-
     catch(b_getval('$unified_nested_mutations', Events0), _, Events0 = []),
     b_setval('$unified_nested_mutations', [Event|Events0]).
 record_nested_scope_mutation(_).
-
 
 
 % -- Batch solve ---------------------------------------------------------
@@ -329,16 +265,13 @@ pending_clause_sources_([parsed(function, _, _, Term)|Forms], Pending) :- !,
 pending_clause_sources_([_|Forms], Pending) :-
     pending_clause_sources_(Forms, Pending).
 
-solve_file_analysis(Pending, Summaries, ClauseRecords) :-
-    solve_file_analysis(Pending, Summaries, ClauseRecords, _).
-
 solve_file_analysis(Pending, Summaries, ClauseRecords, CacheEntries) :-
-    touched_keys(Pending, Keys),
+    source_keys(Pending, Keys),
     maplist(invalidate_pending_summary, Keys),
     clause_universe(Keys, Pending, ClauseSources),
     prepare_clause_universe(ClauseSources, Clauses),
     initial_touched_summaries(Keys, Initial),
-    solve_fixed_point(Clauses, Keys, Initial, 0, Solved, ClauseResults),
+    solve_fixed_point(Clauses, Keys, Initial, Solved, ClauseResults),
     include(summary_for_keys(Keys), Solved, Summaries),
     clause_records_from_results(Pending, ClauseResults, ClauseRecords),
     summary_cache_entries(Summaries, Clauses, CacheEntries).
@@ -346,27 +279,16 @@ solve_file_analysis(Pending, Summaries, ClauseRecords, CacheEntries) :-
 invalidate_pending_summary(Key) :-
     unified_checker_invalidate_event(clause_changed(Key, prevalidated)).
 
-touched_keys(Pending, Keys) :-
-    findall(F/N, member(clause_source(F, N, _), Pending), Keys0),
-    sort(Keys0, Keys).
-
 clause_universe(Keys, Pending, Clauses) :-
     current_stored_clause_sources(Stored),
     include(source_record_for_keys(Keys), Stored, Existing),
     append(Existing, Pending, Clauses).
 
-% Recompilation runs outside the file solver which originally supplied call
-% summaries.  Reusing that solver's records after a mutation is unsound, while
-% analyzing the consumer alone loses result-shape facts from unchanged callees.
-% Build a fresh, invocation-local fixed point over the target's direct-call
-% transitive closure in the clauses which are executable now.  Mutual recursion
-% is naturally retained because closure is computed before solve_fixed_point/5.
-% The target is added when it is a not-yet-stored pending clause following a
-% mutation in the same source batch.  Nothing from this computation is asserted
-% into unified_function_summary/6.
-current_stored_summaries(Source, Summaries) :-
-    current_stored_summaries(Source, Summaries, _).
-
+% Recompilation runs outside the file solver: reusing its records after a
+% mutation is unsound, and analyzing the consumer alone loses facts from
+% unchanged callees. Build a fresh, invocation-local fixed point over the
+% target's current direct-call closure (plus the target itself when it is a
+% not-yet-stored pending clause).
 current_stored_summaries(Source, Summaries, ClauseResults) :-
     source_clause_key(Source, F/N),
     solve_current_source_closure(
@@ -375,18 +297,14 @@ current_stored_summaries(Source, Summaries, ClauseResults) :-
 solve_current_source_closure(RootSources, Summaries, ClauseResults) :-
     current_stored_clause_sources(Stored),
     ensure_sources_in_universe(RootSources, Stored, Sources),
-    solve_source_closure(RootSources, Sources, Summaries, ClauseResults).
-
-solve_source_closure(RootSources, Sources, Summaries, ClauseResults) :-
-    solve_source_closure(
-        RootSources, Sources, Summaries, ClauseResults, _).
+    solve_source_closure(RootSources, Sources, Summaries, ClauseResults, _).
 
 solve_source_closure(RootSources, Sources, Summaries, ClauseResults,
                      Relevant) :-
     prepare_cached_source_closure(
         RootSources, Sources, Relevant, Keys),
     initial_touched_summaries(Keys, Initial),
-    solve_fixed_point(Relevant, Keys, Initial, 0, Summaries, ClauseResults).
+    solve_fixed_point(Relevant, Keys, Initial, Summaries, ClauseResults).
 
 prepare_cached_source_closure(RootSources, Universe, Prepared, Keys) :-
     source_keys(RootSources, RootKeys),
@@ -461,27 +379,6 @@ ensure_sources_in_universe([clause_source(F, N, Source)|Roots], Stored,
 
 clause_source_for_key(F/N, Source, clause_source(F, N, Source)).
 
-reachable_prepared_keys(Roots, Prepared, Keys) :-
-    findall(F/N, member(prepared_clause(F, N, _, _), Prepared), Available0),
-    sort(Available0, Available),
-    include(key_in(Available), Roots, Seeds0),
-    sort(Seeds0, Seeds),
-    reachable_prepared_keys_(Seeds, Prepared, Available, Keys).
-
-reachable_prepared_keys_(Current, Prepared, Available, Keys) :-
-    findall(Callee,
-            ( member(Owner, Current),
-              member(Clause, Prepared),
-              prepared_clause_key(Clause, Owner),
-              prepared_clause_call_key(Clause, Callee),
-              memberchk(Callee, Available) ),
-            Called),
-    append(Current, Called, Expanded0),
-    sort(Expanded0, Expanded),
-    ( Expanded == Current
-      -> Keys = Current
-    ; reachable_prepared_keys_(Expanded, Prepared, Available, Keys) ).
-
 prepared_clause_key(prepared_clause(F, N, _, _), F/N).
 
 prepared_clause_call_key(
@@ -492,8 +389,6 @@ prepared_clause_call_key(
 prepared_for_keys(Keys, Clause) :-
     prepared_clause_key(Clause, Key),
     memberchk(Key, Keys).
-
-key_in(Keys, Key) :- memberchk(Key, Keys).
 
 prepare_clause_universe([], []).
 prepare_clause_universe([clause_source(F, N, Source)|Sources],
@@ -511,21 +406,13 @@ initial_touched_summaries([F/N|Keys],
                                             [initial])|Rest]) :-
     initial_touched_summaries(Keys, Rest).
 
-% Solve result summaries in dependency order and retain the clause analyses
-% which established the final summaries.  Direct-call SCCs are the only places
-% that need iteration: acyclic components are analyzed once, callee first.  A
-% recursive component uses a key worklist, so a changed summary reanalyzes only
-% its callers rather than every clause in the SCC.
-solve_fixed_point(Clauses, Keys, Current, _, Solved) :-
-    solve_fixed_point(Clauses, Keys, Current, 0, Solved, _).
-
-solve_fixed_point(Clauses, Keys, Current, _, Solved, ClauseResults) :-
+% Solve result summaries in dependency order, retaining the clause analyses
+% behind the final summaries. Acyclic components are analyzed once, callee
+% first; a recursive component uses a key worklist, so a changed summary
+% reanalyzes only its callers.
+solve_fixed_point(Clauses, Keys, Current, Solved, ClauseResults) :-
     solve_fixed_point_counted(
         Clauses, Keys, Current, Solved, ClauseResults, _).
-
-solve_fixed_point_counted(Clauses, Keys, Current, Solved, AnalysisCount) :-
-    solve_fixed_point_counted(
-        Clauses, Keys, Current, Solved, _, AnalysisCount).
 
 solve_fixed_point_counted(Clauses, Keys, Current, Solved, ClauseResults,
                           AnalysisCount) :-
@@ -658,26 +545,13 @@ component_callers(Callee, Keys, Graph, Callers) :-
             Callers0),
     sort(Callers0, Callers).
 
-% Recursive cardinality/effect summaries are solved above from the ordinary
-% least fixed point.  Universal facts about every value a call can return need
-% the dual treatment: starting recursive calls with no facts makes a property
-% such as `proper_bool` disappear at the first recursive join and it can never
-% re-enter the lattice, even when every finite result is `true` or `false`.
-%
-% Prove these partial-correctness facts coinductively, one fact at a time.  A
-% result declaration only proposes a finite candidate; it never certifies it.
-% The candidate is assumed for calls to the still-candidate members of this
-% SCC, every clause is analyzed, and any member which does not rederive the
-% fact on its result is removed.  Candidate sets only shrink.  Unsupported
-% clauses and analyses with no proved result fact therefore reject the
-% hypothesis conservatively.
-%
-% Keeping each fact in an independent pass is important.  Simultaneously
-% assuming incompatible facts could make paths unreachable and manufacture a
-% vacuous proof.  The established facts are added only to the exported
-% summaries. Cards, effects and diagnostics remain exactly those produced by
-% the ordinary solver; retained codegen analyses are refreshed once under the
-% proved facts so translation consumes the same final contract.
+% Universal result facts such as proper_bool vanish at the first recursive
+% join of a least fixed point, so they are proved coinductively, one fact at
+% a time: a result declaration proposes the candidate, the fact is assumed for
+% calls to the remaining candidate members of the SCC, every clause is
+% analyzed, and members that do not rederive it are removed. One fact per pass
+% keeps incompatible assumptions from manufacturing vacuous proofs. Only the
+% exported facts change; codegen analyses are refreshed once under them.
 infer_recursive_result_facts(Clauses, Keys, Base, BaseResults,
                              Solved, ClauseResults, Count0, Count) :-
     findall(Fact, coinductive_result_fact(Fact), Facts),
@@ -701,9 +575,8 @@ prove_recursive_result_facts([Fact|Facts], Clauses, Keys, Base,
                                  Rest, Count1, Count),
     append(Here, Rest, Proven).
 
-% `Bool` suggests `proper_bool`, but an open Bool-typed result still has to
-% fail the preservation proof below.  Future coinductive facts extend this
-% proposal relation rather than changing the fixed-point algorithm.
+% A Bool result proposes proper_bool; an open Bool result still fails the
+% preservation proof.
 result_fact_candidate(proper_bool, F/N) :-
     unique_declared_result_type(F, N, 'Bool').
 
@@ -780,11 +653,8 @@ finalize_recursive_result_fact_analyses(_, Clauses, Solved, _, Results,
     length(Clauses, ClauseCount),
     Count is Count0 + ClauseCount.
 
-% Only these fields are observable by bridge_resolve_call/5.  Diagnostics are
-% retained in the full summary for reporting, but a seed-only diagnostic such
-% as `initial` cannot change a caller analysis and must not drive propagation.
-% Exported facts and effects are ground contracts; sorting gives their set
-% representation one stable comparison order.
+% Only these fields are observable by bridge_resolve_call/5; a seed-only
+% diagnostic such as `initial` must not drive propagation.
 summary_resolver_view_unchanged(Key, Left, Right) :-
     summary_for_key(Key, Left, LeftSummary),
     summary_for_key(Key, Right, RightSummary),
@@ -828,12 +698,6 @@ clause_result_for_source([clause_result(_, _, Stored, Outcome)|_], Source,
 clause_result_for_source([_|Results], Source, Outcome) :-
     clause_result_for_source(Results, Source, Outcome).
 
-prepared_for_source([prepared_clause(_, _, Stored, Lowered)|_], Source,
-                    Lowered) :-
-    Stored == Source, !.
-prepared_for_source([_|Clauses], Source, Lowered) :-
-    prepared_for_source(Clauses, Source, Lowered).
-
 try_lower_source_clause(Source, Outcome) :-
     catch(( lower_clause_with_origins(Source, IR, _, Env, Origins)
             -> Outcome = lowered(IR, Env, Origins)
@@ -848,7 +712,6 @@ unsupported_lowering_error(error(domain_error(Domain, _), Context),
 unsupported_lowering_error(Error, _) :- throw(Error).
 
 lowering_error_context(lower_expr/4).
-lowering_error_context(relational_ir:lower_expr/4).
 
 analyze_prepared_clause(unsupported(Reason), _, unsupported(Reason)) :- !.
 analyze_prepared_clause(lowered(IR, Env, Origins), Summaries, Outcome) :-
@@ -910,7 +773,7 @@ intersect_analysis_result_facts(Analysis, Facts0, Facts) :-
     analysis_result_facts(Analysis, Other),
     include(fact_in(Other), Facts0, Facts).
 
-fact_in(Facts, Fact) :- member(Stored, Facts), Stored =@= Fact, !.
+fact_in(Facts, Fact) :- variant_member(Fact, Facts).
 
 exportable_fact(type(Type)) :- ground(Type).
 exportable_fact(proper_bool).
@@ -952,9 +815,6 @@ replace_key_summaries(Keys, Current, Derived, Next) :-
 
 summary_for_keys(Keys, function_summary(F, N, _, _, _, _)) :-
     memberchk(F/N, Keys).
-
-summaries_equivalent(A, B) :- A =@= B.
-
 
 % -- Closed summary cache boundary --------------------------------------
 
@@ -1054,25 +914,10 @@ publish_or_refresh_cache_entries(Generation, Pending, Entries, Events) :-
       -> unified_summary_cache_store_many(Entries)
     ; refresh_pending_cache_entries(Pending, Events) ).
 
-begin_nested_mutation_log(saved_mutations(Had, Previous)) :-
-    ( catch(b_getval('$unified_nested_mutations', Stored), _, fail)
-      -> Had = yes, Previous = Stored
-    ; Had = no, Previous = [] ),
-    b_setval('$unified_nested_mutations', []).
-
-restore_nested_mutation_log(saved_mutations(yes, Previous)) :- !,
-    b_setval('$unified_nested_mutations', Previous).
-restore_nested_mutation_log(_) :-
-    b_setval('$unified_nested_mutations', []).
-
-nested_mutation_events(Events) :-
-    ( catch(b_getval('$unified_nested_mutations', Stored), _, fail)
-      -> sort(Stored, Events)
-    ; Events = [] ).
 
 refresh_pending_cache_entries(Pending, Events) :-
     maplist(unified_checker_invalidate_event, Events),
-    touched_keys(Pending, Keys),
+    source_keys(Pending, Keys),
     maplist(invalidate_pending_summary, Keys),
     current_stored_clause_sources(Stored),
     sources_for_keys(Keys, Stored, CurrentRoots),
@@ -1123,10 +968,8 @@ declared_result_facts(F, N, Facts) :-
     ( ground(Output) -> Facts = [type(Output)] ; Facts = [] ).
 declared_result_facts(_, _, []).
 
-% Production exposes the normalized fn_decl_arity/4 view.  The core module
-% matrix deliberately loads this bridge without the legacy declaration store,
-% so its fixtures install equivalent canonical fn_decl/6 records directly.
-% Keeping the fallback here also avoids making the solver depend on load order.
+% Production reads fn_decl_arity/4; the module matrix loads the bridge without
+% the declaration views, so its fixtures assert fn_decl/6 directly.
 declared_signature_candidate(F, N, ArgTypes, Output) :-
     current_predicate(user:fn_decl_arity/4),
     user:fn_decl_arity(F, N, ArgTypes, Output).
@@ -1184,12 +1027,11 @@ restore_environment_attrs(Env, OriginalAttrs, Updates) :-
     install_environment_attrs(Env, OriginalAttrs),
     ( var(Updates) -> true ; apply_inference_updates(Updates) ).
 
-% Branch isolation must not discard genuine input requirements discovered by
-% legacy inference.  Preserve only bindings of the active inference engine's
-% own open parameter variables, and never preserve a binding for a variable
-% whose type came from the analyzed edge itself.  Thus arithmetic in either
-% reachable arm can still infer a Number parameter, while a successful
-% constructor match cannot specialize a declared polymorphic parameter.
+% Branch isolation keeps genuine input requirements found by inference: only
+% bindings of the inference engine's own open parameter variables survive, and
+% never for a variable typed by the edge itself. Arithmetic in a reachable arm
+% still infers a Number parameter, but a constructor match cannot specialize a
+% declared polymorphic parameter.
 branch_inference_updates([], _, [], [], []).
 branch_inference_updates([binding(_, Var)|Bindings], Typed,
                          [attrs(OriginalKnown, _, _)|OriginalAttrs],
@@ -1217,7 +1059,7 @@ current_inference_assumption(Var, Type) :-
 
 concrete_inference_constraint(Type) :-
     nonvar(Type),
-    \+ catch(user:wildcard_type_t(Type), _, fail),
+    \+ catch(user:wildcard_type(Type), _, fail),
     \+ catch(user:unknown_candidate(Type), _, fail).
 
 apply_inference_updates([]).
@@ -1245,7 +1087,7 @@ state_type_fact(State, Id, Type) :-
 
 concrete_projectable_type(Type) :-
     ground(Type),
-    \+ catch(user:wildcard_type_t(Type), _, fail).
+    \+ catch(user:wildcard_type(Type), _, fail).
 
 type_is_new_for_variable(Var, Type) :-
     ( catch(user:known_candidates(Var, Known), _, fail)
@@ -1257,11 +1099,9 @@ apply_edge_types([typed(Var, Types)|Typed]) :-
     apply_variable_types(Types, Var),
     apply_edge_types(Typed).
 
-% These are branch-local refinements, not new constraints on the declaration's
-% type variables. add_known_type/2 deliberately binds an existing open tknown
-% candidate, which would turn `-[det]-> $t ...` into one concrete type merely
-% because a conditional pattern inspected it. Replace only the temporary
-% candidate view; restore_environment_attrs/2 reinstates the outer view afterward.
+% Branch-local refinements must not bind the declaration's type variables, as
+% add_known_type/2 would; replace only the temporary candidate view, which
+% restore_environment_attrs/2 reinstates.
 apply_variable_types(Types, Var) :-
     put_attr(Var, tknown, Types).
 
@@ -1318,34 +1158,18 @@ bump_bridge_generation :-
     Next is Current + 1,
     nb_setval('$unified_checker_generation', Next).
 
-push_bridge_scope(Scope, saved(Had, Previous)) :-
-    ( catch(b_getval('$unified_checker_scope', Previous0), _, fail)
-      -> Had = yes, Previous = Previous0
-    ; Had = no, Previous = none ),
-    b_setval('$unified_checker_scope', Scope).
+%Run Goal with the backtrackable global Key set to Value, then restore the
+%outer value (Default when Key was unset).
+with_b_value(Key, Default, Value, Goal) :-
+    ( catch(b_getval(Key, Outer), _, fail) -> true ; Outer = Default ),
+    setup_call_cleanup(b_setval(Key, Value), Goal, b_setval(Key, Outer)).
 
-pop_bridge_scope(saved(yes, Previous)) :- !,
-    b_setval('$unified_checker_scope', Previous).
-pop_bridge_scope(_) :- b_setval('$unified_checker_scope', inactive).
+with_bridge_scope(Scope, Goal) :-
+    with_b_value('$unified_checker_scope', inactive, Scope, Goal).
 
-push_current_clause(Record, saved(Had, Previous)) :-
-    ( catch(b_getval('$unified_current_clause', Previous0), _, fail)
-      -> Had = yes, Previous = Previous0
-    ; Had = no, Previous = none ),
-    b_setval('$unified_current_clause', Record).
+with_current_clause(Record, Goal) :-
+    with_b_value('$unified_current_clause', inactive, Record, Goal).
 
-pop_current_clause(saved(yes, Previous)) :- !,
-    b_setval('$unified_current_clause', Previous).
-pop_current_clause(_) :- b_setval('$unified_current_clause', inactive).
-
-variant_dedup([], []).
-variant_dedup([X|Xs], Ys) :-
-    ( variant_member_local(X, Xs)
-      -> variant_dedup(Xs, Ys)
-    ; Ys = [X|Rest], variant_dedup(Xs, Rest) ).
-
-variant_member_local(X, [Y|_]) :- X =@= Y, !.
-variant_member_local(X, [_|Ys]) :- variant_member_local(X, Ys).
 
 
 :- begin_tests(unified_checker_bridge).
@@ -1368,11 +1192,9 @@ test(exact_builtin_call_card_uses_retained_flow_analysis) :-
     analyze_ir(IR, State, Analysis),
     Record = clause_record(Source, IR, Env, Origins, Analysis),
     copy_term(Call, CopiedCall),
-    setup_call_cleanup(
-        push_current_clause(Record, Saved),
+    with_current_clause(Record,
         ( unified_builtin_call_card(Call, card(1,1)),
-          \+ unified_builtin_call_card(CopiedCall, _) ),
-        pop_current_clause(Saved)),
+          \+ unified_builtin_call_card(CopiedCall, _) )),
     var(Term), var(Head), var(Tail).
 
 test(node_card_does_not_hide_fallible_positional_match) :-
@@ -1387,10 +1209,8 @@ test(node_card_does_not_hide_fallible_positional_match) :-
     analyze_ir(IR, State, Analysis),
     analysis_card(Analysis, card(0,1)),
     Record = clause_record(Source, IR, Env, Origins, Analysis),
-    setup_call_cleanup(
-        push_current_clause(Record, Saved),
-        \+ unified_builtin_call_card(Call, _),
-        pop_current_clause(Saved)),
+    with_current_clause(Record,
+        \+ unified_builtin_call_card(Call, _)),
     var(Term), var(Field).
 
 test(ambiguous_equal_source_calls_require_one_card) :-
@@ -1405,11 +1225,9 @@ test(ambiguous_equal_source_calls_require_one_card) :-
     state_empty(State),
     analyze_ir(IR, State, Analysis),
     Record = clause_record(Source, IR, Env, Origins, Analysis),
-    setup_call_cleanup(
-        push_current_clause(Record, Saved),
+    with_current_clause(Record,
         ( \+ unified_builtin_call_card(First, card(1,1)),
-          \+ unified_builtin_call_card(Second, card(1,1)) ),
-        pop_current_clause(Saved)),
+          \+ unified_builtin_call_card(Second, card(1,1)) )),
     var(Term).
 
 test(unsupported_lowering_is_a_clause_local_fallback) :-
@@ -1424,8 +1242,8 @@ test(variant_clauses_keep_occurrence_identity) :-
                clause_source(duplicate_identity, 1, Second)],
     clause_universe([duplicate_identity/1], Pending, Universe),
     prepare_clause_universe(Universe, Prepared),
-    prepared_for_source(Prepared, First, _),
-    prepared_for_source(Prepared, Second, _),
+    once(( member(prepared_clause(_, _, S1, _), Prepared), S1 == First )),
+    once(( member(prepared_clause(_, _, S2, _), Prepared), S2 == Second )),
     length(Prepared, 2),
     X \== Y.
 
@@ -1447,26 +1265,11 @@ test(variant_record_is_aligned_to_recompiled_source) :-
     X \== SourceX,
     Y \== SourceY.
 
-test(recompile_summary_universe_is_transitive_and_scc_complete) :-
-    Sources = [
-        clause_source(recompile_consumer, 0,
-                      [=, [recompile_consumer], [recompile_producer]]),
-        clause_source(recompile_producer, 0,
-                      [=, [recompile_producer], [recompile_consumer]]),
-        clause_source(recompile_unrelated, 0,
-                      [=, [recompile_unrelated], true])
-    ],
-    prepare_clause_universe(Sources, Prepared),
-    reachable_prepared_keys([recompile_consumer/0], Prepared, Keys),
-    assertion(memberchk(recompile_consumer/0, Keys)),
-    assertion(memberchk(recompile_producer/0, Keys)),
-    assertion(\+ memberchk(recompile_unrelated/0, Keys)).
-
 test(recompile_closure_stops_at_cached_callee,
      [setup((unified_summary_cache_reset,
-             unified_summary_cache_store(
+             unified_summary_cache_store_many([cache_entry(
                  function_summary(cache_stop_leaf, 0, card(1,1),
-                                  [proper_bool], [], []), []))),
+                                  [proper_bool], [], []), [])]))),
       cleanup(unified_summary_cache_reset)]) :-
     Root = clause_source(cache_stop_root, 0,
                          [=, [cache_stop_root], [cache_stop_mid]]),
@@ -1550,12 +1353,9 @@ test(recursive_worklist_retains_final_propagated_analysis) :-
                               analyzed(_, _, _, BAnalysis)), Results)),
     assertion(analysis_result_has_fact(BAnalysis, proper_bool)).
 
-% Result-shape facts are partial-correctness properties: if a recursive call
-% returns, its result must have the advertised shape.  A least fixed point
-% cannot discover such a property when every base result is separated from
-% the caller by a recursive edge.  These tests exercise the greatest-fixed-
-% point part of the recursive solver without granting the same coinductive
-% treatment to cardinality, effects, or productivity.
+% A least fixed point cannot discover a result-shape property when every base
+% result is separated from the caller by a recursive edge; these tests cover
+% the greatest-fixed-point part of the solver.
 
 test(recursive_self_bool_uses_greatest_fixed_point,
      [setup(gfp_test_install_bool_declarations(
@@ -1726,7 +1526,7 @@ gfp_test_solve(Sources, Summaries, Results) :-
     prepare_clause_universe(Sources, Prepared),
     source_keys(Sources, Keys),
     initial_touched_summaries(Keys, Initial),
-    solve_fixed_point(Prepared, Keys, Initial, 0, Summaries, Results).
+    solve_fixed_point(Prepared, Keys, Initial, Summaries, Results).
 
 gfp_test_summary_has_fact(F/N, Summaries, Fact) :-
     summary_for_key(
@@ -1886,13 +1686,13 @@ test(constructor_resolver_refuses_genuine_same_arity_ambiguity,
 
 test(semantic_mutation_clears_transitive_summary_cache,
      [setup((unified_summary_cache_reset,
-             unified_summary_cache_store(
+             unified_summary_cache_store_many([cache_entry(
                  function_summary(test_callee, 0, card(1,1),
-                                  [proper_bool], [], []), []),
-             unified_summary_cache_store(
+                                  [proper_bool], [], []), [])]),
+             unified_summary_cache_store_many([cache_entry(
                  function_summary(test_caller, 0, card(1,1),
                                   [proper_bool], [], []),
-                 [summary(test_callee/0)]))),
+                 [summary(test_callee/0)])]))),
       cleanup(unified_summary_cache_reset)]) :-
     unified_checker_invalidate_event(clause_changed(test_callee/0, runtime)),
     \+ unified_checker_bridge:unified_function_summary(
@@ -1902,62 +1702,44 @@ test(semantic_mutation_clears_transitive_summary_cache,
 
 test(scoped_summary_shadows_persistent_facts,
      [setup((unified_summary_cache_reset,
-             unified_summary_cache_store(
+             unified_summary_cache_store_many([cache_entry(
                  function_summary(shadowed, 0, card(1,1),
-                                  [proper_bool], [], []), []))),
+                                  [proper_bool], [], []), [])]))),
       cleanup(unified_summary_cache_reset)]) :-
     current_bridge_generation(Generation),
     Record = clause_record(scope_test, scope_ir, [], [], scope_analysis),
-    setup_call_cleanup(
-        push_bridge_scope(
-            scope(Generation,
+    with_bridge_scope(scope(Generation,
                   [function_summary(shadowed, 0, card(1,1), [], [], [])],
                   [Record]),
-            Saved),
-        setup_call_cleanup(
-            push_current_clause(Record, ClauseSaved),
-            \+ unified_function_result_fact(shadowed, 0, proper_bool),
-            pop_current_clause(ClauseSaved)),
-        pop_bridge_scope(Saved)).
+        with_current_clause(Record,
+            \+ unified_function_result_fact(shadowed, 0, proper_bool))).
 
 test(runtime_mutation_invalidates_active_scope) :-
     current_bridge_generation(Generation),
     Record = clause_record(scope_test, scope_ir, [], [], scope_analysis),
-    setup_call_cleanup(
-        push_bridge_scope(
-            scope(Generation,
+    with_bridge_scope(scope(Generation,
                   [function_summary(producer, 0, card(1,1),
                                     [proper_bool], [], [])],
                   [Record]),
-            Saved),
-        setup_call_cleanup(
-            push_current_clause(Record, ClauseSaved),
+        with_current_clause(Record,
             ( unified_function_result_fact(producer, 0, proper_bool),
               unified_checker_invalidate_event(
                   clause_changed(producer/0, runtime)),
               \+ unified_function_result_fact(producer, 0, proper_bool),
-              \+ bridge_scope(_) ),
-            pop_current_clause(ClauseSaved)),
-        pop_bridge_scope(Saved)).
+              \+ bridge_scope(_) ))).
 
 test(source_form_mutation_keeps_active_scope) :-
     current_bridge_generation(Generation),
     Record = clause_record(scope_test, scope_ir, [], [], scope_analysis),
-    setup_call_cleanup(
-        push_bridge_scope(
-            scope(Generation,
+    with_bridge_scope(scope(Generation,
                   [function_summary(producer, 0, card(1,1),
                                     [proper_bool], [], [])],
                   [Record]),
-            Saved),
-        setup_call_cleanup(
-            push_current_clause(Record, ClauseSaved),
+        with_current_clause(Record,
             ( with_unified_preanalyzed_form(
                   unified_checker_invalidate_event(
                       declaration_changed(value, token, added))),
               unified_function_result_fact(producer, 0, proper_bool),
-              bridge_scope(_) ),
-            pop_current_clause(ClauseSaved)),
-        pop_bridge_scope(Saved)).
+              bridge_scope(_) ))).
 
 :- end_tests(unified_checker_bridge).

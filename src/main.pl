@@ -29,8 +29,6 @@ prolog:error_message(determinism_conflict(Fun, Reason)) -->
     [ 'Determinism check failed for ~p: ~p'-[Fun, Reason] ].
 prolog:error_message(det_functional_head_commitment(Fun, HeadArgs)) -->
     [ 'Determinism check failed for ~p: functional head ~p generates fallible head goals; explicit det/semidet validation cannot certify it'-[Fun, [Fun|HeadArgs]] ].
-prolog:error_message(conflicting_determinism_declarations(Fun)) -->
-    [ 'Conflicting determinism declarations for ~p'-[Fun] ].
 prolog:error_message(conflicting_determinism_declarations(Fun, Locations)) -->
     [ 'Conflicting determinism declarations for ~p at ~p'-[Fun, Locations] ].
 prolog:error_message(det_nonexhaustive(Fun, Pos, Missing)) -->
@@ -38,8 +36,6 @@ prolog:error_message(det_nonexhaustive(Fun, Pos, Missing)) -->
     [ 'Deterministic function ~p is not exhaustive: argument ~w matches no clause for ~w - cover the remaining cases, or declare it -[semidet]-> (zero or one result, committed exactly like -[det]->)'-[Fun, Pos, Txt] ].
 prolog:error_message(overlapping_deterministic_clauses(Fun, ArgsA, ArgsB)) -->
     [ 'Deterministic function ~p has overlapping clauses with heads ~p and ~p'-[Fun, ArgsA, ArgsB] ].
-prolog:error_message(inferred_type_conflict(Fun, Types)) -->
-    [ 'Inferred type conflict for ~p: incompatible candidates ~p'-[Fun, Types] ].
 prolog:error_message(no_matching_overload(Fun)) -->
     [ 'No matching typed overload for ~p'-[Fun] ].
 prolog:error_message(non_parametric_output(Fun)) -->

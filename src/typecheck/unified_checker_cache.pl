@@ -1,16 +1,10 @@
 :- module(unified_checker_cache,
-          [ unified_summary_cache_store/2,
-            unified_summary_cache_store_many/1,
+          [ unified_summary_cache_store_many/1,
             unified_summary_cache_lookup/3,
             unified_summary_cache_lookup/4,
-            unified_summary_cache_snapshot/2,
             unified_summary_cache_snapshot_event/2,
-            unified_summary_cache_restore/1,
-            unified_summary_cache_remove/2,
             unified_summary_cache_invalidate_event/1,
             unified_summary_cache_invalidate_event/2,
-            unified_summary_cache_clear/0,
-            unified_summary_cache_stats/1,
             unified_summary_cache_reset/0
           ]).
 
@@ -20,22 +14,23 @@ The cache stores only ground
 
   function_summary(F, N, Card, ResultFacts, Effects, Diagnostics)
 
-records and ground dependency sets.  Dependencies supplied to store/2 are
+records and ground dependency sets.  Dependencies supplied to store_many/1 are
 flattened, sorted and augmented with the summary's own clause, declaration and
 effect dependencies.  A caller may either copy all transitive dependencies
 into its row or record `summary(Callee/Arity)`.  Removal and invalidation follow
 the latter edges transitively.
 
 This module deliberately owns no source clauses, IR, attributed variables or
-source-occurrence records.  It also has no dependency on the bridge or the
-compiled-clause dependency graph, which keeps it usable at their integration
+source-occurrence records.  It depends only on the abstract domain, not on the
+bridge or the compiled-clause dependency graph, which keeps it usable at their integration
 boundary without introducing a module cycle.
 
-Every public operation is serialized.  Store validates the complete new row
-before changing the cache.  Replacing a changed row evicts its existing
-dependents before publishing the replacement; storing an identical row is a
-no-op.
+Every public operation is serialized.  A store validates the complete batch
+before changing the cache, and replacing a row evicts its existing dependents
+before publishing the replacement.
 */
+
+:- use_module(abstract_domain).
 
 :- dynamic cached_summary/4.
 % cached_summary(F, N, FunctionSummary, Dependencies)
@@ -44,35 +39,17 @@ no-op.
 % cached_summary_dependency(Dependency, OwnerF, OwnerN)
 
 
-%!  unified_summary_cache_store(+FunctionSummary, +Dependencies) is det.
-%
-%   Store or replace a closed summary.  Throws on an open or malformed row.
-%   Dependencies must be one flat, ground list.  `summary(F/N)` dependencies
-%   are optional when the caller instead supplies a flattened transitive set.
-
-unified_summary_cache_store(Summary, Dependencies0) :-
-    validate_summary(Summary, F, N),
-    validate_dependencies(Dependencies0),
-    summary_self_dependencies(F, N, Self),
-    append(Self, Dependencies0, All0),
-    sort(All0, Dependencies),
-    with_mutex(unified_checker_summary_cache,
-               store_summary_locked(F, N, Summary, Dependencies)).
-
-
 %!  unified_summary_cache_store_many(+Entries) is det.
 %
 %   Atomically publish a solved batch.  Entries are
 %   `cache_entry(FunctionSummary, Dependencies)` terms.  The complete batch is
 %   validated before the cache changes; transitive eviction is computed once,
-%   then every replacement row is inserted under the same mutex.  This avoids
-%   the quadratic invalidation loop produced by calling store/2 hundreds of
-%   times after a whole-file fixed point.
+%   then every replacement row is inserted under the same mutex.
 
 unified_summary_cache_store_many(Entries0) :-
     must_be(list, Entries0),
     maplist(normalize_cache_entry, Entries0, Entries),
-    cache_entry_keys(Entries, Keys),
+    findall(F/N, member(cache_row(F, N, _, _), Entries), Keys),
     sort(Keys, UniqueKeys),
     ( same_length(Keys, UniqueKeys)
       -> true
@@ -97,23 +74,8 @@ unified_summary_cache_lookup(F, N, Summary) :-
 unified_summary_cache_lookup(F, N, Summary, Dependencies) :-
     validate_key(F, N),
     with_mutex(unified_checker_summary_cache,
-               lookup_summary_locked(F, N, Stored, StoredDependencies)),
+               cached_summary(F, N, Stored, StoredDependencies)),
     copy_term_nat(Stored-StoredDependencies, Summary-Dependencies).
-
-
-%!  unified_summary_cache_snapshot(+Keys, -Entries) is det.
-%
-%   Capture the exact closed rows named by Keys.  This is the rollback seam for
-%   bounded runtime source transactions; callers restore only rows invalidated
-%   while staging that transaction, never attributed clause records.
-
-unified_summary_cache_snapshot(Keys0, Entries) :-
-    must_be(list, Keys0),
-    maplist(validate_function_key, Keys0),
-    sort(Keys0, Keys),
-    with_mutex(
-        unified_checker_summary_cache,
-        snapshot_keys_locked(Keys, Entries)).
 
 
 %!  unified_summary_cache_snapshot_event(+Event, -Entries) is det.
@@ -121,7 +83,8 @@ unified_summary_cache_snapshot(Keys0, Entries) :-
 %   Snapshot every existing row that invalidate_event/1 would remove, including
 %   transitive summary dependents.  Runtime source staging uses this immediately
 %   before invalidation so a failed transaction can restore the exact closed
-%   cache slice without rebuilding it from a half-mutated program.
+%   cache slice through store_many/1 without rebuilding it from a half-mutated
+%   program.
 
 unified_summary_cache_snapshot_event(Event, Entries) :-
     require_ground(Event, cache_event),
@@ -129,27 +92,6 @@ unified_summary_cache_snapshot_event(Event, Entries) :-
         unified_checker_summary_cache,
         ( event_affected_keys_locked(Event, Keys),
           snapshot_keys_locked(Keys, Entries) )).
-
-
-%!  unified_summary_cache_restore(+Entries) is det.
-
-%   Restore a snapshot captured by snapshot/2.  Validation is atomic and the
-%   normal batch replacement semantics remove any transient dependents first.
-
-unified_summary_cache_restore(Entries) :-
-    unified_summary_cache_store_many(Entries).
-
-
-%!  unified_summary_cache_remove(+F, +N) is det.
-%
-%   Remove this row and every row which depends on it through one or more
-%   `summary(F/N)` edges.  Removing a missing key is harmless, but can still
-%   remove a dependent row whose callee had not itself been cached.
-
-unified_summary_cache_remove(F, N) :-
-    validate_key(F, N),
-    with_mutex(unified_checker_summary_cache,
-               remove_keys_transitively_locked([F/N], _)).
 
 
 %!  unified_summary_cache_invalidate_event(+Event) is det.
@@ -172,31 +114,12 @@ unified_summary_cache_invalidate_event(Event, RemovedKeys) :-
                invalidate_event_locked(Event, RemovedKeys)).
 
 
-%!  unified_summary_cache_clear is det.
-
-unified_summary_cache_clear :-
-    with_mutex(unified_checker_summary_cache, clear_cache_locked).
-
-
 %!  unified_summary_cache_reset is det.
-%
-%   Explicit test/process-reset alias.  It has the same semantics as clear/0.
 
 unified_summary_cache_reset :-
-    unified_summary_cache_clear.
-
-
-%!  unified_summary_cache_stats(-Stats) is det.
-%
-%   Stats is `cache_stats(Rows, DependencyEdges)`.
-
-unified_summary_cache_stats(cache_stats(Rows, DependencyEdges)) :-
-    with_mutex(
-        unified_checker_summary_cache,
-        ( aggregate_all(count, cached_summary(_, _, _, _), Rows),
-          aggregate_all(count,
-                        cached_summary_dependency(_, _, _),
-                        DependencyEdges) )).
+    with_mutex(unified_checker_summary_cache,
+               ( retractall(cached_summary(_, _, _, _)),
+                 retractall(cached_summary_dependency(_, _, _)) )).
 
 
 % -- Validation ---------------------------------------------------------
@@ -206,16 +129,11 @@ validate_summary(Summary, F, N) :-
     ( Summary = function_summary(F, N, Card, ResultFacts,
                                  Effects, Diagnostics),
       atom(F), integer(N), N >= 0,
-      valid_cardinality(Card),
+      once(card_level(Card, _)),
       is_list(ResultFacts), is_list(Effects), is_list(Diagnostics)
       -> true
     ; throw(error(domain_error(unified_function_summary, Summary),
                   unified_checker_cache)) ).
-
-valid_cardinality(card(Lower, Upper)) :-
-    memberchk(Lower, [0, 1]),
-    ( memberchk(Upper, [0, 1]), Upper >= Lower
-    ; Upper == many ).
 
 validate_dependencies(Dependencies) :-
     require_ground(Dependencies, summary_dependencies),
@@ -230,8 +148,6 @@ validate_key(F, N) :-
     ( atom(F), integer(N), N >= 0
       -> true
     ; throw(error(domain_error(function_key, F/N), unified_checker_cache)) ).
-
-validate_function_key(F/N) :- validate_key(F, N).
 
 require_ground(Term, _) :- ground(Term), !.
 require_ground(_, Subject) :-
@@ -249,22 +165,8 @@ normalize_cache_entry(cache_entry(Summary, Dependencies0),
     append(Self, Dependencies0, All0),
     sort(All0, Dependencies).
 
-cache_entry_keys([], []).
-cache_entry_keys([cache_row(F, N, _, _)|Entries], [F/N|Keys]) :-
-    cache_entry_keys(Entries, Keys).
-
 
 % -- Store operations ---------------------------------------------------
-
-store_summary_locked(F, N, Summary, Dependencies) :-
-    ( cached_summary(F, N, Existing, ExistingDependencies),
-      Existing == Summary,
-      ExistingDependencies == Dependencies
-      -> true
-    ; remove_keys_transitively_locked([F/N], _),
-      assertz(cached_summary(F, N, Summary, Dependencies)),
-      forall(member(Dependency, Dependencies),
-             assertz(cached_summary_dependency(Dependency, F, N))) ).
 
 store_many_locked(Keys, Entries) :-
     remove_keys_transitively_locked(Keys, _),
@@ -274,13 +176,6 @@ assert_cache_row_locked(cache_row(F, N, Summary, Dependencies)) :-
     assertz(cached_summary(F, N, Summary, Dependencies)),
     forall(member(Dependency, Dependencies),
            assertz(cached_summary_dependency(Dependency, F, N))).
-
-lookup_summary_locked(F, N, Summary, Dependencies) :-
-    cached_summary(F, N, Summary, Dependencies).
-
-clear_cache_locked :-
-    retractall(cached_summary(_, _, _, _)),
-    retractall(cached_summary_dependency(_, _, _)).
 
 remove_keys_transitively_locked(Seeds0, RemovedKeys) :-
     sort(Seeds0, Seeds),
@@ -314,9 +209,7 @@ invalidate_event_locked(Event, RemovedKeys) :-
     remove_keys_transitively_locked(Keys, RemovedKeys).
 
 event_affected_keys_locked(Event, Keys) :-
-    ( global_cache_event(Event)
-      -> all_cached_keys(Keys)
-    ; known_cache_event(Event)
+    ( known_cache_event(Event)
       -> findall(F/N,
                  ( event_dependency_candidate(Event, Dependency),
                    cached_summary_dependency(Dependency, F, N) ),
@@ -335,10 +228,6 @@ all_cached_keys(Keys) :-
     findall(F/N, cached_summary(F, N, _, _), Keys0),
     sort(Keys0, Keys).
 
-global_cache_event(new_file_batch).
-global_cache_event(broad_mutation(_)).
-
-known_cache_event(clause_changed(F/N)) :- valid_event_key(F, N).
 known_cache_event(clause_changed(F/N, _)) :- valid_event_key(F, N).
 known_cache_event(declaration_changed(F/N, _)) :- valid_event_key(F, N).
 known_cache_event(declaration_changed(Kind, Name, _)) :-
@@ -349,8 +238,6 @@ known_cache_event(callable_changed(Name)) :- atom(Name).
 
 valid_event_key(F, N) :- atom(F), integer(N), N >= 0.
 
-event_dependency_candidate(clause_changed(F/N), Dependency) :-
-    event_dependency_candidate(clause_changed(F/N, runtime), Dependency).
 event_dependency_candidate(clause_changed(F/N, _), Dependency) :-
     function_dependency_candidate(F, N, Dependency).
 
@@ -391,30 +278,30 @@ test(rejects_open_summary,
      [ setup(unified_summary_cache_reset),
        cleanup(unified_summary_cache_reset),
        throws(error(instantiation_error, _)) ]) :-
-    unified_summary_cache_store(
+    unified_summary_cache_store_many([cache_entry(
         function_summary(open_summary, 0, card(1,1), [type(_)], [], []),
-        []).
+        [])]).
 
 test(rejects_open_dependencies,
      [ setup(unified_summary_cache_reset),
        cleanup(unified_summary_cache_reset),
        throws(error(instantiation_error, _)) ]) :-
-    unified_summary_cache_store(
+    unified_summary_cache_store_many([cache_entry(
         function_summary(open_dependency, 0, card(1,1), [], [], []),
-        [clause_set(_)]).
+        [clause_set(_)])]).
 
 test(store_lookup_is_closed_and_adds_self_dependencies,
      [ setup(unified_summary_cache_reset),
        cleanup(unified_summary_cache_reset) ]) :-
     Summary = function_summary(producer, 1, card(1,1),
                                [proper_bool], [pure], []),
-    unified_summary_cache_store(Summary, [ctor_set('Goal')]),
+    unified_summary_cache_store_many([cache_entry(Summary, [ctor_set('Goal')])]),
     unified_summary_cache_lookup(producer, 1, Stored, Dependencies),
     assertion(Stored == Summary),
     assertion(Dependencies ==
               [clause_set(producer/1), ctor_set('Goal'),
                decl(producer/1), effect(producer/1)]),
-    unified_summary_cache_stats(cache_stats(1, 4)).
+    aggregate_all(count, cached_summary_dependency(_, _, _), 4).
 
 test(runtime_clause_event_is_selective,
      [ setup(unified_summary_cache_reset),
@@ -454,8 +341,8 @@ test(changed_replacement_removes_summary_dependents,
        cleanup(unified_summary_cache_reset) ]) :-
     cache_test_summary(callee, []),
     cache_test_summary(caller, [summary(callee/0)]),
-    unified_summary_cache_store(
-        function_summary(callee, 0, card(0,1), [], [pure], []), []),
+    unified_summary_cache_store_many([cache_entry(
+        function_summary(callee, 0, card(0,1), [], [pure], []), [])]),
     assertion(unified_summary_cache_lookup(callee, 0, _)),
     assertion(\+ unified_summary_cache_lookup(caller, 0, _)).
 
@@ -512,7 +399,7 @@ test(event_snapshot_includes_transitive_dependents,
     assertion(Names == [snapshot_leaf, snapshot_middle, snapshot_top]),
     unified_summary_cache_invalidate_event(
         clause_changed(snapshot_leaf/0, runtime_preparing)),
-    unified_summary_cache_restore(Entries),
+    unified_summary_cache_store_many(Entries),
     assertion(unified_summary_cache_lookup(snapshot_leaf, 0, _)),
     assertion(unified_summary_cache_lookup(snapshot_middle, 0, _)),
     assertion(unified_summary_cache_lookup(snapshot_top, 0, _)),
@@ -545,9 +432,9 @@ test(function_declaration_event_invalidates_function_dependents,
 test(generated_specialization_removal_is_symbol_selective,
      [ setup(unified_summary_cache_reset),
        cleanup(unified_summary_cache_reset) ]) :-
-    unified_summary_cache_store(
+    unified_summary_cache_store_many([cache_entry(
         function_summary('worker_Spec_1', 1, card(1,1),
-                         [proper_bool], [pure], []), []),
+                         [proper_bool], [pure], []), [])]),
     cache_test_summary(spec_consumer,
                        [summary('worker_Spec_1'/1)]),
     cache_test_summary(unrelated, []),
@@ -566,24 +453,6 @@ test(callable_registration_invalidates_data_classification,
     assertion(Removed == [data_consumer/0]),
     assertion(unified_summary_cache_lookup(unrelated, 0, _)).
 
-test(broad_event_clears_everything,
-     [ setup(unified_summary_cache_reset),
-       cleanup(unified_summary_cache_reset) ]) :-
-    cache_test_summary(first, []),
-    cache_test_summary(second, []),
-    unified_summary_cache_invalidate_event(
-        broad_mutation(test), Removed),
-    assertion(Removed == [first/0, second/0]),
-    unified_summary_cache_stats(cache_stats(0, 0)).
-
-test(new_file_batch_uses_global_safety_boundary,
-     [ setup(unified_summary_cache_reset),
-       cleanup(unified_summary_cache_reset) ]) :-
-    cache_test_summary(old_file_row, []),
-    unified_summary_cache_invalidate_event(new_file_batch,
-                                           [old_file_row/0]),
-    assertion(\+ unified_summary_cache_lookup(old_file_row, 0, _)).
-
 test(unknown_event_is_conservative,
      [ setup(unified_summary_cache_reset),
        cleanup(unified_summary_cache_reset) ]) :-
@@ -592,8 +461,8 @@ test(unknown_event_is_conservative,
     assertion(\+ unified_summary_cache_lookup(cached, 0, _)).
 
 cache_test_summary(F, Dependencies) :-
-    unified_summary_cache_store(
+    unified_summary_cache_store_many([cache_entry(
         function_summary(F, 0, card(1,1), [proper_bool], [pure], []),
-        Dependencies).
+        Dependencies)]).
 
 :- end_tests(unified_checker_cache).

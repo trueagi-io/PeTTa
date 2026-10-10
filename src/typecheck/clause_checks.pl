@@ -1,17 +1,11 @@
-%%% Clause-level helpers %%%
-%
-% Owns clause-head declaration selection, parameter/pattern binding,
-% contextual call results, and declared-output certification.
-% Consumes declaration/type-language queries, value checking and guards,
-% inference, oracle hooks, and proof-event publication.
-% Boundary: every predicate defined here is wholly owned by this file; callers
-% use these predicates as an ordinary interface, never by clause interleaving.
+%%% Clause-level helpers: clause-head declaration selection, parameter and
+%%% pattern binding, contextual call results, and declared-output
+%%% certification.
 
 %Bind declared parameter types onto clause-head variables. For an overloaded
-%function, the clause's head patterns filter the declarations: a clause whose
-%head selects exactly one overload is checked against it, a clause no overload
-%can produce is rejected, and a genuinely ambiguous clause (e.g. all-variable
-%head serving every overload) stays unchecked as before.
+%function the head patterns filter the declarations: a clause selecting exactly
+%one overload is checked against it, a clause no overload can produce is
+%rejected, and an ambiguous clause (an all-variable head) stays unchecked.
 clause_param_types(F, Args, DeclOut) :- length(Args, N),
                                         findall(ATs-OTx, fn_decl_arity(F, N, ATs, OTx), Decls),
                                         ( Decls == [] -> DeclOut = none
@@ -31,7 +25,7 @@ bind_param_type(Arg, T) :- ( functional_pattern_application(Arg, _, _)
                            -> ( functional_pattern_signature(Arg, T, PatternArgs, ArgTypes)
                                 -> maplist(bind_param_type, PatternArgs, ArgTypes)
                               ; true )
-                           ; var(Arg) -> ( nonvar(T) -> ( \+ wildcard_type_t(T) -> add_known_type(Arg, T)
+                           ; var(Arg) -> ( nonvar(T) -> ( \+ wildcard_type(T) -> add_known_type(Arg, T)
                                                                                   ; true )
                                            %a variable type is the declaration instance: recording it
                                            %lets identical unknowns be recognized (e.g. rcons's $a):
@@ -43,7 +37,7 @@ bind_param_type(Arg, T) :- ( functional_pattern_application(Arg, _, _)
                              -> bind_pattern_typed(Arg, T)
                            ; structural_pattern_fields(Arg, T, Fields, FieldTs)
                              -> maplist(bind_param_type, Fields, FieldTs)
-                           ; atom(T), declared_newtype(T, R), \+ wildcard_type_t(R)
+                           ; atom(T), declared_newtype(T, R), \+ wildcard_type(R)
                              -> bind_param_type(Arg, R)
                            ; is_list(Arg), is_list(T), same_length(Arg, T),
                              \+ is_arrow_type(T)                 %untagged tuple types: ($v Number)
@@ -53,23 +47,19 @@ bind_param_type(Arg, T) :- ( functional_pattern_application(Arg, _, _)
                                                ; true ) ).
 
 %Resolve a registered function-headed pattern from one fresh declaration
-%instance.  Its result is the value occupying the surrounding pattern slot;
-%unifying that result with the slot type instantiates any shared declaration
-%variables before its argument patterns are bound.
+%instance. Unifying its result with the slot type instantiates shared
+%declaration variables before its argument patterns are bound.
 functional_pattern_signature(Pattern, Expected, Args, ArgTypes) :-
     functional_pattern_application(Pattern, F, Args),
     length(Args, N),
-    findall(sig(ATs0, OT0), fn_decl_arity(F, N, ATs0, OT0),
-            [sig(ArgTypes, OutType)]),
+    unique_fn_decl(F, N, ArgTypes, OutType),
     type_unify(OutType, Expected),
     refine_functional_pattern_aliases(F, N, Expected, ArgTypes).
 
-%A relational function may make an otherwise independent input equal to its
-%result on every successful clause.  This is ordinary source semantics, not a
-%named as-pattern rule: a direct returned parameter and variable-to-variable
-%let/chain unifications form a small alias graph.  Intersecting the positions
-%over every clause is conservative; an unrecognized body contributes no
-%aliases.  The clause-set dependency keeps later function mutation honest.
+%A relational function may make an input equal to its result on every
+%successful clause: a directly returned parameter and variable-to-variable
+%let/chain unifications form a small alias graph, intersected over all
+%clauses. An unrecognized body contributes no aliases.
 refine_functional_pattern_aliases(F, N, Expected, ArgTypes) :-
     functional_output_alias_positions(F, N, Positions),
     Positions \== [], !,
@@ -118,10 +108,8 @@ pattern_selects_member(P, M) :- nonvar(M), nonvar(P),
                                         ; same_length(P, M) )
                                 ; fail ).
 
-%Tag evidence outranks shape: (box $pair) also parses as a plain list, but a
-%head atom that is a declared constructor of (or the tag of) exactly one
-%member makes that member the selection - nominal tags are the idiomatic
-%union discriminator (see strict_tuple_types.metta):
+%Tag evidence outranks shape: a head atom that is a declared constructor (or
+%the tag) of exactly one member selects that member:
 pattern_selects_member_tagged(P, M) :- nonvar(M), nonvar(P), P = [Tag|Fs], atom(Tag),
                                        ( atom(M) -> \+ \+ structural_pattern_fields(P, M, _, _)
                                        ; tagged_tuple_type(M, Tag2, FTs), Tag2 == Tag,
@@ -133,7 +121,7 @@ structural_pattern_fields(Arg, T, Fields, FieldTs) :- is_list(Arg), Arg = [Tag|F
                                                       ( tagged_tuple_type(T, Tag2, FieldTs), Tag2 == Tag,
                                                         same_length(Fields, FieldTs) -> true
                                                       ; atom(T), length(Fields, N),
-                                                        findall(ATs-OT, fn_decl_arity(Tag, N, ATs, OT), [FieldTs-OT1]),
+                                                        unique_fn_decl(Tag, N, FieldTs, OT1),
                                                         type_compat_soft(OT1, T) ).
 
 %Contextual output typing for deliberately-undeclared builtins (one clause per
@@ -143,12 +131,6 @@ untyped_call_out(F, Args, Out) :-
         builtin_contextual_typing(F, N, Rule),
         builtin_contextual_output_rule(Rule, Args, Out).
 
-builtin_contextual_typing_rule_defined(cons_list).
-builtin_contextual_typing_rule_defined(union_list).
-builtin_contextual_typing_rule_defined(first_list).
-builtin_contextual_typing_rule_defined(list_element).
-builtin_contextual_typing_rule_defined(list_tail).
-
 builtin_contextual_output_rule(cons_list, [H, Tl], Out) :-
         cons_out_type(H, Tl, Out).
 builtin_contextual_output_rule(union_list, [A, B], Out) :-
@@ -157,28 +139,20 @@ builtin_contextual_output_rule(first_list, [A, _], Out) :-
         first_list_out_type(A, Out).
 builtin_contextual_output_rule(first_list, [A], Out) :-
         first_list_out_type(A, Out).
-%The ACCESSORS, which nobody typed: only the constructors above were here, so
-%a (List Choice) went in and an untyped value came out. That is what forced a
-%runtime guard on every element use and made --strict reject
-%(probe (car-atom $xs)) - the loss was at the accessor, not at match or
-%collapse. first/2 is a lib_roman pair helper, a different function; only the
+%The list accessors' outputs; first/2 is a lib_roman pair helper, so only the
 %one-argument builtin is typed here.
 builtin_contextual_output_rule(list_element, [A], Out) :-
         list_elem_out_type(A, Out).
 builtin_contextual_output_rule(list_tail, [A], Out) :-
         cdr_atom_out_type(A, Out).
 
-%(List T) -> T. The element type is what the accessor projects; whether the
-%call SUCCEEDS is a separate question and belongs to the determinism table
-%(where car-atom is det because its second clause answers () for anything the
-%first does not match, and last is semidet-or-worse for the empty list).
+%(List T) -> T. Whether the call succeeds is the determinism table's question.
 list_elem_out_type(A, Out) :- ( var(Out), list_source_elem(A, T), nonvar(T),
-                                \+ wildcard_type_t(T)
+                                \+ wildcard_type(T)
                                 -> set_out_type(Out, T) ; true ).
 
-%An expression's tail is always a sequence, so cdr-atom keeps the (List ...)
-%floor its old declaration gave it, and narrows the element type whenever the
-%argument's own type supplies one:
+%An expression's tail is always a sequence: cdr-atom yields (List ...),
+%narrowed by the argument's element type:
 cdr_atom_out_type(A, Out) :- ( var(Out), list_source_elem(A, T), nonvar(T)
                                -> set_out_type(Out, ['List', T])
                                 ; set_out_type(Out, ['List', '%Undefined%']) ).
@@ -188,19 +162,13 @@ cdr_atom_out_type(A, Out) :- ( var(Out), list_source_elem(A, T), nonvar(T)
 first_list_out_type(A, Out) :- ( var(Out), list_source_elem(A, T)
                                  -> set_out_type(Out, ['List', T]) ; true ).
 
-%cons stays undeclared (a global (List $a) signature would reject legal
-%heterogeneous expressions). When the head provably fits the tail's list type
-%the result is that list type; when it provably does NOT - both types known,
-%no fit - the result is still a proper list, of the WIDENED element type: the
-%union of what the tail holds and what the head is, exactly how collapse
-%records disagreeing branches. (cons () (cons (item 1) ())) is a
-%(List (| Item (List ...))), which fits a declared (List Atom) - every member
-%fits Atom - while against (List Number) the non-fitting member still costs
-%the guard, so nothing is discharged that the value cannot honour. A head of
-%UNKNOWN type still yields no claim: unknown is not evidence of anything, a
-%union member included.
+%cons stays undeclared (a global (List $a) signature would reject heterogeneous
+%expressions). When the head fits the tail's list type the result is that
+%type; when it provably does not, the result is a list of the widened union
+%element type, as collapse records disagreeing branches. A head of unknown
+%type yields no claim.
 cons_out_type(H, Tl, Out) :- ( var(Out), list_source_elem(Tl, T)
-                               -> ( ( wildcard_type_t(T) -> true    %(List %Undefined%): any head fits
+                               -> ( ( wildcard_type(T) -> true    %(List %Undefined%): any head fits
                                     ; var(H) -> known_singleton(H, K), type_unify(K, T)
                                               ; check_value(H, T, St), St == ok )
                                     -> set_out_type(Out, ['List', T])
@@ -235,22 +203,17 @@ union_atom_out_type(A, B, Out) :- ( var(Out),
                                           ; true )
                                      ; true ).
 
-%The element type carried by a list-valued SOURCE expression, the one question
-%behind every list-shape output typer above: a cons TAIL, a union/concat OPERAND,
-%an accessor's list ARGUMENT all ask it (cons_tail_elem/2 was a second, identical
-%copy). A bound variable answers from its known (List T); a literal () carries no
-%element constraint (T stays open, so any head fits); a literal list is read
-%element-wise (list_elem_type/2). The callers differ only in how they re-wrap the
-%answer - the element itself (car-atom), or (List T) again (cdr-atom, concat):
+%The element type carried by a list-valued source expression (a cons tail, a
+%union/concat operand, an accessor argument): a bound variable's known
+%(List T), an open T for (), or the element-wise type of a literal list.
 list_source_elem(X, T) :- ( var(X) -> known_singleton(X, K), list_type(K, T)
                           ; X == [] -> true
                           ; list_elem_type(X, T) ).
 
 %Destructuring bindings: type a pattern's variables from the bound value's
-%known type, e.g. (let (Stats $sum $sq $n) (make-stats) ...). With no type for
-%the value, a pattern headed by a uniquely declared constructor still knows
-%what its own fields are - that is the constructor's declaration talking, not
-%the scrutinee's:
+%known type, e.g. (let (Stats $sum $sq $n) (make-stats) ...). Without a value
+%type, a pattern headed by a uniquely declared constructor still knows its
+%own fields:
 bind_pattern_from(Pat, Val) :- ( nonvar(Pat)
                                  -> ( ( var(Val) -> known_singleton(Val, KT)
                                                   ; value_single_type(Val, KT) ),
@@ -264,17 +227,14 @@ bind_pattern_from(Pat, Val) :- ( nonvar(Pat)
 bind_pattern_typed(P, T) :- bind_pattern_typed(P, T, []).
 
 %bind_pattern_typed(+Pattern, +Type, +PriorPatterns). PriorPatterns are the
-%patterns of EARLIER branches of the same case, in source order, and are empty
-%for every other caller (clause heads, let destructuring, meta typing) - those
-%are not first-match. They are consulted only for the top-level pattern; field
-%patterns recurse with [], since what an earlier branch matched at the top says
-%nothing about a nested field.
+%patterns of earlier branches of the same case, in source order, consulted
+%only at the top level; every other caller passes [].
 bind_pattern_typed(P, T, Prior) :-
                             ( functional_pattern_application(P, _, _)
                               -> ( functional_pattern_signature(P, T, PatternArgs, ArgTypes)
                                    -> maplist(bind_pattern_typed, PatternArgs, ArgTypes)
                                  ; true )
-                            ; var(P) -> ( nonvar(T), \+ wildcard_type_t(T)
+                            ; var(P) -> ( nonvar(T), \+ wildcard_type(T)
                                          -> variable_fallthrough_type(T, Prior, PT),
                                             add_known_type(P, PT)
                                           ; true )
@@ -292,19 +252,16 @@ bind_pattern_typed(P, T, Prior) :-
                                  bind_pattern_typed(Rest, ['List', ET])
                             ; structural_pattern_fields(P, T, Fields, FieldTs)
                               -> maplist(bind_pattern_typed, Fields, FieldTs)
-                            ; atom(T), declared_newtype(T, R), \+ wildcard_type_t(R)
+                            ; atom(T), declared_newtype(T, R), \+ wildcard_type(R)
                               -> bind_pattern_typed(P, R, Prior)
                             ; is_list(P), is_list(T), same_length(P, T),
                               \+ is_arrow_type(T)
                               -> maplist(bind_pattern_typed, P, T)
                             ; true ).
 
-%A variable case branch is the committed fallthrough: values wholly consumed
-%by earlier branches cannot reach it.  Subtract only union members for which
-%that statement has a positive, closed proof.  In particular, primitive,
-%wildcard, list, arrow, newtype/open-representation and otherwise structural
-%members stay in the union.  Other bind_pattern_typed/3 callers pass Prior=[],
-%so their variable bindings retain the declared type unchanged.
+%A variable case branch is the committed fallthrough, so union members wholly
+%consumed by earlier branches cannot reach it. Subtract only members with a
+%positive closed proof:
 variable_fallthrough_type(T, Prior, NT) :-
     nonempty_prior(Prior),
     is_union(T),
@@ -327,12 +284,9 @@ subtract_consumed_union_members([M|Ms], Prior, Kept, Removed) :-
       ; Kept = [M|Rest],
         Removed = TailRemoved ).
 
-%A tagged tuple denotes one exact constructor shape.  A nominal type is
-%subtractable only when its current, nonempty constructor set is completely
-%covered by earlier unconstrained constructor patterns.  Publishing ctor_set
-%after the proof succeeds makes that closed-world snapshot visible to the
-%dependency graph without retaining dependencies for members we did not
-%exclude.
+%A tagged tuple denotes one exact constructor shape. A nominal type is
+%subtractable only when its nonempty constructor set is completely covered by
+%earlier unconstrained constructor patterns; ctor_set is published only then.
 fallthrough_member_consumed(M, Prior) :-
     nonvar(M),
     is_list(M),
@@ -356,25 +310,16 @@ prior_consumed_ctor_keys([Ctor-K|Keys], Prior) :-
     prior_consumed_ctor(Prior, Ctor, K),
     prior_consumed_ctor_keys(Keys, Prior).
 
-%%% Soundness gate on union narrowing by shape.
-%
-%A pattern that carries TAG evidence for the member it selected - its head is
-%that member's tag, or a declared constructor of it - says something real
-%about the value, and narrows as it always has.
-%
-%Without that evidence (a variable head: ($_type ($_kbid $_ctx $_vars) $prf
-%$tv), or an atom head that is nobody's constructor) the pattern selected the
-%member purely by element count, which alone is unsound: another member's
-%constructor may build a value of exactly that count (a Goal is
-%(CPU $f $a $r), also four elements). Narrowing is then admissible only when
-%every OTHER member is ruled out - see union_member_excluded/3.
+%%% Soundness gate on union narrowing by shape. A pattern with tag evidence
+%%% (its head is the member's tag or constructor) narrows. A pattern that
+%%% selected the member only by element count narrows only when every other
+%%% member is ruled out (union_member_excluded/3): another member's constructor
+%%% may build a value of the same count.
 narrowing_sound(P, _, M1, _) :- pattern_selects_member_tagged(P, M1), !.
 narrowing_sound(P, Ms, _, Prior) :- is_list(P), length(P, N),
                                     narrowing_other_members(Ms, P, N, Prior).
 
-%Do not express this walk with forall/2: forall is double negation, so proof
-%events emitted by a successful exclusion are backtracked away.  The explicit
-%recursion preserves constructor-set dependencies as returned proof data.
+%Not forall/2: its double negation would drop the emitted ctor_set events.
 narrowing_other_members([], _, _, _).
 narrowing_other_members([M|Ms], P, N, Prior) :-
     ( pattern_selects_member(P, M) -> true
@@ -382,15 +327,9 @@ narrowing_other_members([M|Ms], P, N, Prior) :-
     narrowing_other_members(Ms, P, N, Prior).
 
 %union_member_excluded(+Member, +N, +PriorPatterns): no value of Member can be
-%an N-element expression here. Either
-%  (a) by ARITY - Member has no constructor that builds N elements, or
-%  (b) because every constructor of Member that does was already consumed by an
-%      EARLIER branch of the same case. case is first-match/committed
-%      (translate_case compiles to nested if-then-else), so such a value can
-%      never reach this branch.
-%(a) reads the constructor set as it stands right now, so the verdict is a
-%SNAPSHOT. The proof publishes ctor_set(Member), so a later declaration that
-%changes the set invalidates and recompiles exactly the graph consumers.
+%an N-element expression here, (a) by arity, or (b) because earlier branches
+%of the first-match case consumed every constructor that builds N elements.
+%The constructor set is a snapshot; the proof publishes ctor_set(Member).
 union_member_excluded(M, _, _) :- var(M), !, fail.
 union_member_excluded(M, _, _) :- is_arrow_type(M), !.       %a closure is not an expression
 union_member_excluded(M, _, _) :- list_type(M, _), !, fail.  %(List T) admits every length
@@ -408,35 +347,23 @@ union_member_excluded(M, N, Prior) :- atom(M), !,
         ; K is N - 1,
           analysis_emit(dependency(ctor_set(M))),
           forall(member_ctor(M, K, C), prior_consumed_ctor(Prior, C, K)) ).
-union_member_excluded(_, _, _) :- fail.
 
 union_members_excluded([], _, _).
 union_members_excluded([M|Ms], N, Prior) :-
     union_member_excluded(M, N, Prior),
     union_members_excluded(Ms, N, Prior).
 
-%A CONSTRUCTOR of the nominal type M taking K arguments, so its applications
-%have K+1 elements. A declared symbol with NO equations stays literal data,
-%while one with equations is always
-%rewritten at the call site and never survives as a value. So a declaration
-%alone is not enough - \+ fun(C) is what makes C data. Counting reducible
-%helpers here would only ever BLOCK an exclusion, never grant a wrong one, but
-%it blocks far too much: any (= (make-goal $f $a $r) (CPU $f $a $r)) would
-%stop CPU/3 from being Goal's only constructor. A wildcard output claims
-%nothing, so it does not block either.
-%The definedness flag is set early enough: parse_form/2 (filereader.pl)
-%register_fun's every (= (F ...) ...) of a file in the parse prepass, before
-%any clause of that file is compiled, so definition-below-use is fine. A
-%definition arriving from a LATER file invalidates the compiled clause's
-%symbol/effect dependency and the graph revisits it.
+%A constructor of the nominal type M taking K arguments. A declared symbol
+%with equations is rewritten at the call site and never survives as a value,
+%so only equation-less symbols count (counting helpers would wrongly block
+%exclusions). parse_form/2 registers every file's definitions before compiling
+%it, and a later file's definition invalidates the consumer.
 member_ctor(M, K, C) :- declared_fn_type(C, ATs, OT, _), length(ATs, K),
                         \+ fun(C),
-                        nonvar(OT), \+ wildcard_type_t(OT), type_compat_soft(OT, M).
+                        nonvar(OT), \+ wildcard_type(OT), type_compat_soft(OT, M).
 
-%An earlier branch consumed EVERY (Ctor V1 ... Vk) value: its pattern is
-%headed by Ctor at that arity and its arguments are distinct variables, so the
-%match cannot fail. A pattern like (CPU foo $a $r) constrains a field and
-%consumes nothing.
+%An earlier branch consumed every (Ctor V1 ... Vk) value when its pattern is
+%Ctor applied to distinct variables:
 prior_consumed_ctor(Prior, Ctor, K) :-
     member(P0, Prior),
     nonvar(P0),
@@ -455,7 +382,7 @@ clause_output_goals(F, out(OT, ATs), Args, ExpOut, BodyExpr, Gs) :-
         ( var(OT) -> ( term_variables(ATs, Vs), \+ memberchk_eq(OT, Vs)
                        -> parametric_output_check(F, ExpOut) ; true ),
                      Gs = []
-        ; wildcard_type_t(OT) -> Gs = []
+        ; wildcard_type(OT) -> Gs = []
         ; nonvar(BodyExpr), BodyExpr = [Q, QV], Q == quote, \+ atomic(QV)
           -> with_quoted_declared_params(
                  Args, ATs,
@@ -480,10 +407,8 @@ clause_output_goals(F, out(OT, ATs), Args, ExpOut, BodyExpr, Gs) :-
           ; St == unknown -> type_guard(F, ExpOut, OT, Gs)
           ; Gs = [] ) ).
 
-%A quoted compound is unevaluated, but its runtime value still has structural
-%shape. Check that shape directly instead of asking value_candidate_types/2,
-%which would interpret an atom-headed term such as (+ 1 2) as a CALL and
-%inherit Number from +. Expression remains the unconstrained supertype.
+%A quoted compound is unevaluated but has structural shape; check it directly,
+%since value_candidate_types/2 would read (+ 1 2) as a call returning Number.
 quoted_compound_output_status(Value, Required, Status) :-
     quoted_structural_value_status(Value, Required, Status).
 
@@ -495,7 +420,7 @@ quoted_structural_value_status(Value, T, Status) :-
          ; Status = mismatch )
     ; Status = unknown ).
 quoted_structural_value_status(_, T, ok) :-
-    wildcard_type_t(T), !.
+    wildcard_type(T), !.
 quoted_structural_value_status(Value, T, Status) :-
     is_union(T), !, T = ['|'|Members],
     quoted_union_status(Value, Members, Status).
@@ -514,7 +439,7 @@ quoted_structural_value_status(Value, T, Status) :-
     atom(T), declared_newtype(T, Representation), !,
     quoted_structural_value_status(Value, Representation, Status).
 quoted_structural_value_status(Value, T, Status) :-
-    atom(T), \+ primitive_type(T), \+ wildcard_type_t(T),
+    atom(T), \+ primitive_type(T), \+ wildcard_type(T),
     structural_pattern_fields(Value, T, Fields, FieldTs), !,
     quoted_fields_status(Fields, FieldTs, Status).
 quoted_structural_value_status(Value, T, Status) :-
@@ -559,11 +484,9 @@ quoted_structural_type(Value, Type) :-
     maplist(quoted_structural_type, Value, Type).
 quoted_structural_type(_, 'Expression').
 
-%Atom/Expression parameters intentionally carry no tknown attribute because
-%they are checker wildcards. Inside a quote, however, the declaration is
-%positive structural information: the runtime slot contains that parameter
-%value literally. Publish the declaration mapping only for this output check,
-%without changing the variables' ordinary checker attributes.
+%Atom/Expression parameters carry no tknown attribute, but inside a quote the
+%declaration is positive structural information about the slot. Publish it
+%for this output check only.
 with_quoted_declared_params(Args, Types, Goal) :-
     quoted_param_pairs(Args, Types, Pairs),
     ( catch(b_getval('$quoted_declared_params', Saved), _, fail) -> true

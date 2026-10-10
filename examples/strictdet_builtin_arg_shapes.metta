@@ -1,4 +1,4 @@
-; builtin_call_determinism/3 is keyed on (name, arity) only, so one worst-case
+; The builtin registry is keyed on (name, arity) only, so one worst-case
 ; verdict has to serve every call site. Most of the weak entries are weak for a
 ; SHAPE reason - length/2, append/3 and select/3 INVERT over an open list,
 ; min_list/2 has no answer for (), and bool/1 invents a boolean it was not

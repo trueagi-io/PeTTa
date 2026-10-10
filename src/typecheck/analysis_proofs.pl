@@ -1,22 +1,17 @@
-%%% Functional analysis records and the memo boundary.
+%%% Analysis proof records and the proof memo.
 %
-% Analyses return one uniform, closed record:
+% Analyses return one closed record:
 %
 %   analysis_proof(Subject, Verdict,
 %                  requirements(BoundaryRequirements),
 %                  certificates(OutputCertificates),
 %                  dependencies(Dependencies))
 %
-% The core walkers communicate proof observations through a backtrackable,
-% dynamically scoped event stack. A surrounding analysis_collect/2 turns the
-% stack frame into ordinary returned data; no result survives that boundary.
-% Nested proof-producing analyses contribute one returned proof record to their
-% caller, so a top-level proof contains the transitive evidence it consumed.
-%
-% Owns analysis_proof/5 construction/projection, observation collection, and
-% the sole analysis_memo/2 cache API. Consumes dependency-event matching and
-% declaration/type dependency extraction. Boundary: the dynamic memo is
-% private by convention; all reads, writes, and invalidation use this API.
+% Walkers report observations on a backtrackable, dynamically scoped event
+% stack; analysis_collect/2 turns a frame into returned data. A nested proof
+% is one observation of its caller, so a top-level proof carries the
+% transitive evidence it consumed. analysis_memo/2 is read and written only
+% through this API.
 
 :- dynamic analysis_memo/2.
 :- dynamic analysis_memo_dep/2. % analysis_memo_dep(Dependency, MemoKey)
@@ -56,38 +51,6 @@ analysis_cache_remove_key(Key) :-
 analysis_cache_remove_keys(Keys) :-
     forall(member(Key, Keys), analysis_cache_remove_key(Key)).
 
-analysis_cache_keys(Template, Keys) :-
-    findall(Key,
-            ( analysis_memo(Key, _),
-              subsumes_term(Template, Key) ),
-            Keys0),
-    sort(Keys0, Keys).
-
-% Legacy selectors remain for callers which are not mutation boundaries.  A
-% program mutation goes through analysis_cache_invalidate_event/1 below: it
-% removes only proofs whose recorded (or memo-key-implied) dependencies match.
-analysis_cache_invalidate(all) :-
-    findall(Key, analysis_memo(Key, _), Keys0),
-    sort(Keys0, Keys),
-    analysis_cache_remove_keys(Keys).
-analysis_cache_invalidate(det) :-
-    analysis_cache_keys(det(_, _), Keys),
-    analysis_cache_remove_keys(Keys).
-analysis_cache_invalidate(assume) :-
-    analysis_cache_keys(assume(_, _), Keys),
-    analysis_cache_remove_keys(Keys).
-analysis_cache_invalidate(effect) :-
-    analysis_cache_keys(effect(_, _, _), Keys),
-    analysis_cache_remove_keys(Keys).
-analysis_cache_invalidate(effect(F)) :-
-    analysis_cache_keys(effect(F, _, _), Keys),
-    analysis_cache_remove_keys(Keys).
-analysis_cache_invalidate(output) :-
-    analysis_cache_keys(output(_, _, _), Keys),
-    analysis_cache_remove_keys(Keys).
-analysis_cache_invalidate(output(Kind, F, N)) :-
-    analysis_cache_remove_key(output(Kind, F, N)).
-
 analysis_cache_invalidate_event(Event) :-
     findall(Key,
             ( mutation_candidate_dependency(Event, Dependency),
@@ -96,8 +59,15 @@ analysis_cache_invalidate_event(Event) :-
     sort(Keys0, Keys),
     analysis_cache_remove_keys(Keys).
 
-analysis_cache_invalidate_outputs(F) :-
-    analysis_cache_keys(output(_, F, _), Keys),
+%Symbol teardown: ordinary mutations go through analysis_cache_invalidate_event/1,
+%but a forgotten symbol's own effect and output proofs are removed by name.
+analysis_cache_forget_symbol(F) :-
+    findall(Key,
+            ( analysis_memo(Key, _),
+              ( subsumes_term(effect(F, _, _), Key)
+              ; subsumes_term(output(_, F, _), Key) ) ),
+            Keys0),
+    sort(Keys0, Keys),
     analysis_cache_remove_keys(Keys).
 
 analysis_memo_dependencies(Key, Proof, Dependencies) :-
@@ -141,11 +111,9 @@ analysis_make_proof(Subject, Verdict, Events, ExtraDependencies, Proof) :-
                            certificates(Certs),
                            dependencies(Deps)).
 
-%Nested analyses return complete proofs. Carry one proof observation through
-%the collection boundary and merge its already-batched result lists here;
-%replaying every dependency through reset/shift at every nesting level makes
-%deep call analyses quadratic in observations. Boundary requirements remain
-%local to their proof subject and are deliberately not inherited.
+%Nested analyses return complete proofs; merge their already-batched lists
+%here (replaying every dependency at every nesting level is quadratic).
+%Boundary requirements stay with their own proof subject.
 analysis_events_parts([], Bs-Bs, Cs-Cs, Ds-Ds).
 analysis_events_parts([required_bound(Pos, Kind)|Events],
                       [bound(Pos, Kind)|Bs]-BT, Cs-CT, Ds-DT) :- !,
@@ -176,20 +144,15 @@ analysis_proof_certificates(analysis_proof(_, _, _, certificates(Certs), _), Cer
 analysis_proof_dependencies(analysis_proof(_, _, _, _, dependencies(Deps)), Deps).
 
 analysis_reemit_proof(Proof) :-
-    %Boundary requirements belong to Proof's subject. A caller may depend on
-    %the callee proof, but must never reinterpret the callee's argument
-    %positions as its own; analysis_events_parts/4 merges only certs and deps.
+    %A caller may depend on the callee proof but must never reinterpret the
+    %callee's argument positions as its own.
     analysis_emit(proof(Proof)).
 
 % Conservative dependency inventory for an expression or clause-set term.
-% Every real named call records its declaration/effect and both certificate
-% families. A declared-but-as-yet undefined call or bare symbol instead gets a
-% late_* dependency, so its first definition invalidates that decision without
-% waking ordinary same-file callers already covered by the declaration/body
-% prepasses.
-% Type dependencies are attached only when the term actually carries them;
-% the old "all types in the program" approximation would make the Phase-4
-% dependency graph effectively global on every constructor declaration.
+% Every named call records its declaration, effect and both certificate
+% families; a declared-but-undefined call or bare symbol gets a late_*
+% dependency, so its first definition invalidates the decision. Type
+% dependencies are attached only for types the term carries.
 analysis_term_dependencies(Term, Dependencies) :-
     analysis_term_inventory(Term, Calls0-[], Symbols0-[]),
     sort(Calls0, Calls),
@@ -208,9 +171,7 @@ analysis_term_dependencies(Term, Dependencies) :-
 
 analysis_symbol_dependency(S, late_symbol(S)) :-
     \+ fun(S), fn_decl(S, _, _, _, _, _).
-%A bare value-symbol lookup consumes the absence of a value declaration too:
-%a later declaration can change its candidate type and must invalidate the
-%compiled decision.
+%A bare value-symbol lookup also consumes the absence of a value declaration:
 analysis_symbol_dependency(S, declaration(value, S)).
 
 analysis_call_dependency(F, N, D) :-
@@ -247,10 +208,8 @@ analysis_function_decl_dependencies(F, Dependencies) :-
     append(NormalizedDeps, SourceDeps, Ds0),
     sort(Ds0, Dependencies).
 
-%Type normalization/checking consumes negative declarations as well as
-%positive ones.  Recording all declaration kinds for an atom is a deliberate
-%small over-approximation that prevents a late kind declaration from changing
-%the interpretation of an already-compiled type spelling invisibly.
+%Type normalization consumes negative declarations too, so an atom records
+%every declaration kind (a small over-approximation):
 analysis_type_dependency(T, declaration(alias, T)) :- atom(T).
 analysis_type_dependency(T, declaration(newtype, T)) :- atom(T).
 analysis_type_dependency(T, declaration(foreign, T)) :- atom(T).
@@ -264,9 +223,7 @@ analysis_type_dependency(T, ctor_set(T)) :-
 analysis_type_dependency(T, D) :-
     nonvar(T), is_list(T), member(E, T), analysis_type_dependency(E, D).
 
-%One traversal collects the call and bare-symbol inventories consumed by the
-%dependency proof. Difference lists avoid the append tree formerly built by
-%two independent recursive walkers.
+%One traversal collects the call and bare-symbol inventories:
 analysis_term_inventory(Term, Calls-CallsTail, Symbols-SymbolsTail) :-
     ( var(Term)
       -> Calls = CallsTail, Symbols = SymbolsTail
@@ -297,9 +254,3 @@ analysis_terms_inventory([Term|Terms], Calls-CallsTail,
     analysis_term_inventory(Term, Calls-CallsMid, Symbols-SymbolsMid),
     analysis_terms_inventory(Terms, CallsMid-CallsTail,
                              SymbolsMid-SymbolsTail).
-
-analysis_snapshot_proof(Subject, Snapshot, Dependencies,
-                        analysis_proof(Subject, snapshot(Snapshot),
-                                       requirements([]), certificates([]),
-                                       dependencies(Deps))) :-
-    sort(Dependencies, Deps).

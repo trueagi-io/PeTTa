@@ -1,10 +1,3 @@
-%Runtime function add-atom cleans up its own staged raw atom, registration,
-%metadata and compiled-dependency state on failure or exception. This remains
-%a bounded transaction: an embedder observing concurrent mutation can still
-%see the short interval between staging and cleanup, and a multi-function
-%dependency cascade is not atomically rolled back as one unit.
-:- discontiguous 'add-atom'/3.
-%
 %Since both normal add-attom call and function additions needs to add the S-expression:
 add_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                assertz(Term),
@@ -15,42 +8,38 @@ remove_sexp(Space, [Rel|Args]) :- Term =.. [Space, Rel | Args],
                                   retractall(Term),
                                   maybe_uncache_type_decl(Space, [Rel|Args]).
 
-%Add a function atom:
+%Add a function atom. On failure or exception it rolls back its staged raw
+%atom, registration, metadata and compiled-dependency state; concurrent
+%observers can still see the interval between staging and cleanup.
 'add-atom'(Space, Term, true) :- Term = [=,[FAtom|W],_], !,
                                  length(W, SourceArity),
                                  snapshot_runtime_function_add(
                                      FAtom, SourceArity, Snapshot),
                                  catch(
                                      ( runtime_add_function_tx(
-                                           Space, Term, FAtom, W, Snapshot,
-                                           RawRef, ClauseRef)
+                                           Space, Term, FAtom, W, Snapshot)
                                        -> true
                                        ; cleanup_runtime_function_add(
-                                           FAtom, RawRef, ClauseRef,
-                                           Snapshot),
+                                           FAtom, Snapshot),
                                        fail ),
                                      Error,
                                      ( cleanup_runtime_function_add(
-                                           FAtom, RawRef, ClauseRef,
-                                           Snapshot),
-                                       throw(Error) )),
-                                 nb_setval('$runtime_add_raw_ref', none),
-                                 nb_setval('$runtime_add_clause_ref', none).
+                                           FAtom, Snapshot),
+                                       throw(Error) )).
 
-runtime_add_function(Space, Term, FAtom, W, RawRef, ClauseRef) :-
-    runtime_add_function_tx(
-        Space, Term, FAtom, W, no_runtime_snapshot, RawRef, ClauseRef).
+%Add an atom to the space:
+'add-atom'(Space, Term, true) :-
+    typed_space_runtime_value_ok(Space, Term),
+    add_sexp(Space, Term).
 
-runtime_add_function_tx(Space, Term, FAtom, W, Snapshot, RawRef, ClauseRef) :-
+runtime_add_function_tx(Space, Term, FAtom, W, Snapshot) :-
     Term = [=, [FAtom|W], TermBody],
     RawTerm =.. [Space, '=', [FAtom|W], TermBody],
     assertz(RawTerm, RawRef),
-    % Publish the exact staged ref before any later goal can throw.  Ordinary
-    % Prolog output arguments are undone during exception unwinding; storing
-    % it non-backtrackably lets the transaction cleanup erase exactly this raw
-    % clause without variant-matching older atoms.
-    remember_runtime_add_ref(Snapshot, raw, RawRef),
-    nb_setval('$runtime_add_raw_ref', RawRef),
+    % Bindings are undone when a later goal fails or throws, so the staged refs
+    % are stored non-backtrackably in the snapshot for the cleanup to erase.
+    arg(7, Snapshot, Refs),
+    nb_setarg(1, Refs, RawRef),
     maybe_cache_type_decl(Space, Term),
     register_fun(FAtom),
     length(W, N),
@@ -63,8 +52,7 @@ runtime_add_function_tx(Space, Term, FAtom, W, Snapshot, RawRef, ClauseRef) :-
         clause_changed(FAtom/N, runtime_preparing)),
     once(translate_clause(Term, Clause, true, Dependencies)),
     assertz(Clause, ClauseRef),
-    remember_runtime_add_ref(Snapshot, clause, ClauseRef),
-    nb_setval('$runtime_add_clause_ref', ClauseRef),
+    nb_setarg(2, Refs, ClauseRef),
     assertz(translated_from(ClauseRef, Term)),
     record_compiled_dependencies(ClauseRef, FAtom/N, Dependencies),
     notify_mutation(clause_changed(FAtom/N, runtime)),
@@ -83,21 +71,17 @@ snapshot_runtime_function_add(F, N,
     unified_checker_cache:unified_summary_cache_snapshot_event(
         clause_changed(F/N, runtime_preparing), CacheEntries).
 
-cleanup_runtime_function_add(F, RawRef, ClauseRef,
-        runtime_add_snapshot(N, FunFacts, Arities, Recompile,
-                             CompiledClauses, CacheEntries, Refs)) :-
-    runtime_add_clause_ref(ClauseRef, Refs, StagedClauseRef),
-    ( nonvar(StagedClauseRef)
-      -> forget_compiled_dependencies(StagedClauseRef),
-         retractall(translated_from(StagedClauseRef, _)),
-         ignore(catch(erase(StagedClauseRef), _, fail))
+cleanup_runtime_function_add(F,
+        runtime_add_snapshot(N, FunFacts, Arities, Recompile, CompiledClauses,
+                             CacheEntries, runtime_add_refs(RawRef, ClauseRef))) :-
+    ( ClauseRef \== none
+      -> forget_compiled_dependencies(ClauseRef),
+         retractall(translated_from(ClauseRef, _)),
+         ignore(catch(erase(ClauseRef), _, fail))
     ; true ),
-    runtime_add_raw_ref(RawRef, Refs, StagedRawRef),
-    ( nonvar(StagedRawRef)
-      -> ignore(catch(erase(StagedRawRef), _, fail))
+    ( RawRef \== none
+      -> ignore(catch(erase(RawRef), _, fail))
     ; true ),
-    nb_setval('$runtime_add_raw_ref', none),
-    nb_setval('$runtime_add_clause_ref', none),
     restore_runtime_function_clauses(F, CompiledClauses),
     restore_recompile_state(F, Recompile),
     retractall(fun(F)),
@@ -113,7 +97,7 @@ cleanup_runtime_function_add(F, RawRef, ClauseRef,
     % Recompile analysis may have staged post-add summaries before a later
     % operation failed.  The rollback restored the old program state, so make
     % that failure boundary explicit and conservative.
-    unified_checker_cache:unified_summary_cache_restore(CacheEntries).
+    unified_checker_cache:unified_summary_cache_store_many(CacheEntries).
 
 snapshot_runtime_function_clauses(F, Clauses) :-
     findall(runtime_compiled_clause(Source, Head, Body, Origin, Dependencies),
@@ -150,43 +134,12 @@ restore_runtime_compiled_clauses(
 runtime_source_key([Eq, [F|Args], _], F/N) :-
     Eq == (=), atom(F), is_list(Args), length(Args, N).
 
-remember_runtime_add_ref(
-        runtime_add_snapshot(_, _, _, _, _, _, Refs), raw, Ref) :- !,
-    nb_setarg(1, Refs, Ref).
-remember_runtime_add_ref(
-        runtime_add_snapshot(_, _, _, _, _, _, Refs), clause, Ref) :- !,
-    nb_setarg(2, Refs, Ref).
-remember_runtime_add_ref(_, _, _).
-
-runtime_add_raw_ref(RawRef, _, RawRef) :- nonvar(RawRef), !.
-runtime_add_raw_ref(_, runtime_add_refs(Stored, _), Stored) :-
-    Stored \== none, !.
-runtime_add_raw_ref(_, _, Stored) :-
-    catch(nb_getval('$runtime_add_raw_ref', Value), _, fail),
-    Value \== none, !,
-    Stored = Value.
-runtime_add_raw_ref(_, _, _).
-
-runtime_add_clause_ref(ClauseRef, _, ClauseRef) :- nonvar(ClauseRef), !.
-runtime_add_clause_ref(_, runtime_add_refs(_, Stored), Stored) :-
-    Stored \== none, !.
-runtime_add_clause_ref(_, _, Stored) :-
-    catch(nb_getval('$runtime_add_clause_ref', Value), _, fail),
-    Value \== none, !,
-    Stored = Value.
-runtime_add_clause_ref(_, _, _).
-
-%Add an atom to the space:
-'add-atom'(Space, Term, true) :-
-    typed_space_runtime_value_ok(Space, Term),
-    add_sexp(Space, Term).
-
 %%Remove a function atom:
 'remove-atom'(Space, Term, Removed) :- Term = [=,[F|Args],Body], !,
                                        remove_sexp(Space, Term),
                                        catch(nb_getval(F, Prev), _, Prev = []),
                                        (   select(Meta, Prev, Rest),
-                                           fun_meta_parts(Meta, Args0, Body0, _),
+                                           Meta = fun_meta(Args0, Body0, _),
                                            Args0 =@= Args,
                                            Body0 =@= Body
                                            -> ( Rest == [] -> nb_delete(F)

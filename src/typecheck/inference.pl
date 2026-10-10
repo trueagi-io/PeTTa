@@ -1,30 +1,11 @@
 %%% Undeclared-function inference and parametric declaration validation.
 %
-% Owns: clause-local inference assumptions, inferred function types, promised
-% declaration variables, and parametric input/output honesty checks.
-% Consumes: canonical declaration/type queries and translation-time type
-% candidate attributes.
-% Boundary: inferred_fn_type/3 is the sole persistent store; all other
-% assumptions are scoped and restored around one clause translation.
-%
-%%% The promised type variables of the clause currently being compiled.
-%
-% The snapshot above is a promise the declaration made to every caller, and
-% two rules follow from that, both of which need to know the set while the
-% BODY is being compiled (translate_clause/3 publishes it here):
-%
-%   1. Nothing the body reads may be discharged against one - it stands for a
-%      type the caller picked, not one this clause knows (indefinite_candidate/1).
-%   2. Nothing the compiler GUESSES may pin one. translate_closure_call/5
-%      assumes an unknown head is a function and binds its type to an arrow
-%      shape; that is sound inference about an undeclared function's own
-%      parameter, but on a promised variable it is the compiler inventing a
-%      fact about a position the declaration quantifies universally over -
-%      and it costs nothing to skip, since a non-function head still reduces
-%      to data exactly as before.
-%
-% Set with b_setval/2 so a nested compile (specialization, eval) that is later
-% abandoned by backtracking cannot leak its set into the outer clause.
+%%% The promised type variables of the clause being compiled: a declaration's
+%%% argument type variables are the caller's choice, so while the body is
+%%% compiled (1) nothing it reads may be discharged against one
+%%% (indefinite_candidate/1), and (2) the compiler may not pin one by guessing,
+%%% as translate_closure_call/5 does for an unknown head. Scoped by b_setval so
+%%% an abandoned nested compile cannot leak its set.
 param_promises_scope(Promises, Outer) :- catch(b_getval('$param_promises', Outer), _, Outer = []),
                                          b_setval('$param_promises', Promises).
 
@@ -34,18 +15,16 @@ param_promise_var(V) :- var(V),
                         catch(b_getval('$param_promises', Vs), _, fail),
                         memberchk_eq(V, Vs).
 
-%After the body is translated, every snapshotted position must still be unbound
-%(var-var aliasing to another polymorphic function) or a wildcard. If the body
-%forced it to a concrete type the declaration is dishonest - mirror
-%parametric_output_check and reject at compile time:
+%After the body is translated, every snapshotted position must still be
+%unbound or a wildcard; a body that forced one to a concrete type makes the
+%declaration dishonest:
 parametric_param_check(F, Vars) :- forall(member(T, Vars),
                                           ( var(T) -> true
-                                          ; wildcard_type_t(T) -> true
+                                          ; wildcard_type(T) -> true
                                           ; throw(error(non_parametric_param(F, T), typecheck)) )).
 
-%Only a candidate carrying CONCRETE type evidence makes a bottom body a
-%dishonest parametric declaration: the marker, a wrapped literal and a still
-%open type variable are all "no concrete result stated here".
+%Only concrete type evidence makes a bottom body a dishonest parametric
+%declaration; the marker, a wrapped literal or an open variable state nothing.
 parametric_output_check(F, ExpOut) :-
     ( var(ExpOut)
       -> ( known_candidates(ExpOut, Cs), member(C, Cs),
@@ -54,9 +33,8 @@ parametric_output_check(F, ExpOut) :-
             ; true )
        ; throw(error(non_parametric_output(F), typecheck)) ).
 
-%A declared argument type variable promises universality. Snapshot every type
-%variable still open after head-pattern binding, including nested variables;
-%the post-body check above must reject any one the implementation pins.
+%Snapshot every type variable still open after head-pattern binding, including
+%nested ones, for the post-body check above.
 parametric_param_snapshot(out(_, ATs), Vars) :- !, term_variables(ATs, Vars).
 parametric_param_snapshot(_, []).
 
@@ -69,21 +47,13 @@ strict_check_function_typed(F, Args) :- ( strict_mode(true), \+ sub_atom(F, 0, _
                                              ; throw(error(strict_missing_function_type(F, N), typecheck)) )
                                            ; true ).
 
-%%% Local type inference for undeclared functions %%%
-%
-% While an undeclared function's clause is translated, its variable parameters
-% carry fresh assumption type variables; typed call sites in the body bind them
-% by unification. A parameter whose assumption sees conflicting uses is tainted
-% (no knowledge is recorded for it). This includes the variables of a
-% destructuring head pattern - they are parameters of the clause too - whose
-% assumptions are then rebuilt into the pattern's own type, the only thing a
-% call site can go on once the body has stopped guarding them.
-%
-% The harvested types live in an internal store, are never asserted into &self,
-% and are used only to *add* knowledge: eliminating guards, typing call
-% outputs, and satisfying strict mode. Call sites of inferred functions never
-% throw at compile time, and demand an inferred type only where the value is
-% visibly of another one (see check_call_arg/5).
+%%% Local type inference for undeclared functions. While a clause is
+%%% translated, its parameters (including destructured pattern variables)
+%%% carry fresh assumption type variables that typed call sites bind; a
+%%% parameter seeing conflicting uses is tainted. The harvested types are an
+%%% internal store used only to add knowledge: eliminating guards, typing call
+%%% outputs, satisfying strict mode. Call sites of inferred functions demand an
+%%% inferred type only where a value is visibly of another (check_call_arg/5).
 :- dynamic inferred_fn_type/3.     % inferred_fn_type(F, ArgTypes, OutType)
 
 inferred_decl_arity(F, N, ATs, OT) :- inferred_fn_type(F, ATs, OT), length(ATs, N).
@@ -107,10 +77,8 @@ assume_param_type(Arg, t(Ps, Ts), t(Ps1, [T|Ts])) :- ( var(Arg)
                                                           ; add_known_type(Arg, T), Ps1 = [a(Arg, T)|Ps] )
                                                      ; value_single_type(Arg, T)
                                                        -> ctor_pattern_field_types(Arg), Ps1 = Ps
-                                                     %a variable bound by a DESTRUCTURING head pattern is
-                                                     %every bit as much a parameter of the clause, so it
-                                                     %gets the same fresh assumption (the pattern's own
-                                                     %type is rebuilt from those in infer_param_type/4):
+                                                     %a destructured variable is a parameter too
+                                                     %(its pattern type is rebuilt in infer_param_type/4):
                                                      ; is_list(Arg) -> assume_pattern_vars(Arg, Ps, Ps1)
                                                      ; Ps1 = Ps ).
 
@@ -121,16 +89,11 @@ assume_pattern_vars([A|As], Ps0, Ps) :- ( var(A) -> ( known_singleton(A, _) -> P
                                         ; Ps1 = Ps0 ),
                                         assume_pattern_vars(As, Ps1, Ps).
 
-%A pattern headed by a uniquely declared constructor types its fields from that
-%declaration, whatever the scrutinee's type turns out to be: (: P (-> Number
-%Number Pair)) makes the $a and $b of (= (f (P $a $b)) ...) Numbers. Pure added
-%knowledge - the fields of a value carrying P's tag are what P declared them.
-%A literal field that contradicts the declaration only means this clause head
-%cannot match a well-typed value; inference stays out of that judgement.
-%\+ fun(Tag) is member_ctor/3's own constructor test: a declared symbol WITH
-%equations is a function, and a function-headed pattern is compiled as an
-%inverted CALL of that function - its fields are solved, not destructured -
-%so its declaration says nothing about what the pattern variables hold.
+%A pattern headed by a uniquely declared constructor (\+ fun(Tag), as in
+%member_ctor/3) types its fields from that declaration: (: P (-> Number Number
+%Pair)) makes the $a and $b of (= (f (P $a $b)) ...) Numbers. A function-headed
+%pattern is an inverted call whose declaration says nothing about its
+%variables, and a contradicting literal field is left to the head match.
 ctor_pattern_field_types(Arg) :- ( functional_pattern_application(Arg, _, _)
                                    -> ( functional_pattern_signature(Arg, _ResultType,
                                                                      PatternArgs, ArgTypes)
@@ -141,7 +104,7 @@ ctor_pattern_field_types(Arg) :- ( functional_pattern_application(Arg, _, _)
                                                  true)
                                       ; true )
                                   ; is_list(Arg), Arg = [Tag|Fs], atom(Tag), \+ fun(Tag), Fs \== [],
-                                   length(Fs, N), findall(ATs, fn_decl_arity(Tag, N, ATs, _), [ATs1])
+                                   length(Fs, N), unique_fn_decl(Tag, N, ATs1, _)
                                    -> catch(maplist(bind_param_type, Fs, ATs1),
                                             error(literal_type_mismatch(_, _), typecheck), true)
                                     ; true ).
@@ -171,22 +134,17 @@ store_inferred_type(F, Pairs, Args, ExpOut) :- catch(b_getval('$assump_taint', T
                                                ( member(T, [OT|ATs]), T \== '%Undefined%'
                                                  -> merge_inferred(F, ATs, OT) ; true ).
 
-%A structural parameter type is only worth storing if it still ACCEPTS the very
-%pattern it was read off. The two readings of a tuple type (see
-%tagged_tuple_type/3) do not compose freely: (Statement $s $p) under a declared
-%(: Statement Type) infers (Type Number Number), which reads back as a tagged
-%shape demanding the literal atom Type in head position - a claim no value
-%matching that pattern satisfies. Round-tripping the pattern rejects exactly
-%those, whichever way the type was built.
+%A structural parameter type is stored only if it still accepts the pattern it
+%was read off: (Statement $s $p) under (: Statement Type) infers
+%(Type Number Number), which reads back as a tagged shape no matching value
+%has.
 pattern_type_roundtrip(Arg, T, TN) :- ( \+ is_list(Arg) -> TN = T
                                       ; T \== '%Undefined%', \+ \+ check_value(Arg, T, ok) -> TN = T
                                       ; TN = '%Undefined%' ).
 
-%The type of a destructuring parameter is its pattern with each field replaced
-%by the field's inferred type - (stv $s $c) with both fields used as numbers is
-%(stv Number Number). Rebuilding it is not decoration: the fields carry
-%assumption types now, so the body no longer guards them, and this is what
-%keeps a call site checking that (stv "a" "b") is not one of those.
+%A destructuring parameter's type is its pattern with each field replaced by
+%its inferred type: (stv $s $c) used as numbers is (stv Number Number). The
+%fields' body guards were elided, so call sites need this shape to check.
 infer_param_type(Pairs, Taints, Arg, T) :- ( var(Arg) -> ( memberchk_eq(Arg, Taints) -> T = '%Undefined%'
                                                          ; member(a(P, Tv), Pairs), P == Arg -> T = Tv
                                                          ; known_singleton(Arg, K) -> T = K
@@ -209,16 +167,10 @@ normalize_inferred(T, ['List', ETN]) :- ground(T), list_type(T, ET), !,
 normalize_inferred(T, T) :- ground(T), is_arrow_type(T), !.
 normalize_inferred(_, '%Undefined%').
 
-%A destructuring parameter's shape is knowledge too, so it survives instead of
-%collapsing - but only if it will be READ BACK as the tagged shape it was built
-%from. (Statement $s $p) under a declared (: Statement Type) rebuilds to
-%(Statement T1 T2), which tagged_tuple_type/3 reads positionally, as a 3-field
-%record whose first field is a Statement: a different, and false, claim about
-%the value. An undefined field collapses the whole shape as well - a partly
-%known tuple type is not a shape any call site can check. Parameters only:
-%their shapes are rebuilt from patterns this file controls and are verified
-%against those patterns afterwards (pattern_type_roundtrip/3), which is not
-%true of an output type read off an arbitrary body expression.
+%A destructured parameter's shape survives only if it reads back as the tagged
+%shape it was built from (tagged_tuple_type/3), and collapses when any field
+%is undefined: a partly known tuple is not checkable. Parameter shapes are
+%verified against their patterns afterwards (pattern_type_roundtrip/3).
 normalize_inferred_param(T, TN) :- ( is_list(T), T = [Tag|Fs], atom(Tag), Fs \== [],
                                      maplist(normalize_inferred_param, Fs, FTs),
                                      \+ memberchk('%Undefined%', FTs),

@@ -1,33 +1,24 @@
 %%%%%%%%%% Compile-time typechecking support %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
-% The checker is organized as separately loaded ownership units. Predicate
-% definitions are never interleaved across files; each persistent store has an
-% explicit dynamic/thread_local declaration in its owning file. Consequently
-% the order below is organizational, not semantic. The boundary matrix loads
-% the non-module units in a different order and rejects predicates defined in
-% more than one unit.
+% Each predicate is defined in exactly one unit and each store is declared in
+% its owning unit, so load order is not semantic (examples/
+% typecheck_boundary_matrix.sh loads the user-space units permuted).
 %
-% Unified checker modules (see typecheck/UNIFIED_CHECKER.md):
-%   abstract_domain.pl   value facts and cardinality intervals
-%   call_summaries.pl    declarative builtin modes and postconditions
-%   relational_ir.pl     single lowering of source control/evaluation forms
-%   ir_analyzer.pl       flow-sensitive interpretation of relational IR
+% Relational checker modules (see typecheck/UNIFIED_CHECKER.md): the abstract
+% domain, builtin call summaries, the relational IR, its analyzer, and the
+% bridge that feeds their results to the translator. builtin_registry.pl holds
+% the builtin table shared by the translator and both checkers.
 %
-% Legacy compatibility module:
-%   builtin_registry.pl  existing public builtin metadata views
-%
-% Documented non-module boundaries (kept in `user` while translator/metta
-% still consume their interfaces directly):
+% User-space units, consumed directly by the translator:
 %   flags_arrows.pl      modes and canonical arrow syntax
-%   decl_store.pl        canonical declaration store and lifecycle
-%   type_lang.pl         type language, normalization, compatibility, attrs
+%   decl_store.pl        declaration store and lifecycle
+%   type_lang.pl         type language, compatibility, type attributes
 %   value_checks.pl      static/deferred value checks and call-site guards
 %   clause_checks.pl     clause patterns, contextual results, output checks
 %   inference.pl         undeclared inference and parametric promises
 %   oracles.pl           runtime soundness/cardinality oracles
-%   analysis_proofs.pl   functional proof records and memo boundary
-%   det_builtins.pl      effective builtin/call effect lookup
-%   det_proofs.pl        determinism walker, certificates, procedural rules
+%   analysis_proofs.pl   proof records and the proof memo
+%   det_proofs.pl        determinism walker, certificates, builtin rules
 %   det_analysis.pl      effect flow, coverage, whole-set validation
 %   det_validate.pl      committed-arrow validation and bound provisos
 %   dependency_graph.pl  compiled dependencies and mutation invalidation
@@ -45,7 +36,6 @@
        'typecheck/decl_store.pl',
        'typecheck/dependency_graph.pl',
        'typecheck/det_analysis.pl',
-       'typecheck/det_builtins.pl',
        'typecheck/det_proofs.pl',
        'typecheck/det_validate.pl',
        'typecheck/flags_arrows.pl',

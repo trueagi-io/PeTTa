@@ -1,36 +1,18 @@
-%%% Argument-aware transitive determinism through higher-order functions.
-%
-% Owns effect-polymorphic/conditional effect analysis, effect-flow helpers,
-% case coverage and whole-clause-set exhaustiveness validation.
-% Consumes declaration/type queries, the clause/body proof walker, proof-cache
-% interfaces, validation scopes, translated clause metadata, and dependency
-% publication. The persisted exhaustiveness verdict is owned here because it
-% has no individual compiled clause ref.
-% Boundary: this file contains every clause of its owned predicates.
+%%% Argument-aware transitive determinism through higher-order functions:
+%%% effect-polymorphic and closure-conditional effect analysis, case coverage
+%%% and whole-clause-set exhaustiveness validation.
 :- dynamic det_exhaustive_verdict/8.
 %A function whose declaration leaves a higher-order parameter uncommitted can
-%still be deterministic CONDITIONALLY on its closure
-%arguments: fold-flat is det exactly when the folded closure is det. The
-%unconditional body_determinism analyzes the callee's clauses in isolation -
-%the closure param applies with a plain -> head, which is not det evidence -
-%so it reports unspecified and a det caller's validation fails. Here, when
-%the ACTUAL argument at a call site is det, we re-analyze the callee's
-%clauses with the closure-parameter positions treated as det and certify the
-%call. The det assumption is scoped to copies of the callee's clause metas;
-%no global flag ever makes a plain -> arrow count as det.
-%
-%NOTE ON MECHANISM: the stored clause metas are captured (translator.pl)
-%before clause_param_types binds the declared arrow types onto the head param
-%vars, so those vars carry NO tknown arrow attribute. Rather than read and
-%upgrade an existing attribute, we DERIVE the det arrow from the function's
-%unique declaration and attach it to the copied head var at each arrow
-%position. The net effect is identical - the copy's param var reads as
-%-[det]-> for the var-head application in deterministic_expr - and it stays
-%scoped to the copy; the stored metas are never mutated.
-%A bounded effect-polymorphic declaration is used analytically only when it is
-%the unique declaration at this arity. Overload dispatch has its own type
-%branches, but the determinism walker sees only F/Arity and cannot soundly
-%choose one of several effect equations.
+%still be det conditionally on its closure arguments: fold-flat is det when
+%the folded closure is. When the actual argument at a call site is det, the
+%callee's clauses are re-analyzed with the closure positions treated as det.
+%Stored clause metas carry no arrow attribute (they are captured before
+%clause_param_types runs), so the det arrow is derived from the unique
+%declaration and attached to COPIES of the metas; a plain -> never counts as
+%det globally.
+%An effect-polymorphic declaration is used only when it is the unique
+%declaration at this arity: the walker sees only F/Arity and cannot choose
+%between several effect equations.
 effect_poly_decl(F, N, Name, ATs, Positions) :-
     findall(decl(As, Effect),
             fn_decl_copy(F, N, scheme(As, _), Effect, _, _),
@@ -43,12 +25,9 @@ effect_poly_decl(F, N, Name, ATs, Positions) :-
 stored_effect_position(Name, closure_arg(Idx, M), pos(Idx, M, Arrow)) :-
     effect_arrow_atom(Arrow, Name).
 
-%The declaration's intrinsic effect: analyze copied clause metadata with only
-%the $v closure slots assumed det. An unproved body remains unspecified rather
-%than being mislabeled nondet; either verdict rejects a det/semidet consumer,
-%but preserving unknown matters to callers that report why no proof exists.
-%The separate recursion stack is the same coinductive assumption used by
-%body_determinism_assuming/3.
+%The declaration's intrinsic effect: the clause metas analyzed with only the
+%$v closure slots assumed det. An unproved body stays unspecified, so callers
+%can report why no proof exists.
 effect_body_determinism(F, N, Name, Det) :-
     effect_body_determinism_proof(F, N, Name, Proof),
     analysis_proof_verdict(Proof, Det),
@@ -63,40 +42,19 @@ effect_body_determinism_proof(F, N, Name, Proof) :-
                         [effect(F/N), decl(F/N), clause_set(F/N)], Proof).
 effect_body_determinism_proof(F, N, Name, Proof) :-
     effect_poly_decl(F, N, Name, ATs, Positions),
-    catch(nb_getval(F, Metas0), _, Metas0 = []),
-    include(arity_meta(N), Metas0, Metas),
-    Metas \== [],
+    fun_metas(F, N, Metas),
     maplist(assume_det_meta(ATs, Positions), Metas, Upgraded),
     catch(b_getval('$effect_assume_stack', St), _, St = []),
     setup_call_cleanup(
         b_setval('$effect_assume_stack', [effect(F, N, Name)|St]),
-        ( with_det_enforced(enforced(F, N),
-                            clause_set_determinism_proof(Upgraded, ClauseProof)),
-          analysis_proof_verdict(ClauseProof, Raw),
-          effect_public_level(Raw, Det),
-          analysis_proof_requirements(ClauseProof, Bounds),
-          analysis_proof_certificates(ClauseProof, Certs),
-          analysis_proof_dependencies(ClauseProof, ClauseDeps),
-          analysis_term_dependencies(Upgraded, TermDeps),
-          append([[effect(F/N), decl(F/N), clause_set(F/N)],
-                  ClauseDeps, TermDeps], Ds0),
-          sort(Ds0, Deps),
-          Proof = analysis_proof(effect_body(F/N, Name), Det,
-                                 requirements(Bounds),
-                                 certificates(Certs),
-                                 dependencies(Deps)) ),
+        clause_set_subject_proof(effect_body(F/N, Name), F/N, enforced(F, N),
+                                 Upgraded, Proof),
         b_setval('$effect_assume_stack', St)),
     analysis_cache_store(effect(F, N, Name), Proof).
 
-effect_public_level(det, det).
-effect_public_level(semidet, semidet).
-effect_public_level(nondet, nondet).
-effect_public_level(unspecified, unspecified).
 
 %Instantiate $v from every corresponding closure argument and join it with the
-%intrinsic body verdict. A missing closure verdict stays `unspecified`: this is
-%accepted as an unknown call effect in ordinary code and rejected naturally
-%when a committed caller needs stronger evidence.
+%intrinsic body verdict. A missing closure verdict stays `unspecified`.
 effect_poly_call_determinism(F, N, Args, Det) :-
     effect_poly_decl(F, N, Name, _, Positions),
     effect_body_determinism(F, N, Name, BodyDet),
@@ -106,9 +64,7 @@ effect_poly_call_determinism(F, N, Args, Det) :-
     effect_join(IntrinsicAndClosure, Selection, Det).
 
 effect_poly_selection_determinism(F, N, Args, Det) :-
-    catch(nb_getval(F, Metas0), _, fail),
-    include(arity_meta(N), Metas0, Metas),
-    Metas \== [],
+    fun_metas(F, N, Metas),
     inferred_selection_determinism(F, N, Args, Metas, Det).
 
 effect_positions_instantiation([], _, det).
@@ -127,11 +83,8 @@ closure_effect_level(['|->', _, Body], _, Det) :- !,
     deterministic_expr_core(Body, R), det_result_effect(R, Det).
 closure_effect_level(partial(F, _), M, Det) :- !,
     named_closure_effect(F, M, Det).
-%A source-level partial application of a closure parameter, e.g.
-%($pred $x), is still a closure value when $pred has more arguments left.
-%The effect of applying that resulting closure is the parameter arrow's
-%effect; the ordinary expression walk separately accounts for evaluating the
-%bound arguments while forming it.
+%A partial application of a closure parameter, ($pred $x), is still a closure
+%when $pred has arguments left; applying it has the parameter arrow's effect.
 closure_effect_level([F|Bound], M, Det) :- var(F), !,
     known_singleton(F, K), arrow_head_level(K, L),
     K = [_|Rest], length(Rest, Len), Total is Len - 1,
@@ -163,22 +116,18 @@ effect_join(semidet, _, semidet) :- !.
 effect_join(_, semidet, semidet) :- !.
 effect_join(det, det, det).
 
-%Declared arrow parameter positions (any head but -[nondet]->, whose det-ness
-%is irrelevant because it is already handled as nondet), as
-%pos(Index, InArity, Head) where InArity is the arrow's parameter count. A
-%-[semidet]-> position is listed too: it is only ever UPGRADED to det when the
-%actual argument proves det, and a semidet actual simply fails the evidence
-%test below, which drops the whole path back to the normal fallbacks:
+%Declared arrow parameter positions other than -[nondet]->, as
+%pos(Index, InArity, Head). A -[semidet]-> position is only ever upgraded to
+%det when the actual argument proves det:
 arrow_det_positions(ATs, Positions) :- findall(pos(Idx, M, H),
                                               ( nth0(Idx, ATs, T), is_arrow_type(T),
                                                 T = [H|Rest], arrow_atom_det(H, L), L \== nondet,
                                                 length(Rest, Len), M is Len - 1 ),
                                               Positions).
 
-%Fun must have a UNIQUE arity-N declaration exposing at least one non-nondet
-%arrow parameter, and every such position's actual argument must be det (else
-%this path adds nothing and fails so the normal fallbacks run):
-det_closure_args_ok(Fun, N, Args) :- findall(ATs, fn_decl_arity(Fun, N, ATs, _), [ATs1]),
+%Fun must have a unique arity-N declaration exposing at least one non-nondet
+%arrow parameter, and every such position's actual argument must be det:
+det_closure_args_ok(Fun, N, Args) :- unique_fn_decl(Fun, N, ATs1, _),
                                      arrow_det_positions(ATs1, Positions),
                                      Positions \== [],
                                      det_closure_positions(Positions, Args).
@@ -188,36 +137,20 @@ det_closure_positions([pos(Idx, M, _)|Ps], Args) :- nth0(Idx, Args, Arg),
                                                     det_arg_evidence(Arg, M),
                                                     det_closure_positions(Ps, Args).
 
-%An actual argument carries det evidence when it is: a var whose known arrow
-%commits to det; a lambda with a det body; a (partial) application or bare
-%atom naming a function that is det at the relevant arity. Anything else
-%fails:
+%An actual argument carries det evidence when it is a var whose known arrow
+%commits to det, a lambda with a det body, or a (partial) application or atom
+%naming a function that is det at the relevant arity:
 det_arg_evidence(Arg, M) :- closure_effect_level(Arg, M, det).
-
-%A named function used as a VALUE is the same function it is when called, so
-%it is judged by the same relation - builtin table first, then the declared
-%arrow, then clause analysis. Reading only the declaration here is what let
-%a declaration certify `or` as a deterministic fold accumulator while a
-%direct call to or/2 was rejected: one symbol, two verdicts. The table is the
-%checker's own knowledge and outranks a
-%declaration it contradicts, exactly as it does for a direct call and for the
-%oracle's wrapping decision (oracle_det_believed/3).
-det_atom_evidence(F2, M) :- catch(function_call_determinism(F2, M, Det), _, fail), Det == det.
 
 %The named function's own full arity (declared, else from stored clauses):
 fn_own_arity(F2, A) :- fn_decl_arity(F2, A, _, _), !.
 fn_own_arity(F2, A) :- catch(nb_getval(F2, Metas), _, fail),
-                       member(Meta, Metas), fun_meta_parts(Meta, As, _, _),
+                       member(Meta, Metas), Meta = fun_meta(As, _, _),
                        length(As, A), !.
 
-%body_determinism GIVEN the arrow-typed parameters are det. Analyzes COPIES
-%of the stored clause metas with each arrow-position head param var attached
-%the -[det]-> form of its declared arrow type; the stored metas stay intact.
-%A SEPARATE assume-stack breaks recursion (the callee re-enters this path
-%with the now-det closure var, and det_closure_args_ok re-confirms it) and a
-%separate cache memoizes the argument-independent ("det GIVEN det closures")
-%result. Never reuses body_determinism's $det_stack - that would let the
-%unconditional analysis wrongly certify a plain -> as det.
+%body_determinism given det arrow-typed parameters, on copies of the clause
+%metas. Its own recursion stack and memo keep the unconditional analysis
+%($det_stack) from ever certifying a plain -> as det.
 body_determinism_assuming(F, N, Det) :-
     body_determinism_assuming_proof(F, N, Proof),
     analysis_proof_verdict(Proof, Det),
@@ -231,10 +164,8 @@ body_determinism_assuming_proof(F, N, Proof) :-
     analysis_make_proof(conditional_body(F/N), det, [],
                         [effect(F/N), decl(F/N), clause_set(F/N)], Proof).
 body_determinism_assuming_proof(F, N, Proof) :-
-    catch(nb_getval(F, Metas0), _, Metas0 = []),
-    include(arity_meta(N), Metas0, Metas),
-    Metas \== [],
-    findall(ATs, fn_decl_arity(F, N, ATs, _), [ATs1]),
+    fun_metas(F, N, Metas),
+    unique_fn_decl(F, N, ATs1, _),
     arrow_det_positions(ATs1, Positions),
     Positions \== [],
     maplist(assume_det_meta(ATs1, Positions), Metas, Upgraded),
@@ -242,28 +173,14 @@ body_determinism_assuming_proof(F, N, Proof) :-
     setup_call_cleanup(
         b_setval('$det_assume_stack', [F/N|St]),
         ( det_enforced_flag(F, N, Enf),
-          with_det_enforced(Enf,
-              clause_set_determinism_proof(Upgraded, ClauseProof)),
-          analysis_proof_verdict(ClauseProof, Det),
-          analysis_proof_requirements(ClauseProof, Bounds),
-          analysis_proof_certificates(ClauseProof, Certs),
-          analysis_proof_dependencies(ClauseProof, ClauseDeps),
-          analysis_term_dependencies(Upgraded, TermDeps),
-          append([[effect(F/N), decl(F/N), clause_set(F/N)],
-                  ClauseDeps, TermDeps], Ds0),
-          sort(Ds0, Deps),
-          Proof = analysis_proof(conditional_body(F/N), Det,
-                                 requirements(Bounds),
-                                 certificates(Certs),
-                                 dependencies(Deps)) ),
+          clause_set_subject_proof(conditional_body(F/N), F/N, Enf, Upgraded,
+                                   Proof) ),
         b_setval('$det_assume_stack', St)),
     analysis_cache_store(assume(F, N), Proof).
 
-%Copy the clause meta (attributes copy with the term) and, at each arrow
-%position, attach the det form of the declared arrow to the COPIED head var -
-%never the stored one:
+%Attach the det form of each declared arrow to the COPIED head var:
 assume_det_meta(ATs1, Positions, Meta, Meta2) :- copy_term(Meta, Meta2),
-                                                 fun_meta_parts(Meta2, Args, _, _),
+                                                 Meta2 = fun_meta(Args, _, _),
                                                  maplist(bind_meta_param, Args, ATs1),
                                                  assume_det_positions(Positions, ATs1, Args).
 
@@ -275,42 +192,28 @@ assume_det_positions([pos(Idx, _, _)|Ps], ATs1, Args) :- nth0(Idx, ATs1, T), T =
                                                         ( nth0(Idx, Args, HeadArg) -> assume_det_param(HeadArg, DetArrow) ; true ),
                                                         assume_det_positions(Ps, ATs1, Args).
 
-%Only a var head param (carrying no attr, or an existing arrow attr) is
-%upgraded; any other shape is left as-is so the analysis stays conservative
-%(and therefore sound) for that clause:
+%Only a var head parameter is upgraded; any other shape stays conservative:
 assume_det_param(V, DetArrow) :- ( var(V),
                                    ( get_attr(V, tknown, [K]) -> ( nonvar(K), is_arrow_type(K) ) ; true )
                                  -> put_attr(V, tknown, [DetArrow])
                                  ; true ).
 
-%Underapplication builds a closure instead of calling (reduce case 1):
-%constructing the partial is deterministic - the closure's own determinism
-%is judged at its call site through its arrow type - so only the bound
-%arguments need to be deterministic here:
+%Underapplication builds a closure instead of calling: forming it is det (the
+%closure is judged at its call site), so only the bound arguments count:
 underapplied_closure(Fun, N) :- CallArity is N + 1,
                                 \+ arity(Fun, CallArity),
                                 arity(Fun, Known), Known > CallArity, !.
 
 %%% Combining determinism verdicts. The lattice is
-%%% ok < may_fail(_) < nondeterministic(_) / unknown(_): a subexpression that
-%%% may fail leaves the whole expression semidet, while a branching or opaque
-%%% one settles it - so may_fail keeps scanning for something worse, and the
-%%% top of the lattice short-circuits (which preserves the historical
-%%% "first non-ok verdict wins" reason reporting):
-%once/1 (which is what (once E) compiles to) caps the solution count at one; it
-%never manufactures one. So it does erase nondeterminism - and opacity too: an
-%expression nothing can analyse still has AT MOST one solution once wrapped -
-%but it does not erase failure, because (once E) fails exactly when E does.
-%The old reading, that (once E) is unconditionally ok, threw the callee's
-%may_fail away and let a -[semidet]-> call satisfy a -[det]-> promise.
-%Note this is a REFINEMENT as well as a tightening: once(nondeterministic) and
-%once(unknown) used to be discarded, and are now the strictly more precise
-%may_fail (zero or one), which -[semidet]-> accepts.
+%%% ok < may_fail(_) < nondeterministic(_) / unknown(_); may_fail keeps scanning
+%%% for something worse and the top short-circuits, so the first non-ok reason
+%%% is reported.
+%(once E) caps the solution count at one, erasing nondeterminism and opacity,
+%but it fails exactly when E does, so it keeps may_fail.
 once_determinism(Expr, Result) :- deterministic_expr_core(Expr, R),
-                                  ( R == ok -> Result = ok
-                                  ; R = may_fail(_) -> Result = R
-                                  ; R = nondeterministic(Why) -> Result = may_fail(once(Why))
-                                  ; R = unknown(Why) -> Result = may_fail(once(Why))
+                                  ( ( R == ok ; R = may_fail(_) ) -> Result = R
+                                  ; ( R = nondeterministic(Why) ; R = unknown(Why) )
+                                    -> Result = may_fail(once(Why))
                                   ; Result = may_fail(once(R)) ).
 
 det_result_rank(ok, 0).
@@ -329,12 +232,8 @@ combine_determinism_list([Expr|Exprs], Result) :- deterministic_expr_core(Expr, 
                                                   ; combine_determinism_list(Exprs, Rest),
                                                     combine_det_results(First, Rest, Result) ).
 
-%(let* ((P1 V1) (P2 V2) ...) Body) IS nested (let P1 V1 (let P2 V2 ...)),
-%so each binding is judged by let_determinism/4 itself - the destructured
-%field types, the collapse properness guarantee and the nonemptiness
-%narrowing all apply per binding with no second copy of the logic. The old
-%pattern_then_exprs walk analyzed each pair in isolation, which is exactly
-%how the let refinements failed to reach let*:
+%(let* ((P1 V1) (P2 V2) ...) Body) is nested lets, so each binding gets
+%let_determinism/4's refinements:
 binds_and_body_determinism([], Body, Result) :- deterministic_expr_core(Body, Result).
 binds_and_body_determinism([[Pat, Val]|Rest], Body, Result) :-
     ( Rest == [] -> In = Body ; In = ['let*', Rest, Body] ),
@@ -347,21 +246,11 @@ case_expr_determinism(KeyExpr, PairsExpr, Result) :- deterministic_expr_core(Key
                                                        combine_det_results(KeyResult, R2, R12),
                                                        combine_det_results(R12, R3, Result) ).
 
-%%% Does the case cover its scrutinee?
-%%%
-%%% translate_case/6 compiles the branches to a nested if-then-else with NO
-%%% final else, so a value that matches no pattern makes the whole case FAIL.
-%%% That failure path belongs to the construct, not to any branch, so
-%%% case_pairs_determinism/2 above cannot see it.
-%%%
-%%% The verdict is ASYMMETRIC in exactly the way det_exhaustiveness_prepass/1
-%%% is, and for the same reason: PeTTa's nominal types are OPEN, so "cannot
-%%% tell" is the common case and treating it as failure would reject most
-%%% legitimate code. Only a PROVABLY uncovered value yields may_fail - a
-%%% scrutinee whose type is unknown, unenumerable or extensible stays silent.
-%%% The proof itself is unmatched_case/5, the same relation the clause-head
-%%% exhaustiveness check uses, applied to the branch patterns as a one-column
-%%% head set.
+%%% Does the case cover its scrutinee? translate_case/6 compiles no final
+%%% else, so an unmatched value makes the whole case fail - a path no branch
+%%% shows. Nominal types are open, so only a provably uncovered value yields
+%%% may_fail (unmatched_case/5, as for clause heads); an unknown or extensible
+%%% scrutinee type stays silent.
 case_coverage_determinism(KeyExpr, PairsExpr, Result) :-
     ( case_scrutinee_type(KeyExpr, T0), copy_term(T0, T),
       case_value_patterns(PairsExpr, Heads), Heads \== [],
@@ -370,19 +259,15 @@ case_coverage_determinism(KeyExpr, PairsExpr, Result) :-
       -> Result = may_fail(nonexhaustive_case(Missing))
        ; Result = ok ).
 
-%The scrutinee's type, when the checker already knows it: a parameter (or any
-%other variable) carrying a single known type, or any non-variable value for
-%which the ordinary value-typing relation yields one candidate. Reusing that
-%relation is important for literals (True/False in particular) as well as
-%declared-output calls; anything else leaves the coverage question unasked.
+%The scrutinee's type when already known: a single known variable type, or the
+%one value-typing candidate of a non-variable (literals and declared-output
+%calls):
 case_scrutinee_type(K, T) :- var(K), !, known_singleton(K, T0), nonvar(T0), T = T0.
 case_scrutinee_type(K, T) :- nonvar(K), value_candidate_types(K, [T0]),
                              nonvar(T0), T = T0.
 
-%The branch patterns, as single-argument "clause heads" for unmatched_case/5.
-%The (Empty ...) branch is dropped: it is not a value pattern at all but the
-%fallback translate_expr/3 wires to "the KEY produced no solution", so it
-%covers nothing the other branches leave open.
+%The branch patterns as one-column heads. The (Empty ...) branch is the
+%no-solution fallback, not a value pattern, so it covers nothing:
 case_value_patterns(Pairs, Heads) :- is_list(Pairs),
                                      findall([P], ( member(Pair, Pairs), nonvar(Pair),
                                                     Pair = [P, _], P \== 'Empty' ),
@@ -402,16 +287,11 @@ pattern_then_exprs(Pat, Exprs, Result) :- deterministic_pattern(Pat, R0),
                                           ; combine_determinism_list(Exprs, R2),
                                             combine_det_results(R0, R2, Result) ).
 
-%(let Pat Val In) / (chain Pat Val In). Same worst-of composition as
-%pattern_then_exprs, but a DESTRUCTURING pattern's field variables are bound to
-%FIELDS of Val's result, and when Val's declared output type fixes a field to a
-%concrete NON-arrow type that field can never be a function symbol (a well-typed
-%(Number Number) tuple holds numbers). So a body expression HEADED by such a
-%field - the (let ($l $r) (add-pair ..) ($l $r)) reconstruction - is data, not
-%a dynamic dispatch: reduce/2 leaves a non-function (or unbound) head
-%unevaluated, exactly one solution. We give the body analysis that knowledge by
-%binding the field types onto COPIES of the pattern/body variables (never the
-%shared source term), so the var-head clause reads them as data construction.
+%(let Pat Val In) / (chain Pat Val In). A destructuring pattern's fields whose
+%declared types are concrete non-arrow types can never be function symbols, so
+%a body headed by such a field ((let ($l $r) (add-pair ..) ($l $r))) is data
+%construction, not dynamic dispatch. The field types are bound on COPIES of the
+%pattern and body, never the shared source term.
 let_determinism(Pat, Val, In, Result) :-
     deterministic_pattern(Pat, R0),
     ( det_result_final(R0) -> Result = R0
@@ -419,32 +299,21 @@ let_determinism(Pat, Val, In, Result) :-
       ( det_result_final(RVal) -> Result = RVal
       ; copy_term(Pat-In, PatC-InC),
         ignore(bind_destructured_field_types(PatC, Val)),
-        %A plain let variable receives the producer's declared result type in
-        %the analysis copy.  This is weaker than the proper-list certificate
-        %below: it does not claim that the value is already manifest, but it
-        %lets call-selection consume List/Bool/nominal evidence.  Selection
-        %then requires a boundary proviso for direct parameters; this local
-        %case is backed by the ordinary runtime result check emitted for Val.
+        %A plain let variable gets the producer's declared result type in the
+        %analysis copy, so call selection can consume List/Bool/nominal
+        %evidence; the runtime result check emitted for Val backs it.
         ignore(bind_plain_result_type(PatC, Val)),
-        %A PLAIN-var pattern bound to a value that is GUARANTEED a proper
-        %list - a collapse form (findall/3 output) or a call to a
-        %proper_list_output-certified function - carries that knowledge into
-        %the body analysis, so the (== $v ()) nonemptiness narrowing can fire
-        %on a let-introduced variable exactly as it does on a declared list
-        %parameter. The guarantee is load-bearing: the narrowing's coverage
-        %leg assumes the runtime value IS a list (a cons head cannot match a
-        %Number, and a miss is a failure under det), and collapse is what
-        %makes that unconditional. A declared (List _) output gets the weaker
-        %selection type above, but does NOT qualify for this manifest-output
-        %certificate:
+        %A plain-var pattern bound to a guaranteed proper list (collapse or a
+        %proper_list_output-certified call) lets the (== $v ()) narrowing fire
+        %on it. A declared (List _) output does not qualify: the narrowing's
+        %coverage leg needs the value to be a list unconditionally.
         ( var(PatC), val_guaranteed_proper_list(Val)
           -> add_known_type(PatC, ['List', '%Undefined%']),
              put_attr(PatC, proper_list_cert, true),
              ProperListVar = proper(PatC)
         ; ProperListVar = none ),
-        %fields whose type stayed unknown (arrow, wildcard, no declared tuple
-        %type at all) can arrive bound to anything, functions included - mark
-        %the copies so they read as parameters, not as fresh locals:
+        %Fields of unknown type can arrive bound to functions; mark them as
+        %parameters, not fresh locals:
         term_variables(PatC, FVs),
         maplist(mark_field_unless_typed, FVs),
         with_scoped_proper_list_var(
@@ -455,18 +324,14 @@ let_determinism(Pat, Val, In, Result) :-
         combine_det_results(RMatch, RVI, RVIM),
         combine_det_results(R0, RVIM, Result) ) ).
 
-%Translation places Pattern = Value before the value's goals.  That generated
-%unification is a real zero-result path unless the source value or its declared
-%product shape entails the pattern.  Fresh-variable destructuring of a
-%matching product is the important positive case; literals and constructor
-%tests remain fallible unless the value is visibly the same structure.
+%Translation places Pattern = Value before the value's goals, a real
+%zero-result path unless the source value or its declared product shape
+%entails the pattern.
 let_pattern_match_result(Pat, Val, ok) :-
     let_pattern_entailed(Pat, Val), !.
-%A cut in the value position has an established conditional-selection proof:
-%the generated unification either fails before the cut (so later clauses stay
-%reachable), or succeeds and the cut commits before producing a result.
-%body_conditionally_commits/1 is the matching clause-set side of this rule;
-%this is deliberately not a general exemption for let patterns.
+%A cut in the value position either fails the unification before the cut or
+%commits before producing a result; body_conditionally_commits/1 is the
+%clause-set side of the same rule.
 let_pattern_match_result(_, Val, ok) :-
     nonvar(Val), Val = [Cut], Cut == cut, !.
 let_pattern_match_result(Pat, _, may_fail(let_pattern(Pat))).
@@ -475,11 +340,8 @@ let_pattern_entailed(Pat, _) :- var(Pat), !.
 let_pattern_entailed(Pat, Val) :-
     manifest_pattern_match(Pat, Val), !.
 %A higher-order call can instantiate a parametric result through its closure
-%argument before translation assigns the call output.  Consume that same
-%closure-first declaration resolution here, but only for the failure-free
-%case: a nonempty positional product destructured into distinct variables.
-%Literal/constructor fields and repeated variables still add a real
-%unification-failure path and therefore use the ordinary entailment rules.
+%argument; resolve the declaration closure-first, but only for a nonempty
+%positional product destructured into distinct variables.
 let_pattern_entailed(Pat, Val) :-
     resolved_call_output_type(Val, T),
     fresh_variable_product_pattern(Pat, T), !.
@@ -492,9 +354,7 @@ resolved_call_output_type([F|Args], OT) :-
     findall(call(ATs0, OT0),
             fn_decl_arity(F, N, ATs0, OT0),
             [call(ATs, OT)]),
-    %The translator processes closure positions before contextual/product
-    %positions so shared declaration variables acquire their call-specific
-    %instantiation.  -1 means no argument is being skipped as a staged binder.
+    %Closure positions first, as in the translator; -1 skips no binder.
     resolve_source_arrow_args(Args, ATs, -1),
     nonvar(OT).
 
@@ -531,12 +391,11 @@ pattern_entailed_by_type(Pat, T) :-
     is_list(Pat), contextual_product_type(T),
     same_length(Pat, T),
     maplist(pattern_entailed_by_type, Pat, T).
-%A nominal value is guaranteed to match a constructor pattern only while that
-%constructor is the type's sole inhabitant shape and there are no declared
-%bare constants. The ctor_set dependency makes this snapshot honest when a
-%later declaration adds another constructor.
+%A nominal value always matches a constructor pattern only while that
+%constructor is the type's sole shape and no bare constants exist; ctor_set
+%makes the snapshot invalidatable.
 pattern_entailed_by_type(Pat, T) :-
-    atom(T), \+ primitive_type(T), \+ wildcard_type_t(T),
+    atom(T), \+ primitive_type(T), \+ wildcard_type(T),
     analysis_emit(dependency(ctor_set(T))),
     findall(Ctor-Arity, member_ctor(T, Arity, Ctor), Keys0),
     sort(Keys0, [Ctor-Arity]),
@@ -566,9 +425,8 @@ scoped_proper_list_var(V) :-
     catch(b_getval('$proper_list_vars', Vars), _, fail),
     member(Here, Vars), Here == V, !.
 
-%Bind each destructuring field variable to its concrete non-arrow field type,
-%read off Val's declared tuple output type. Non-arrow, non-wildcard only: an
-%arrow or Atom field could legitimately carry a function, so it stays unknown.
+%Bind each destructured field to its concrete non-arrow, non-wildcard field
+%type from Val's declared tuple output:
 bind_destructured_field_types(Pat, Val) :-
     functional_pattern_application(Pat, _, _), !,
     call_output_type(Val, OT),
@@ -579,17 +437,8 @@ bind_destructured_field_types(Pat, Val) :-
     is_list(OT), same_length(Pat, OT),
     bind_pat_field_types(Pat, OT).
 
-bind_det_pattern_type(P, T) :- ( var(P), nonvar(T), \+ is_arrow_type(T), \+ wildcard_type_t(T)
-                                 -> add_known_type(P, T)
-                                ; functional_pattern_application(P, _, _)
-                                  -> bind_pattern_typed(P, T)
-                                ; is_list(P), is_list(T), same_length(P, T),
-                                  \+ is_arrow_type(T)
-                                  -> bind_pat_field_types(P, T)
-                                ; true ).
-
 bind_pat_field_types([], []).
-bind_pat_field_types([P|Ps], [T|Ts]) :- ( var(P), nonvar(T), \+ is_arrow_type(T), \+ wildcard_type_t(T)
+bind_pat_field_types([P|Ps], [T|Ts]) :- ( var(P), nonvar(T), \+ is_arrow_type(T), \+ wildcard_type(T)
                                           -> add_known_type(P, T) ; true ),
                                         bind_pat_field_types(Ps, Ts).
 
@@ -598,7 +447,7 @@ bind_plain_result_type(Pat, Val) :-
     call_output_type(Val, T),
     nonvar(T),
     \+ is_arrow_type(T),
-    \+ wildcard_type_t(T),
+    \+ wildcard_type(T),
     add_known_type(Pat, T).
 
 mark_field_unless_typed(V) :- ( get_attr(V, tknown, _) -> true ; note_unknown_candidate(V) ).
@@ -615,33 +464,13 @@ combine_pattern_list([E|Es], Result) :- deterministic_pattern(E, R1),
                                         ; combine_pattern_list(Es, R2),
                                           combine_det_results(R1, R2, Result) ).
 
-%%% Exhaustiveness of -[det]-> functions (--strict-det only) %%%
-%%%
-%%% -[det]-> promises EXACTLY one result, but a clause set that cannot match
-%%% some input of its declared argument types delivers zero. The check is
-%%% deliberately ASYMMETRIC: provably incomplete is an error, cannot tell is
-%%% accepted in silence. PeTTa's nominal types are OPEN - a constructor may be
-%%% declared in a later file - so "cannot tell" is the common case, and
-%%% GHC-style "warn unless proven exhaustive" would reject legitimate code
-%%% with no way out. The way out of a REAL incompleteness is -[semidet]->,
-%%% which commits (and therefore costs) exactly like -[det]->.
-%%%
-%%% Only an EXPLICIT -[det]-> is checked (explicit_det_decl/2). Plain arrows
-%%% are uncommitted in default/--strict mode and illegal under --strict-det.
-%%%
-%%% Because the promise is per-function and written down, it is checked in
-%%% EVERY mode - like the overlap and body-determinism checks an explicit
-%%% -[det]-> already gets flaglessly. --strict-det forces you to make the
-%%% determinism claim; it is not what makes a claim you already made mean
-%%% something. Outside --strict-det, `->` remains the uncommitted form.
-%%%
-%%% This runs as a per-file PREPASS over the parsed forms (filereader.pl), for
-%%% the same reason type declarations are pre-cached there: exhaustiveness is a
-%%% property of the WHOLE clause set, and clauses arrive one form at a time -
-%%% checking after each one would reject (= (not true) false) before
-%%% (= (not false) true) has been read. Clauses already compiled by earlier
-%%% files count too (stored_clause_head/3), but a function whose clauses are
-%%% split across files is still judged on what the current file can see.
+%%% Exhaustiveness of explicit -[det]-> functions. A clause set that cannot
+%%% match some input of its declared types delivers zero results. Nominal types
+%%% are open, so only PROVABLY incomplete is an error; "cannot tell" is
+%%% accepted, and a real incompleteness is declared -[semidet]->. The check
+%%% runs in every mode, as a per-file prepass over the parsed forms, because
+%%% exhaustiveness is a property of the whole clause set and clauses arrive one
+%%% form at a time. Clauses compiled by earlier files count too.
 revalidate_dependency_consumer(exhaustiveness(F, N), Event) :-
     det_exhaustive_verdict(F, N, StoredHeads, Consts, _, File, Line, Str),
     current_exhaustiveness_heads(F, N, CurrentHeads),
@@ -676,9 +505,8 @@ current_exhaustiveness_heads(F, N, Heads) :-
 det_exhaustiveness_prepass(ParsedForms) :-
     findall(F/N, ( parsed_clause_head(ParsedForms, _, _, F, Args), length(Args, N) ), Keys0),
     sort(Keys0, Keys),
-    %value declarations are order-sensitive knowledge atoms, so unlike
-    %arrow declarations they are NOT pre-cached - the file's own nullary
-    %constructors are read straight from its forms instead:
+    %Value declarations are not pre-cached, so the file's own nullary
+    %constructors are read from its forms:
     findall(C-T, parsed_value_decl(ParsedForms, C, T), Consts),
     forall(member(F/N, Keys), check_det_exhaustive_group(ParsedForms, Consts, F, N)).
 
@@ -693,7 +521,7 @@ parsed_value_decl(ParsedForms, C, T) :- member(parsed(expression, _, _, Form), P
 
 stored_clause_head(F, N, Args) :- catch(nb_getval(F, Metas), _, fail),
                                   member(Meta, Metas),
-                                  fun_meta_parts(Meta, Args, _, _),
+                                  Meta = fun_meta(Args, _, _),
                                   length(Args, N).
 
 check_det_exhaustive_group(ParsedForms, Consts, F, N) :-
@@ -702,9 +530,8 @@ check_det_exhaustive_group(ParsedForms, Consts, F, N) :-
       -> findall(Args, ( parsed_clause_head(ParsedForms, _, _, F, Args), length(Args, N)
                        ; stored_clause_head(F, N, Args) ), Heads),
          once(( parsed_clause_head(ParsedForms, Line, Str, F, A0), length(A0, N) )),
-         %the verdict is a snapshot of the constructor sets it consulted, so
-         %it is kept along with WHICH sets those were - a constructor declared
-         %later re-runs exactly the verdicts its type takes part in:
+         %The verdict is a snapshot of the constructor sets it consulted; a
+         %later constructor re-runs exactly the verdicts its type is in:
          with_form_location(
              Line, Str,
              det_exhaustiveness_proof(Consts, F, N, Heads, ExhaustiveProof)),
@@ -727,10 +554,8 @@ det_exhaustiveness_proof(Consts, F, N, Heads, Proof) :-
                         Dependencies, Proof).
 
 %An effect-polymorphic declaration promises exactly one result at its det
-%instantiation only when the intrinsic body verdict (with $v slots assumed
-%det) is itself det. Derive that verdict from the whole parsed clause group so
-%the same exhaustiveness check used by -[det]-> runs before any clause is
-%compiled. The scoped recursion assumption lets a map/fold call itself.
+%instantiation only when its intrinsic body verdict is det; derive that from
+%the parsed clause group so the exhaustiveness check runs before compiling.
 effect_det_exhaustiveness_required(ParsedForms, F, N) :-
     effect_poly_decl(F, N, Name, ATs, Positions),
     findall(fun_meta(Args, Body, clean),
@@ -739,7 +564,7 @@ effect_det_exhaustiveness_required(ParsedForms, F, N) :-
               Head = [F0|Args], F0 == F, length(Args, N)
             ; catch(nb_getval(F, Stored), _, fail),
               member(Meta, Stored),
-              fun_meta_parts(Meta, Args, Body, _),
+              Meta = fun_meta(Args, Body, _),
               length(Args, N) ),
             Metas),
     Metas \== [],
@@ -754,31 +579,27 @@ effect_det_exhaustiveness_required(ParsedForms, F, N) :-
 %The declaration must be unique at this arity: several declarations are typed
 %overloads, and the clauses then belong to no single argument-type vector.
 check_det_exhaustive(Consts, F, N, Heads) :-
-    ( findall(ATs, fn_decl_arity(F, N, ATs, _), [ATs1]),
+    ( unique_fn_decl(F, N, ATs1, _),
       nth0(Idx, ATs1, T),
       unmatched_case(Consts, Heads, Idx, T, Missing)
       -> Pos is Idx + 1,
          throw(error(det_nonexhaustive(F, Pos, Missing), determinism))
        ; true ).
 
-%One argument position proves incompleteness when EVERY clause pins it to a
-%recognizable shape - no variable, no wildcard, no computed subterm - and some
-%value of its declared type has no matching shape. A single variable in the
-%column, an unenumerable type, or a pattern the key relation does not
-%recognize makes the position silent; guards and arithmetic conditions live in
-%the body and are never consulted (they can only make a function match LESS,
-%so ignoring them keeps the verdict sound).
+%One argument position proves incompleteness when every clause pins it to a
+%recognizable shape and some value of its declared type matches none. A
+%variable in the column, an unenumerable type or an unrecognized pattern makes
+%it silent; body guards are ignored (they only make a function match less).
 unmatched_case(Consts, Heads, Idx, T, Missing) :-
-    nonvar(T), \+ wildcard_type_t(T),
+    nonvar(T), \+ wildcard_type(T),
     findall(P, ( member(H, Heads), nth0(Idx, H, P) ), Col),
     Col \== [],
     maplist(pattern_key, Col, Keys),
     ( uncovered_infinite_domain(T, Keys) -> Missing = other(T)
     ; domain_keys(T, Consts, DKeys), member(Missing, DKeys), \+ memberchk(Missing, Keys) ).
 
-%The value shape a head pattern matches, as key(Name, Arity). A variable, a
-%fun-headed (computed) subterm, an empty expression or anything else has no
-%key - and a column containing one is no evidence at all:
+%The value shape a head pattern matches, as key(Name, Arity); a variable,
+%computed subterm or () has none:
 pattern_key(P, key(P, 0)) :- atomic(P), P \== [], \+ ( atom(P), fun(P) ), !.
 pattern_key(P, key(C, K)) :- is_list(P), P = [C|As], atom(C), \+ fun(C),
                              length(As, K), K > 0.
@@ -788,16 +609,9 @@ pattern_key(P, key(C, K)) :- is_list(P), P = [C|As], atom(C), \+ fun(C),
 uncovered_infinite_domain('Number', Keys) :- forall(member(key(V, A), Keys), ( A =:= 0, number(V) )).
 uncovered_infinite_domain('String', Keys) :- forall(member(key(V, A), Keys), ( A =:= 0, string(V) )).
 
-%The complete set of value shapes of a type, when it can be enumerated at all.
-%Bool is closed by construction; a nominal type's set is its equation-less
-%declared constructors (member_ctor/3 - a declared symbol WITH equations is
-%rewritten at the call site and never survives as a value) plus its
-%equation-less declared constants.
-%The set is read as it stands right now, so like union_member_excluded/3 this
-%is a SNAPSHOT: a constructor for T declared in a later file changes it. Both
-%users publish an ordinary ctor_set/1 proof dependency. Clause consumers are
-%recompiled by the dependency graph; whole-clause-set exhaustiveness consumers
-%are re-run through their graph validation record.
+%The complete set of value shapes of a type, when enumerable: Bool, or a
+%nominal type's equation-less constructors (member_ctor/3) and constants. It
+%is a snapshot of the current declarations; users publish ctor_set/1.
 domain_keys('Bool', _, [key(true, 0), key(false, 0)]) :- !.
 domain_keys(T, Consts, Keys) :- atom(T), declared_newtype(T, R), !, domain_keys(R, Consts, Keys).
 domain_keys(T, Consts, Keys) :- atom(T), \+ wildcard_type(T), \+ primitive_type(T),

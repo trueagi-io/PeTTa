@@ -95,10 +95,9 @@ test(late_prolog_callable_recompiles_data_consumer,
             user:'ucl-late-consumer'(true, Result),
             BeforeRegistration),
     assertion(BeforeRegistration == [['ucl-late-prolog', true]]),
-    user:compiled_function_dependencies(
-        'ucl-late-consumer', InitialDependencies),
-    assertion(memberchk(
-                  late_call('ucl-late-prolog'/1), InitialDependencies)),
+    assertion(( user:compiled_deps(Ref, 'ucl-late-consumer'/_, _, Deps),
+                clause(_, _, Ref),
+                memberchk(late_call('ucl-late-prolog'/1), Deps) )),
     setup_call_cleanup(
         assertz(user:'ucl-late-prolog'(true, true), ImplementationRef),
         ( user:import_prolog_function('ucl-late-prolog', Imported),
@@ -134,9 +133,9 @@ test(runtime_add_rollback_restores_post_swap_state,
     assertion(AddedRaw0 == 0),
     cache_row('ucl-swap-producer', 1, ProducerCache0),
     cache_row('ucl-swap-consumer', 1, ConsumerCache0),
-    unified_checker_cache:unified_summary_cache_store(
+    unified_checker_cache:unified_summary_cache_store_many([cache_entry(
         function_summary('ucl-swap-sentinel', 0, card(1,1),
-                         [proper_bool], [], []), []),
+                         [proper_bool], [], []), [])]),
     cache_row('ucl-swap-sentinel', 0, SentinelCache0),
 
     runtime_add_outcome(AddedSource, Outcome),

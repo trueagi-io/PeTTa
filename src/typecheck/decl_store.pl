@@ -1,12 +1,5 @@
-%%% Canonical declaration storage and declaration lifecycle.
-%
-% Owns: every function/value/type declaration store, declaration provenance and
-% library origin, add/remove/cache/renormalize operations, and fresh-copy lookup
-% views.
-% Consumes: arrow/type normalization, mutation notification, source-loading
-% provenance helpers, and translator recompilation entry points.
-% Boundary: all declaration mutation enters through maybe_cache_type_decl/2,
-% maybe_uncache_type_decl/2, or forget_symbol_types/1.
+%%% Declaration storage and lifecycle. All declaration mutation enters through
+%%% maybe_cache_type_decl/2, maybe_uncache_type_decl/2 or forget_symbol_types/1.
 
 :- thread_local loading_origin/1.
 :- thread_local declaration_provenance/1.
@@ -17,9 +10,8 @@
 :- dynamic declared_type_alias/2.   % declared_type_alias(Name, Representation)
 :- dynamic declared_foreign_type/2. % declared_foreign_type(Name, Arity)
 :- dynamic declared_space_type/2.   % declared_space_type(Name, RowType)
-:- discontiguous maybe_cache_type_decl/2.
 
-%%% Canonical function-declaration record.
+%%% Function-declaration record:
 %
 % fn_decl(F, Arity, scheme(ArgTypes, OutType), Effect, Origin, Provenance)
 %
@@ -27,11 +19,8 @@
 %   Top       = det | semidet | nondet | unspecified | variable(Name)
 %   Variables = [] | [effect_var(Name, [closure_arg(Index, Arity), ...])]
 %
-% Provenance keeps both the source location and original syntax. The syntax is
-% load-bearing lifecycle information: it lets late alias addition/removal
-% renormalize this one store without reconstructing declarations from parallel
-% effect/origin tables. Effect metadata itself is closed and contains no Prolog
-% variables.
+% Provenance keeps the source location and original syntax, so late alias
+% addition/removal can renormalize this store in place.
 
 fn_decl_copy(F, N, Scheme, Effect, Origin, Provenance) :-
     fn_decl(F, N, S0, E0, Origin, P0),
@@ -50,14 +39,6 @@ explicit_det_decl(F, N) :-
 explicit_committed_decl(F, N, Det) :-
     fn_decl(F, N, _, effect_model(Det, _), _, _),
     committed_det(Det).
-
-%Compatibility view: like the old side table, it succeeds only for trusted
-%library origin (user was represented by absence).
-decl_origin(F, Origin) :-
-    fn_decl(F, _, _, _, Origin, _),
-    Origin = library(_).
-decl_origin(Name, Origin) :-
-    nonfn_decl_origin(Name, Origin).
 
 trusted_library_decl(F) :-
     fn_decl(F, _, _, _, library(_), _), !.
@@ -86,9 +67,7 @@ current_fn_decl_provenance(Type, provenance(Location, syntax(Type))) :-
       -> Location = source(File, unknown)
     ; Location = unknown ).
 
-%The only two predicates that write the canonical store. Every cache,
-%renormalization, origin change, removal and forget path is expressed through
-%this pair.
+%The only two predicates that write the function-declaration store:
 add_fn_decl_record(fn_decl(F, N, Scheme, Effect, Origin, Provenance), Added) :-
     ( fn_decl(F, N, S2, E2, _, _), (S2-E2) =@= (Scheme-Effect)
       -> Added = false
@@ -131,141 +110,16 @@ maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C
                                       format(user_error,
                                              "Warning: type declaration name (~w) is an expression; write (: ~w ...) to declare the function~n",
                                              [Name, Name]).
-%Erased nominal newtypes: (: KB (Newtype Expression)) declares KB as a
-%distinct compile-time role over the given representation. Nothing exists at
-%runtime; the brand lives purely in the checker.
-maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C, Name, [NT, R]],
-                                      C == (:), atom(Name), NT == 'Newtype', !,
+maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C, Name, Type],
+                                      C == (:), atom(Name), kind_decl(Type, Keyword, Value), !,
                                       with_decl_transaction(Name,
-                                          cache_newtype_decl(Name, R)).
-cache_newtype_decl(Name, R) :-
-                                      prepare_decl_origin(Name, [NT, R], _),
-                                      NT = 'Newtype',
-                                      normalize_type(R, RN),
-                                      ( declared_newtype(Name, R2)
-                                        -> ( R2 =@= RN -> true
-                                           ; format(user_error,
-                                                    "Warning: conflicting Newtype declaration for ~w ignored: ~p differs from ~p~n",
-                                                    [Name, RN, R2]) )
-                                      ; declared_type_alias(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: Newtype declaration for ~w ignored: name is already an Alias~n",
-                                                  [Name])
-                                      ; declared_foreign_type(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: Newtype declaration for ~w ignored: name is already a Foreign type~n",
-                                                  [Name])
-                                      ; declared_space_type(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: Newtype declaration for ~w ignored: name is already a SpaceOf type~n",
-                                                  [Name])
-                                      ; assertz(declared_newtype(Name, RN)),
-                                        decl_notify(declaration_changed(newtype, Name,
-                                                                         added)) ).
-%Structural aliases: (: Row (Alias (Number String))) names an erased type
-%expression, not a nominal role. Normalize now so later lookup is one
-%non-recursive expansion. Aliases are not hoisted by precache_fn_type_decl/2;
-%declare-before-use stays cheapest, while a fresh late alias repairs prior
-%declarations below.
-maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C, Name, [A, R]],
-                                      C == (:), atom(Name), A == 'Alias', !,
-                                      with_decl_transaction(Name,
-                                          cache_alias_decl(Name, R)).
-cache_alias_decl(Name, R) :-
-                                      prepare_decl_origin(Name, [A, R], _),
-                                      A = 'Alias',
-                                      normalize_type(R, RN),
-                                      ( declared_type_alias(Name, R2)
-                                        -> ( R2 =@= RN -> true
-                                           ; format(user_error,
-                                                    "Warning: conflicting type alias declaration for ~w ignored: ~p differs from ~p~n",
-                                                    [Name, RN, R2]) )
-                                      ; declared_newtype(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: type alias declaration for ~w ignored: name is already a Newtype~n",
-                                                  [Name])
-                                      ; declared_foreign_type(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: type alias declaration for ~w ignored: name is already a Foreign type~n",
-                                                  [Name])
-                                      ; declared_space_type(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: type alias declaration for ~w ignored: name is already a SpaceOf type~n",
-                                                  [Name])
-                                      ; assertz(declared_type_alias(Name, RN)),
-                                        renormalize_late_alias(Name, _),
-                                        decl_notify(declaration_changed(alias, Name,
-                                                                         added)) ).
-%Opaque foreign types: (: Heap (Foreign)) and (: Heap (Foreign 1)) declare a
-%nominal runtime-uncheckable type constructor. Only its name and arity enter
-%the checker; native values themselves remain wholly opaque.
-maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C, Name, [F|Spec]],
-                                      C == (:), atom(Name), F == 'Foreign',
-                                      ( Spec == [] -> Arity = 0
-                                       ; Spec = [Arity], integer(Arity), Arity > 0 ), !,
-                                      with_decl_transaction(Name,
-                                          cache_foreign_decl(Name, Spec, Arity)).
-cache_foreign_decl(Name, Spec, Arity) :-
-                                      F = 'Foreign',
-                                      prepare_decl_origin(Name, [F|Spec], _),
-                                      ( declared_foreign_type(Name, A2)
-                                        -> ( A2 == Arity -> true
-                                           ; format(user_error,
-                                                    "Warning: conflicting foreign type declaration for ~w ignored: arity ~w differs from ~w~n",
-                                                    [Name, Arity, A2]) )
-                                      ; declared_newtype(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: foreign type declaration for ~w ignored: name is already a Newtype~n",
-                                                  [Name])
-                                      ; declared_type_alias(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: foreign type declaration for ~w ignored: name is already an Alias~n",
-                                                  [Name])
-                                      ; declared_space_type(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: foreign type declaration for ~w ignored: name is already a SpaceOf type~n",
-                                                  [Name])
-                                      ; assertz(declared_foreign_type(Name, Arity)),
-                                        decl_notify(declaration_changed(foreign, Name,
-                                                                         added)) ).
-%Typed spaces: (: &jobs (SpaceOf Row)) opts one statically named space into
-%row checking. Normalize now so aliases in schemas are erased before use;
-%like Newtype/Alias/Foreign, this declaration is source-ordered, not hoisted.
-maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C, Name, [SO, R]],
-                                      C == (:), atom(Name), SO == 'SpaceOf', !,
-                                      with_decl_transaction(Name,
-                                          cache_space_decl(Name, R)).
-cache_space_decl(Name, R) :-
-                                      SO = 'SpaceOf',
-                                      prepare_decl_origin(Name, [SO, R], _),
-                                      normalize_type(R, RN),
-                                      ( declared_space_type(Name, R2)
-                                        -> ( R2 =@= RN -> true
-                                           ; format(user_error,
-                                                    "Warning: conflicting space type declaration for ~w ignored: ~p differs from ~p~n",
-                                                    [Name, RN, R2]) )
-                                      ; declared_newtype(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: space type declaration for ~w ignored: name is already a Newtype~n",
-                                                  [Name])
-                                      ; declared_type_alias(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: space type declaration for ~w ignored: name is already an Alias~n",
-                                                  [Name])
-                                      ; declared_foreign_type(Name, _)
-                                        -> format(user_error,
-                                                  "Warning: space type declaration for ~w ignored: name is already a Foreign type~n",
-                                                  [Name])
-                                      ; validate_existing_space_rows(Name, RN),
-                                        assertz(declared_space_type(Name, RN)),
-                                        decl_notify(declaration_changed(space, Name,
-                                                                         added)) ).
+                                          cache_kind_decl(Name, Type, Keyword, Value)).
 maybe_cache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term = [C, Name, Type],
                                         C == (:), atom(Name)
                                         -> ( nonvar(Type), infix_arrow_misuse(Type)
                                              -> throw(error(infix_arrow_syntax(Name, Type), typecheck))
                                            ; nonvar(Type), fn_type_shape(Type, ATs, OT, Det)
-                                              -> with_fn_decl_transaction(
+                                              -> with_decl_transaction(
                                                      Name,
                                                      ( prepare_decl_origin(Name, Type, Origin),
                                                        current_fn_decl_provenance(Type, Provenance),
@@ -275,6 +129,63 @@ maybe_cache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term = 
                                                     Name,
                                                     cache_value_decl(Name, Type)) )
                                         ; true ).
+
+%%% Kind declarations (: Name (Keyword ...)), each kind in its own store keyed
+%%% by name. Erased nominal newtypes (: KB (Newtype Expression)) declare a
+%%% distinct compile-time role over a representation; nothing exists at
+%%% runtime. Structural aliases (: Row (Alias (Number String))) name an erased
+%%% type expression. Opaque foreign types (: Heap (Foreign)) and
+%%% (: Heap (Foreign 1)) enter only a nominal name and arity; native values stay
+%%% opaque. Typed spaces (: &jobs (SpaceOf Row)) opt one statically named space
+%%% into row checking. Representations are normalized when cached, so aliases
+%%% are erased and later lookup is one non-recursive expansion. Kind
+%%% declarations are source-ordered, not hoisted by precache_fn_type_decl/2;
+%%% declare-before-use stays cheapest, while a fresh late alias repairs prior
+%%% declarations.
+%Keyword, notification kind, store, conflict-warning noun, "already" phrase:
+decl_kind('Newtype', newtype, declared_newtype,      'Newtype',     'a Newtype').
+decl_kind('Alias',   alias,   declared_type_alias,   'type alias',  'an Alias').
+decl_kind('Foreign', foreign, declared_foreign_type, 'foreign type', 'a Foreign type').
+decl_kind('SpaceOf', space,   declared_space_type,   'space type',  'a SpaceOf type').
+
+%Every per-name type store with its notification kind:
+type_store(value, declared_value_type).
+type_store(Kind, Store) :- decl_kind(_, Kind, Store, _, _).
+
+%Type is a well-formed kind declaration; Value is what its store holds:
+kind_decl(Type, Keyword, Value) :-
+    is_list(Type), Type = [Keyword|Spec], atom(Keyword),
+    decl_kind(Keyword, _, _, _, _),
+    ( Keyword == 'Foreign'
+      -> ( Spec == [] -> Value = 0 ; Spec = [Value], integer(Value), Value > 0 )
+    ; Spec = [R], normalize_type(R, Value) ).
+
+kind_decl_clause(Name, Keyword, Value, Ref) :-
+    decl_kind(Keyword, _, Store, _, _),
+    Entry =.. [Store, Name, Stored],
+    clause(Entry, true, Ref),
+    Stored =@= Value.
+
+cache_kind_decl(Name, Type, Keyword, Value) :-
+    prepare_decl_origin(Name, Type, _),
+    decl_kind(Keyword, Kind, Store, Noun, _),
+    Entry =.. [Store, Name, Prior],
+    ( call(Entry)
+      -> ( Prior =@= Value -> true
+         ; ( Keyword == 'Foreign' -> What = 'arity ' ; What = '' ),
+           format(user_error,
+                  "Warning: conflicting ~w declaration for ~w ignored: ~w~p differs from ~p~n",
+                  [Noun, Name, What, Value, Prior]) )
+    ; decl_kind(Other, _, OtherStore, _, Already), Other \== Keyword,
+      OtherEntry =.. [OtherStore, Name, _], call(OtherEntry)
+      -> format(user_error,
+                "Warning: ~w declaration for ~w ignored: name is already ~w~n",
+                [Noun, Name, Already])
+    ; ( Keyword == 'SpaceOf' -> validate_existing_space_rows(Name, Value) ; true ),
+      New =.. [Store, Name, Value],
+      assertz(New),
+      ( Keyword == 'Alias' -> renormalize_late_alias(Name, _) ; true ),
+      decl_notify(declaration_changed(Kind, Name, added)) ).
 
 cache_value_decl(Name, Type) :-
     prepare_decl_origin(Name, Type, Origin),
@@ -302,14 +213,9 @@ existing_space_row(Name, Row) :-
     catch(clause(Head, true), _, fail),
     Head =.. [Name|Row].
 
-%A declaration-driven graph revalidation is transactional with respect to the
-%canonical declaration state.  The raw source atom inserted by runtime
-%add-atom remains outside this bounded transaction (MeTTa has no catchable
-%mutation exception boundary yet), but executable clauses, declarations,
-%origins and inferred types are restored together.
-with_fn_decl_transaction(Name, Goal) :-
-    with_decl_transaction(Name, Goal).
-
+%A declaration-driven graph revalidation is transactional over the declaration
+%state: executable clauses, declarations, origins and inferred types are
+%restored together. The raw source atom of a runtime add-atom stays outside it.
 with_decl_transaction(Name, Goal) :-
     snapshot_decl_transaction(Name, Snapshot),
     catch(( Goal -> true
@@ -320,22 +226,20 @@ with_decl_transaction(Name, Goal) :-
             throw(Error) )).
 
 snapshot_decl_transaction(Name,
-        decl_transaction(Records, Origins, Inferred, Values, Newtypes,
-                         Aliases, Foreigns, Spaces)) :-
+        decl_transaction(Records, Origins, Inferred, Stores)) :-
     findall(fn_decl(Name, N, Scheme, Effect, Origin, Provenance),
             fn_decl_copy(Name, N, Scheme, Effect, Origin, Provenance),
             Records),
     findall(Origin, nonfn_decl_origin(Name, Origin), Origins),
     findall(inferred(ATs, OT), inferred_fn_type(Name, ATs, OT), Inferred),
-    findall(T, declared_value_type(Name, T), Values),
-    findall(T, declared_newtype(Name, T), Newtypes),
-    findall(T, declared_type_alias(Name, T), Aliases),
-    findall(A, declared_foreign_type(Name, A), Foreigns),
-    findall(T, declared_space_type(Name, T), Spaces).
+    findall(Store-Ts,
+            ( type_store(_, Store),
+              Entry =.. [Store, Name, T],
+              findall(T, Entry, Ts) ),
+            Stores).
 
 restore_decl_transaction(Name,
-        decl_transaction(Records, Origins, Inferred, Values, Newtypes,
-                         Aliases, Foreigns, Spaces)) :-
+        decl_transaction(Records, Origins, Inferred, Stores)) :-
     findall(N, fn_decl(Name, N, _, _, _, _), CurrentArities0),
     findall(N, member(fn_decl(Name, N, _, _, _, _), Records), PriorArities0),
     append(CurrentArities0, PriorArities0, Arities0),
@@ -349,24 +253,18 @@ restore_decl_transaction(Name,
           retractall(inferred_fn_type(Name, _, _)),
           forall(member(inferred(ATs, OT), Inferred),
                  assertz(inferred_fn_type(Name, ATs, OT))),
-          retractall(declared_value_type(Name, _)),
-          forall(member(T, Values), assertz(declared_value_type(Name, T))),
-          retractall(declared_newtype(Name, _)),
-          forall(member(T, Newtypes), assertz(declared_newtype(Name, T))),
-          retractall(declared_type_alias(Name, _)),
-          forall(member(T, Aliases), assertz(declared_type_alias(Name, T))),
-          retractall(declared_foreign_type(Name, _)),
-          forall(member(A, Foreigns), assertz(declared_foreign_type(Name, A))),
-          retractall(declared_space_type(Name, _)),
-          forall(member(T, Spaces), assertz(declared_space_type(Name, T))) )),
-    %Consumers may already have reacted to an origin flip before the staged
-    %declaration failed. Re-run those exact graph edges under the restored
-    %state; retain the original validation error if rollback revalidation
-    %itself reports anything.
+          forall(member(Store-Ts, Stores),
+                 ( Any =.. [Store, Name, _],
+                   retractall(Any),
+                   forall(member(T, Ts),
+                          ( Entry =.. [Store, Name, T], assertz(Entry) )) )) )),
+    %Consumers may have reacted to the origin flip before the staged
+    %declaration failed: re-run those edges under the restored state, keeping
+    %the original validation error.
     catch(decl_notify(declaration_changed(origin, Name, changed)), _, true),
     forall(member(N, Arities),
            catch(decl_notify(declaration_changed(Name/N, changed)), _, true)),
-    forall(member(Kind, [value, newtype, alias, foreign, space]),
+    forall(type_store(Kind, _),
            catch(decl_notify(declaration_changed(Kind, Name, changed)), _, true)).
 
 cache_fn_type_decl(Name, Type, ATs, OT, Det, Origin, Provenance) :-
@@ -389,46 +287,30 @@ cache_fn_type_decl(Name, Type, ATs, OT, Det, Origin, Provenance) :-
 decl_notify(_) :-
     catch(b_getval('$suppress_decl_notifications', true), _, fail), !.
 decl_notify(Event) :-
-    catch(nb_getval('$batched_decl_notifications', Events0), _, fail),
-    is_list(Events0), !,
+    nb_current('$batched_decl_notifications', Events0), !,
     nb_setval('$batched_decl_notifications', [Event|Events0]).
 decl_notify(Event) :-
     notify_mutation(Event).
 
 :- meta_predicate with_decl_notifications_batched(0).
 
-% Function declarations are hoisted as one file-level prepass.  Consumers
-% should therefore be rebuilt against that final declaration set, not once for
-% every intermediate prefix of it.  Nested batching contributes to the outer
-% queue; the outermost scope restores notification mode before flushing.
+% Function declarations are hoisted as one file-level prepass, so consumers are
+% rebuilt once against the final set, not once per prefix. Nested batching
+% feeds the outer queue.
 with_decl_notifications_batched(Goal) :-
-    ( catch(nb_getval('$batched_decl_notifications', Existing), _, fail),
-      is_list(Existing)
+    ( nb_current('$batched_decl_notifications', _)
       -> call(Goal)
     ; setup_call_cleanup(
-          push_decl_notification_batch(Saved),
+          nb_setval('$batched_decl_notifications', []),
           call(Goal),
-          pop_and_flush_decl_notification_batch(Saved)) ).
+          flush_decl_notification_batch) ).
 
-push_decl_notification_batch(saved(yes, Previous)) :-
-    catch(nb_getval('$batched_decl_notifications', Previous), _, fail), !,
-    nb_setval('$batched_decl_notifications', []).
-push_decl_notification_batch(saved(no, none)) :-
-    nb_setval('$batched_decl_notifications', []).
-
-pop_and_flush_decl_notification_batch(Saved) :-
-    ( catch(nb_getval('$batched_decl_notifications', Reversed), _, fail)
-      -> true
-    ; Reversed = [] ),
-    restore_decl_notification_batch(Saved),
+flush_decl_notification_batch :-
+    nb_getval('$batched_decl_notifications', Reversed),
+    nb_delete('$batched_decl_notifications'),
     reverse(Reversed, Ordered),
     list_to_set(Ordered, Events),
     notify_mutations(Events).
-
-restore_decl_notification_batch(saved(yes, Previous)) :- !,
-    nb_setval('$batched_decl_notifications', Previous).
-restore_decl_notification_batch(_) :-
-    catch(nb_delete('$batched_decl_notifications'), _, true).
 
 with_decl_notifications_suppressed(Goal) :-
     catch(b_getval('$suppress_decl_notifications', Saved), _, Saved = false),
@@ -444,15 +326,11 @@ notify_symbol_constructor_sets(Name) :-
            decl_notify(constructor_set_changed(T, Name))).
 notify_symbol_constructor_sets(_).
 
+%Name is a constructor or constant of T, so declaring or removing it changes
+%the ctor_set(T) the dependency graph tracks:
 symbol_enters_constructor_set(Name, T) :-
-    once(new_ctor_key(Name, T, _)).
-
-%Bridge declaration mutation to the dependency graph's ctor_set(Type) events.
-new_ctor_key(Name, T, K) :- member_ctor(T, K, Name).
-new_ctor_key(Name, T, 0) :-
-    declared_value_type(Name, T2),
-    T = T2,
-    \+ fun(Name).
+    ( member_ctor(T, _, Name) -> true
+    ; declared_value_type(Name, T), \+ fun(Name) ).
 
 %Origin is deliberately symbol-level: one user declaration opts the whole
 %callable back into conservative guards, including all of its overloads. A
@@ -496,11 +374,9 @@ mark_symbol_origin_user(Name) :-
     decl_notify(declaration_changed(origin, Name, changed)).
 
 cached_symbol_declaration(Name) :- fn_decl(Name, _, _, _, _, _), !.
-cached_symbol_declaration(Name) :- declared_value_type(Name, _), !.
-cached_symbol_declaration(Name) :- declared_newtype(Name, _), !.
-cached_symbol_declaration(Name) :- declared_type_alias(Name, _), !.
-cached_symbol_declaration(Name) :- declared_foreign_type(Name, _), !.
-cached_symbol_declaration(Name) :- declared_space_type(Name, _).
+cached_symbol_declaration(Name) :- type_store(_, Store),
+                                   Entry =.. [Store, Name, _],
+                                   call(Entry), !.
 
 warn_user_library_redeclaration(Name, Type, Library) :-
     ( cached_declaration_matches(Name, Type)
@@ -511,13 +387,10 @@ warn_user_library_redeclaration(Name, Type, Library) :-
              [Name, Library, Location, Type]) ).
 
 library_decl_location(Name, Text) :-
-    fn_decl(Name, _, _, _, library(_), provenance(Location, _)), !,
-    provenance_location_text(Location, Text).
-library_decl_location(_, '').
-
-provenance_location_text(source(File, Line), Text) :-
-    format(atom(Text), " at ~w:~w", [File, Line]).
-provenance_location_text(_, '').
+    ( once(fn_decl(Name, _, _, _, library(_), provenance(Location, _))),
+      Location = source(File, Line)
+      -> format(atom(Text), " at ~w:~w", [File, Line])
+    ; Text = '' ).
 
 cached_declaration_matches(Name, Type) :-
     nonvar(Type), fn_type_shape(Type, ATs, OT, Det), !,
@@ -525,15 +398,8 @@ cached_declaration_matches(Name, Type) :-
     normalize_type(OT, OTN),
     declared_fn_type(Name, A2, O2, D2),
     (A2-O2-D2) =@= (ATN-OTN-Det).
-cached_declaration_matches(Name, [NT, R]) :- NT == 'Newtype', !,
-    normalize_type(R, RN), declared_newtype(Name, R2), R2 =@= RN.
-cached_declaration_matches(Name, [A, R]) :- A == 'Alias', !,
-    normalize_type(R, RN), declared_type_alias(Name, R2), R2 =@= RN.
-cached_declaration_matches(Name, [F|Spec]) :- F == 'Foreign', !,
-    ( Spec == [] -> Arity = 0 ; Spec = [Arity] ),
-    declared_foreign_type(Name, Arity).
-cached_declaration_matches(Name, [SO, R]) :- SO == 'SpaceOf', !,
-    normalize_type(R, RN), declared_space_type(Name, R2), R2 =@= RN.
+cached_declaration_matches(Name, Type) :- kind_decl(Type, Keyword, Value), !,
+    kind_decl_clause(Name, Keyword, Value, _).
 cached_declaration_matches(Name, Type) :-
     normalize_type(Type, TN),
     declared_value_type(Name, T2),
@@ -576,14 +442,11 @@ forbidden_effect_parameter_occurrence(T) :-
       -> member(E, Rest), effect_var_occurrence(E, _)
     ; effect_var_occurrence(T, _) ).
 
-%Strict determinism is an explicit-effect mode: every arrow in a function
-%declaration, including arrows nested in parameter/output positions (and
-%aliases expanded into those positions), must name its cardinality. The
-%standard builtin signature file is checker-internal type metadata; builtin
-%determinism comes authoritatively from det_builtins.pl, so that one load path
-%is exempt instead of duplicating hundreds of table annotations.
+%Under --strict-det every arrow in a function declaration, including nested
+%and alias-expanded ones, must name its cardinality. Builtin signatures are
+%exempt: builtin determinism comes from the registry's cardinality column.
 require_explicit_det_arrows(Name, Type) :-
-    ( strict_det(true), \+ builtin_signature_load,
+    ( strict_det(true), \+ nb_current('$builtin_signatures', true),
       normalize_type(Type, Normalized),
       type_contains_plain_arrow(Normalized)
       -> throw(error(strict_det_plain_arrow(Name), determinism))
@@ -594,20 +457,12 @@ type_contains_plain_arrow(T) :-
     ( T = [H|_], H == (->)
     ; member(E, T), type_contains_plain_arrow(E) ), !.
 
-builtin_signature_load :- nb_current('$seeding_builtin_types', true), !.
-builtin_signature_load :-
-    current_metta_file(File),
-    standard_library_path(Base),
-    atomic_list_concat([Base, '/lib_builtin_types.metta'], BuiltinFile),
-    catch(same_file(File, BuiltinFile), _, fail).
-
-%Arrow declarations are pre-cached before source-ordered Alias declarations
-%exist. When the declaration is processed in place, remove its syntax-only
-%prepass copy if normalize_type/2 expanded an alias; otherwise that stale
-%opaque overload would leak the alias name into the checker.
+%Arrow declarations are pre-cached before source-ordered aliases exist; when
+%the declaration is processed in place and an alias expanded, remove the stale
+%syntax-only prepass copy:
 remove_unexpanded_fn_precache(Name, ATs, OT, Det, ATN, OTN) :-
-    maplist(normalize_type_syntax, ATs, RawATs),
-    normalize_type_syntax(OT, RawOT),
+    maplist(normalize_type(syntax), ATs, RawATs),
+    normalize_type(syntax, OT, RawOT),
     ( (RawATs-RawOT) =@= (ATN-OTN)
       -> true
     ; canonical_effect_model(Det, RawATs, RawEffect),
@@ -616,34 +471,18 @@ remove_unexpanded_fn_precache(Name, ATs, OT, Det, ATN, OTN) :-
       -> true
     ; true ).
 
-%Canonicalize only arrow syntax, deliberately leaving atoms untouched. This
-%reconstructs the exact type cached before a source-local alias was visible.
-normalize_type_syntax(T, T) :- var(T), !.
-normalize_type_syntax(T, T) :- atomic(T), !.
-normalize_type_syntax(T, TN) :- is_list(T), fn_type_shape(T, ATs, OT, _), !,
-                                T = [Arrow|_],
-                                canonical_arrow(Arrow, H),
-                                maplist(normalize_type_syntax, ATs, ATN),
-                                normalize_type_syntax(OT, OTN),
-                                append(ATN, [OTN], Xs),
-                                TN = [H|Xs].
-normalize_type_syntax(T, TN) :- is_list(T), !, maplist(normalize_type_syntax, T, TN).
-normalize_type_syntax(T, T).
-
-%%% A fresh alias may arrive after declarations already cached its name as an
-%%% opaque atom. Rebuild every declaration store that contains that exact atom
-%%% in source order, now that normalize_type/2 can erase it. Only functions
-%%% whose arrow entries changed need recompilation; determinism metadata is
-%%% keyed by function name and arity, neither of which changes here.
+%%% A fresh alias may arrive after declarations cached its name as an opaque
+%%% atom: rebuild, in source order, every store containing that atom. Only
+%%% functions whose arrow entries changed are recompiled.
 renormalize_late_alias(Name, Fs) :-
     self_type_declarations(All),
     dependent_type_names(All, [Name], Names),
     include(declaration_mentions_any(Names), All, Rebuilt),
     renormalize_alias_fn_decls(Name, Fs),
-    renormalize_alias_value_decls(Name),
-    renormalize_alias_space_decls(Name),
+    renormalize_alias_store(Name, declared_value_type),
+    renormalize_alias_store(Name, declared_space_type),
     renormalize_alias_alias_decls(Name),
-    renormalize_alias_newtype_decls(Name),
+    renormalize_alias_store(Name, declared_newtype),
     notify_rebuilt_declarations(Rebuilt).
 
 type_term_mentions_alias(T, Name) :- sub_term(S, T), S == Name, !.
@@ -671,24 +510,18 @@ reassert_alias_fn_decl(Name, Old) :-
          replace_fn_decl_record(Old, New)
     ; true ).
 
-renormalize_alias_value_decls(Name) :-
-    findall(value(V, T), declared_value_type(V, T), Ds),
-    ( member(value(_, T0), Ds), type_term_mentions_alias(T0, Name)
-      -> retractall(declared_value_type(_, _)),
-         forall(member(value(V, T), Ds),
-                ( ( type_term_mentions_alias(T, Name) -> normalize_type(T, TN) ; TN = T ),
-                  ( declared_value_type(V, T2), T2 =@= TN -> true
-                  ; assertz(declared_value_type(V, TN)) ) ))
-    ; true ).
-
-renormalize_alias_space_decls(Name) :-
-    findall(space(S, T), declared_space_type(S, T), Ds),
-    ( member(space(_, T0), Ds), type_term_mentions_alias(T0, Name)
-      -> retractall(declared_space_type(_, _)),
-         forall(member(space(S, T), Ds),
-                ( ( type_term_mentions_alias(T, Name) -> normalize_type(T, TN) ; TN = T ),
-                  ( declared_space_type(S, T2), T2 =@= TN -> true
-                  ; assertz(declared_space_type(S, TN)) ) ))
+%Renormalize the Name(Key, Type) store entries that mention the alias Name:
+renormalize_alias_store(Name, Store) :-
+    Entry =.. [Store, K, T],
+    findall(K-T, Entry, Ds),
+    ( member(_-T0, Ds), type_term_mentions_alias(T0, Name)
+      -> Any =.. [Store, _, _],
+         retractall(Any),
+         forall(member(K1-T1, Ds),
+                ( ( type_term_mentions_alias(T1, Name) -> normalize_type(T1, TN) ; TN = T1 ),
+                  Existing =.. [Store, K1, T2],
+                  ( call(Existing), T2 =@= TN -> true
+                  ; New =.. [Store, K1, TN], assertz(New) ) ))
     ; true ).
 
 renormalize_alias_alias_decls(Name) :-
@@ -701,16 +534,6 @@ renormalize_alias_alias_decls(Name) :-
                   assertz(declared_type_alias(A, TN)) ))
     ; true ).
 
-renormalize_alias_newtype_decls(Name) :-
-    findall(newtype(N, T), declared_newtype(N, T), Ds),
-    ( member(newtype(_, T0), Ds), type_term_mentions_alias(T0, Name)
-      -> retractall(declared_newtype(_, _)),
-         forall(member(newtype(N, T), Ds),
-                ( ( type_term_mentions_alias(T, Name) -> normalize_type(T, TN) ; TN = T ),
-                  ( declared_newtype(N, T2), T2 =@= TN -> true
-                  ; assertz(declared_newtype(N, TN)) ) ))
-    ; true ).
-
 %Declaration prepass: only function (arrow) declarations are hoisted, so
 %definitions may call helpers declared later in the same file. Value
 %declarations stay order-sensitive - they are knowledge atoms whose position
@@ -721,21 +544,23 @@ precache_fn_type_decl(Space, Term) :- ( is_list(Term), Term = [C, Name, Type],
                                         -> maybe_cache_type_decl(Space, Term)
                                          ; true ).
 
-%Seed the store with the builtin operator types (called once after loading):
-seed_builtin_types :- standard_library_path(Base),
-                      atomic_list_concat([Base, '/lib_builtin_types.metta'], Path),
-                      read_file_to_string(Path, S, []),
-                      metta_string_forms(S, Forms),
-                      setup_call_cleanup(
-                          nb_setval('$seeding_builtin_types', true),
-                          in_metta_file(
-                              Path,
-                              forall(member(form(FormStr, Line), Forms),
-                                     with_form_location(
-                                         Line, FormStr,
-                                         ( sread(FormStr, Term),
-                                           maybe_cache_type_decl('&self', Term) )))),
-                          nb_delete('$seeding_builtin_types')).
+%%% Builtin signatures are the typing column of builtin_spec/6. They seed the
+%%% store once after loading, and lib_builtin_types adds them to a space as
+%%% (: Name Type) atoms for get-type and match.
+builtin_type_declaration([:, F, [Arrow|Types]]) :-
+    builtin_signature(F, _, Det, ArgTypes, OutType),
+    once(arrow_det(Arrow, Det)),
+    append(ArgTypes, [OutType], Types).
+
+with_builtin_signatures(Goal) :-
+    setup_call_cleanup(nb_setval('$builtin_signatures', true),
+                       forall(builtin_type_declaration(Decl), call(Goal, Decl)),
+                       nb_delete('$builtin_signatures')).
+
+seed_builtin_types :- with_builtin_signatures(maybe_cache_type_decl('&self')).
+
+add_builtin_signatures(Space, true) :-
+    with_builtin_signatures([Decl]>>'add-atom'(Space, Decl, true)).
 
 maybe_uncache_type_decl(Space, Term) :-
     ( Space == '&self', is_list(Term), Term = [C, Name, Type],
@@ -747,33 +572,14 @@ maybe_uncache_type_decl(Space, Term) :-
 %whose normalization depended on a removed alias, recompute explicit-arrow
 %metadata from the declarations that remain in &self, and recompile affected
 %clauses so cuts and guards match the surviving declarations.
-uncache_type_decl(Name, [NT, R]) :- NT == 'Newtype', !,
-    normalize_type(R, RN),
-    ( clause(declared_newtype(Name, R2), true, Ref), R2 =@= RN
-      -> erase(Ref),
-         retractall(nonfn_decl_origin(Name, _)),
-         decl_notify(declaration_changed(newtype, Name, removed))
-    ; true ).
-uncache_type_decl(Name, [A, R]) :- A == 'Alias', !,
-    normalize_type(R, RN),
-    ( clause(declared_type_alias(Name, R2), true, Ref), R2 =@= RN
-      -> alias_removal_rebuild(Name, Ref)
-    ; true ).
-uncache_type_decl(Name, [F|Spec]) :-
-    F == 'Foreign',
-    ( Spec == [] -> Arity = 0
-    ; Spec = [Arity], integer(Arity), Arity > 0 ), !,
-    ( clause(declared_foreign_type(Name, A2), true, Ref), A2 == Arity
-      -> erase(Ref),
-         retractall(nonfn_decl_origin(Name, _)),
-         decl_notify(declaration_changed(foreign, Name, removed))
-    ; true ).
-uncache_type_decl(Name, [SO, R]) :- SO == 'SpaceOf', !,
-    normalize_type(R, RN),
-    ( clause(declared_space_type(Name, R2), true, Ref), R2 =@= RN
-      -> erase(Ref),
-         retractall(nonfn_decl_origin(Name, _)),
-         decl_notify(declaration_changed(space, Name, removed))
+uncache_type_decl(Name, Type) :- kind_decl(Type, Keyword, Value), !,
+    ( kind_decl_clause(Name, Keyword, Value, Ref)
+      -> ( Keyword == 'Alias'
+           -> alias_removal_rebuild(Name, Ref)
+         ; decl_kind(Keyword, Kind, _, _, _),
+           erase(Ref),
+           retractall(nonfn_decl_origin(Name, _)),
+           decl_notify(declaration_changed(Kind, Name, removed)) )
     ; true ).
 uncache_type_decl(Name, Type) :-
     ( nonvar(Type), fn_type_shape(Type, ATs, OT, Det)
@@ -840,18 +646,12 @@ notify_rebuilt_declarations(Terms) :-
 rebuilt_declaration_event([_, F, Type], declaration_changed(F/N, changed)) :-
     nonvar(Type), fn_type_shape(Type, ATs, _, _), !,
     length(ATs, N).
-rebuilt_declaration_event([_, Name, [Kind, _]],
-                          declaration_changed(StoreKind, Name, changed)) :-
-    declaration_kind_name(Kind, StoreKind), !.
-rebuilt_declaration_event([_, Name, [Foreign|_]],
-                          declaration_changed(foreign, Name, changed)) :-
-    Foreign == 'Foreign', !.
+rebuilt_declaration_event([_, Name, Type],
+                          declaration_changed(Kind, Name, changed)) :-
+    kind_decl(Type, Keyword, _), !,
+    decl_kind(Keyword, Kind, _, _, _).
 rebuilt_declaration_event([_, Name, _],
                           declaration_changed(value, Name, changed)).
-
-declaration_kind_name('Alias', alias).
-declaration_kind_name('Newtype', newtype).
-declaration_kind_name('SpaceOf', space).
 
 %Alias removal temporarily erases and rebuilds dependent cache entries, but
 %their source declarations were not removed. Preserve any library provenance
@@ -885,23 +685,8 @@ type_kind_representation([K, R], R) :-
 declaration_mentions_any(Names, [_, _, Type]) :-
     member(Name, Names), type_term_mentions_alias(Type, Name), !.
 
-declaration_function_name([_, F, Type], F) :-
-    nonvar(Type), fn_type_shape(Type, _, _, _).
-
-erase_cached_declaration_only([_, Name, [NT, R]]) :- NT == 'Newtype', !,
-    normalize_type(R, RN),
-    ( clause(declared_newtype(Name, R2), true, Ref), R2 =@= RN -> erase(Ref) ; true ).
-erase_cached_declaration_only([_, Name, [A, R]]) :- A == 'Alias', !,
-    normalize_type(R, RN),
-    ( clause(declared_type_alias(Name, R2), true, Ref), R2 =@= RN -> erase(Ref) ; true ).
-erase_cached_declaration_only([_, Name, [F|Spec]]) :-
-    F == 'Foreign',
-    ( Spec == [] -> Arity = 0
-    ; Spec = [Arity], integer(Arity), Arity > 0 ), !,
-    ( clause(declared_foreign_type(Name, A2), true, Ref), A2 == Arity -> erase(Ref) ; true ).
-erase_cached_declaration_only([_, Name, [SO, R]]) :- SO == 'SpaceOf', !,
-    normalize_type(R, RN),
-    ( clause(declared_space_type(Name, R2), true, Ref), R2 =@= RN -> erase(Ref) ; true ).
+erase_cached_declaration_only([_, Name, Type]) :- kind_decl(Type, Keyword, Value), !,
+    ( kind_decl_clause(Name, Keyword, Value, Ref) -> erase(Ref) ; true ).
 erase_cached_declaration_only([_, Name, Type]) :-
     ( nonvar(Type), fn_type_shape(Type, ATs, OT, Det)
       -> maplist(normalize_type, ATs, ATN), normalize_type(OT, OTN),
@@ -912,35 +697,19 @@ erase_cached_declaration_only([_, Name, Type]) :-
     ; normalize_type(Type, TN),
       ( clause(declared_value_type(Name, T2), true, Ref), T2 =@= TN -> erase(Ref) ; true ) ).
 
-affected_decl_functions(Names, Fs) :-
-    findall(F,
-            ( declared_fn_type(F, ATs, OT, _),
-              member(Name, Names), type_term_mentions_alias(ATs-OT, Name) ),
-            ByType),
-    findall(F,
-            ( catch(translated_from(_, Term), _, fail), nonvar(Term),
-              Term = [=, Head, _], nonvar(Head), Head = [F|_],
-              member(Name, Names), type_term_mentions_alias(Term, Name) ),
-            BySource),
-    append(ByType, BySource, Fs0), sort(Fs0, Fs).
-
 forget_symbol_types(Name) :- remove_all_fn_decl_records(Name),
                              unified_checker_invalidate_event(
                                  generated_specialization_removed(Name)),
                              retractall(nonfn_decl_origin(Name, _)),
-                             retractall(declared_value_type(Name, _)),
-                             retractall(declared_newtype(Name, _)),
-                             retractall(declared_type_alias(Name, _)),
-                             retractall(declared_foreign_type(Name, _)),
-                             retractall(declared_space_type(Name, _)),
+                             forall(type_store(_, Store),
+                                    ( Entry =.. [Store, Name, _], retractall(Entry) )),
                              retractall(inferred_fn_type(Name, _, _)),
                              retractall(det_bound_proviso(Name, _, _, _)),
-                             analysis_cache_invalidate(effect(Name)),
-                             reset_output_certs(Name).  %withdraw the output certificates
+                             analysis_cache_forget_symbol(Name).
 
 %%% Store lookup (each retrieval yields a fresh copy of the declaration):
 fn_decl_arity(F, N, ATs, OT) :- declared_fn_type(F, ATs, OT, _), length(ATs, N).
-fn_decl_partial(F, N, PTs, RTs, OT) :- fn_decl_partial(F, N, PTs, RTs, OT, _).
+unique_fn_decl(F, N, ATs, OT) :- findall(A-O, fn_decl_arity(F, N, A, O), [ATs-OT]).
 fn_decl_partial(F, N, PTs, RTs, OT, Det) :- declared_fn_type(F, ATs, OT, Det),
                                             length(ATs, Total), Total > N,
                                             length(PTs, N), append(PTs, RTs, ATs).
