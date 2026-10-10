@@ -539,6 +539,10 @@ output_cert_proof(Kind, F, N, Proof) :-
                         [output_cert(Kind, F/N)|Dependencies], Proof),
     analysis_cache_store(output(Kind, F, N), Proof).
 
+%The stack `top` marks a query from outside any certificate proof, which
+%takes the memoized certificate.
+output_cert_core(Kind, F, N, top, Verdict, []) :- !,
+    ( output_cert(Kind, F, N) -> Verdict = yes ; Verdict = no ).
 output_cert_core(Kind, F, N, Stack, yes, [output_cert(Kind, F/N)]) :-
     memberchk(c(Kind, F, N), Stack), !.
 output_cert_core(Kind, F, N, Stack, Verdict, Dependencies) :-
@@ -624,26 +628,10 @@ bool_logic_builtin(implies).
 
 cert_bool_args([], _, yes, []).
 cert_bool_args([A|As], Stack, Verdict, Dependencies) :-
-    cert_bool_value(A, Stack, Here, HereDeps),
+    clause_result_bool_core(A, Stack, Here, HereDeps),
     cert_bool_args(As, Stack, Rest, RestDeps),
     ( Here == yes, Rest == yes -> Verdict = yes ; Verdict = no ),
     append(HereDeps, RestDeps, Dependencies).
-
-cert_bool_value(A, _, yes, []) :- ( A == true ; A == false ), !.
-cert_bool_value(A, Stack, Verdict, Dependencies) :-
-    nonvar(A), A = [F|Args], atom(F), bool_logic_builtin(F), !,
-    cert_bool_args(Args, Stack, Verdict, Dependencies).
-cert_bool_value(A, _, yes, [effect(F/N), decl(F/N)]) :-
-    nonvar(A), A = [F|Args], atom(F), is_list(Args), length(Args, N),
-    \+ bool_logic_builtin(F),
-    ( builtin_call_determinism_args(F, N, Args, det)
-    ; builtin_flat_cardinality(F, N, det) ),
-    unique_fn_decl(F, N, _, OT1), OT1 == 'Bool', !.
-cert_bool_value(A, Stack, Verdict, Dependencies) :-
-    nonvar(A), A = [G|GArgs], atom(G), is_list(GArgs), !,
-    length(GArgs, N),
-    output_cert_core(bound_bool, G, N, Stack, Verdict, Dependencies).
-cert_bool_value(_, _, no, []).
 
 clause_result_proper_list_core(Body, _, yes, []) :-
     nonvar(Body), Body = [Hd|Rest], nonvar(Hd), Hd == collapse,
@@ -659,28 +647,15 @@ clause_result_proper_list_core(Body, Stack, Verdict, Dependencies) :-
     output_cert_core(proper_list, G, N, Stack, Verdict, Dependencies).
 clause_result_proper_list_core(_, _, no, []).
 
-%A clause body whose RESULT is provably a bound proper list. Every test here is
-%NON-BINDING (nonvar guards + ==): Body is the SHARED clause body term that
-%translate_expr/3 compiles next, so unifying a pattern into it - e.g. matching a
-%var-headed application ($f $x) against [collapse, _] - would bind the clause's
-%own variables and corrupt the compile.
-clause_result_proper_list(Body) :- nonvar(Body), Body = [Hd|Rest], nonvar(Hd), Hd == collapse,
-                                   Rest = [_], !.
-%SWI list_to_set/2 always constructs a closed output list whenever it returns;
-%the input may affect success/error behavior, never the result spine.
-clause_result_proper_list(Body) :- nonvar(Body), Body = [F, _],
-                                   F == list_to_set, !.
-clause_result_proper_list(Body) :- proper_list_literal_spine(Body), !.
-%recursive, same-file only: a call to an already-certified function. A data
-%atom head is handled by proper_list_literal_spine above (data_headed), so this
-%reaches only a genuine function application:
-clause_result_proper_list(Body) :- nonvar(Body), Body = [G|GArgs], atom(G),
-                                   \+ ( G == cons ; G == 'cons-atom' ),
-                                   length(GArgs, N), proper_list_output(G, N).
-
-%Also used by let_determinism/4: such a let value makes the bound variable a
-%proper list, so (== $v ()) can narrow it.
-val_guaranteed_proper_list(Val) :- clause_result_proper_list(Val).
+%A clause body whose RESULT is provably a bound proper list, outside any
+%certificate proof: calls are judged by their cached certificates. Every
+%test is NON-BINDING (nonvar guards + ==): Body is the SHARED clause body term
+%that translate_expr/3 compiles next, so unifying a pattern into it - e.g.
+%matching a var-headed application ($f $x) against [collapse, _] - would bind
+%the clause's own variables and corrupt the compile.
+%let_determinism/4 uses it: such a let value makes the bound variable a proper
+%list, so (== $v ()) can narrow it.
+clause_result_proper_list(Body) :- clause_result_proper_list_core(Body, top, yes, _).
 
 %A literal proper-list spine, built at the clause site: the empty list, a
 %data-headed list literal, or a cons onto a literal spine. Mirrors

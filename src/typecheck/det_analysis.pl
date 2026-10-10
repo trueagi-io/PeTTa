@@ -307,7 +307,7 @@ let_determinism(Pat, Val, In, Result) :-
         %proper_list_output-certified call) lets the (== $v ()) narrowing fire
         %on it. A declared (List _) output does not qualify: the narrowing's
         %coverage leg needs the value to be a list unconditionally.
-        ( var(PatC), val_guaranteed_proper_list(Val)
+        ( var(PatC), clause_result_proper_list(Val)
           -> add_known_type(PatC, ['List', '%Undefined%']),
              put_attr(PatC, proper_list_cert, true),
              ProperListVar = proper(PatC)
