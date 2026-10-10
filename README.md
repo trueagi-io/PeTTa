@@ -404,9 +404,13 @@ requirement rather than testing one, so it succeeds on an unbound variable. A
 declared `Bool` therefore never implies a bound boolean, and a declared
 `(List T)` never implies a proper list; an unbound argument of a declared type
 comes straight out of well-typed code, e.g. the unfilled field of `(B $u)`.
-An exception is not a solution, so a predicate that *raises* on a mode it
+Errors are not results: a call that raises is outside cardinality, neither a
+solution nor "zero solutions". So a predicate that *raises* on a mode it
 cannot serve is still `det`; one that *fails* is at best `semidet`, and one
-that enumerates is `nondet`.
+that enumerates is `nondet`. `(+ "a" 1)` and `(car-atom ())` raise, and `+`
+and `car-atom` are `det`. The relational analyzer's call summaries in
+`call_summaries.pl` take their cardinality from the same table, so they give
+arithmetic and numeric comparison exactly one result too.
 
 Read that way, arithmetic, comparison, reflection, the cell operations
 (`cons`, `car-atom`, `cdr-atom`) and `sort-atom`/`unique-atom`/`sort`/`msort`

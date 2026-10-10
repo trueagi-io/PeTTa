@@ -27,47 +27,26 @@ summaries to inspect a literal payload.
 */
 
 :- use_module(abstract_domain).
+:- use_module(builtin_registry).
 
 :- meta_predicate mode_applicable(+, 2, -).
 :- meta_predicate select_builtin_mode(+, +, 2, -, -, -).
 :- discontiguous builtin_mode/6.
 
-% Arithmetic.  The numeric preconditions capture the usable mode; arithmetic
-% results are instantiated numbers when a call succeeds.
-arithmetic_builtin('+').
-arithmetic_builtin('-').
-arithmetic_builtin('*').
-arithmetic_builtin('/').
-arithmetic_builtin('%').
-arithmetic_builtin(min).
-arithmetic_builtin(max).
+% Native arithmetic and numeric comparison answer exactly once whenever they
+% return: an operand that is not a number raises, and an error is not a
+% result.  Their members and cardinality come from builtin_registry.pl.
+builtin_mode(F/N, [], Posts, Card, [pure], 50) :-
+    numeric_builtin(F, N, Out),
+    builtin_flat_cardinality(F, N, Level),
+    card_level(Card, Level),
+    built_result_posts(Out, Posts).
 
-builtin_mode(F/2,
-             [req(0, number), req(1, number)],
-             [ensure(result, type('Number')), ensure(result, number),
-              ensure(result, ground), ensure(result, nonvar)],
-             card(1, 1), [pure], 100) :-
-    arithmetic_builtin(F).
-builtin_mode(F/2, [], [], card(0, 1), [pure], 0) :-
-    arithmetic_builtin(F).
-
-% Numeric comparisons and reified equality always produce a proper Bool.
-numeric_comparison('<').
-numeric_comparison('<=').
-numeric_comparison('>').
-numeric_comparison('>=').
-
-builtin_mode(F/2,
-             [req(0, number), req(1, number)],
-             [ensure(result, type('Bool')), ensure(result, proper_bool),
-              ensure(result, ground), ensure(result, nonvar)],
-             card(1, 1), [pure], 100) :-
-    numeric_comparison(F).
-builtin_mode(F/2, [],
-             [ensure(result, type('Bool')), ensure(result, proper_bool),
-              ensure(result, ground), ensure(result, nonvar)],
-             card(0, 1), [pure], 0) :-
-    numeric_comparison(F).
+numeric_builtin(F, 2, 'Number') :-
+    builtin_codegen_hook(F, 2, arithmetic_native).
+numeric_builtin(F, 2, 'Bool') :-
+    builtin_codegen_hook(F, 2, reified_comparison),
+    builtin_signature(F, 2, _, ['Number', 'Number'], 'Bool').
 
 equality_builtin('=').
 equality_builtin('==').
@@ -83,32 +62,24 @@ builtin_mode(F/2, [],
     equality_builtin(F).
 
 % Boolean predicates enumerate missing Bool inputs, but are exactly-one tests
-% once every operand is already a proper Boolean.
-binary_bool_builtin(and).
-binary_bool_builtin(or).
-binary_bool_builtin(xor).
-binary_bool_builtin(implies).
+% once every operand is already a proper Boolean.  The registry names the
+% family and its worst case.
+builtin_mode(F/N, Reqs, Posts, card(1, 1), [pure], 100) :-
+    builtin_argument_rule(F, N, manifest_booleans),
+    findall(req(I, proper_bool), ( between(1, N, I1), I is I1 - 1 ), Reqs),
+    built_result_posts('Bool', Posts).
+builtin_mode(F/N, [], Posts, Card, [pure], 0) :-
+    builtin_argument_rule(F, N, manifest_booleans),
+    builtin_flat_cardinality(F, N, Worst),
+    card_level(Card, Worst),
+    built_result_posts('Bool', Posts).
 
-builtin_mode(F/2,
-             [req(0, proper_bool), req(1, proper_bool)],
-             [ensure(result, type('Bool')), ensure(result, proper_bool),
-              ensure(result, ground), ensure(result, nonvar)],
-             card(1, 1), [pure], 100) :-
-    binary_bool_builtin(F).
-builtin_mode(F/2, [],
-             [ensure(result, type('Bool')), ensure(result, proper_bool),
-              ensure(result, ground), ensure(result, nonvar)],
-             card(0, many), [pure], 0) :-
-    binary_bool_builtin(F).
-
-builtin_mode(not/1, [req(0, proper_bool)],
-             [ensure(result, type('Bool')), ensure(result, proper_bool),
-              ensure(result, ground), ensure(result, nonvar)],
-             card(1, 1), [pure], 100).
-builtin_mode(not/1, [],
-             [ensure(result, type('Bool')), ensure(result, proper_bool),
-              ensure(result, ground), ensure(result, nonvar)],
-             card(0, many), [pure], 0).
+built_result_posts('Number',
+                   [ensure(result, type('Number')), ensure(result, number),
+                    ensure(result, ground), ensure(result, nonvar)]).
+built_result_posts('Bool',
+                   [ensure(result, type('Bool')), ensure(result, proper_bool),
+                    ensure(result, ground), ensure(result, nonvar)]).
 
 % Reflection tests are total and always reify their answer as a proper Bool.
 reflection_test('is-var').
@@ -209,18 +180,15 @@ builtin_mode('cdr-atom'/1, [], [], card(1, 1), [pure], 0).
 % Constructors always build a nonvar pair.  A proper tail is required to call
 % that pair a proper, nonempty expression; the unguarded row therefore records
 % only the fact true even for an improper tail.
-cons_builtin(cons).
-cons_builtin('cons-atom').
-
 builtin_mode(F/2, [req(1, proper_list)],
              [ensure(result, expr), ensure(result, proper_list),
               ensure(result, nonempty_list), ensure(result, nonvar)],
              card(1, 1), [pure], 100) :-
-    cons_builtin(F).
+    builtin_contextual_typing(F, 2, cons_list).
 builtin_mode(F/2, [],
              [ensure(result, nonvar)],
              card(1, 1), [pure], 0) :-
-    cons_builtin(F).
+    builtin_contextual_typing(F, 2, cons_list).
 
 % Compiler forms.  collapse collects every inner solution into exactly one
 % proper list. once caps the upper bound at one but may still return nothing.
@@ -445,6 +413,16 @@ test(bool_specific_mode_outranks_fallback) :-
     select_builtin_mode(and, 2, has_proper_bool, Posts, Card, Effects),
     assertion(Card == card(1, 1)),
     assertion(Effects == [pure]),
+    assertion(memberchk(ensure(result, proper_bool), Posts)).
+
+test(arithmetic_is_det_and_numeric) :-
+    select_builtin_mode('+', 2, has_none, Posts, Card, _),
+    assertion(Card == card(1, 1)),
+    assertion(memberchk(ensure(result, number), Posts)).
+
+test(comparison_is_det_and_proper_bool) :-
+    select_builtin_mode('<', 2, has_none, Posts, Card, _),
+    assertion(Card == card(1, 1)),
     assertion(memberchk(ensure(result, proper_bool), Posts)).
 
 test(bool_fallback_without_facts) :-

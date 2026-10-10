@@ -43,10 +43,13 @@
 % predicate (N MeTTa arguments plus the result) under the weakest calling
 % convention: any argument may be unbound or ill-typed (the residual guard
 % accepts an unbound variable), so a (List T) position may hold an open list,
-% and the result may already be bound. An exception is not a solution: det is
-% exactly one solution for every instantiation, semidet at most one. Relational
-% modes are real (append/3 inverts, length/2 enumerates shapes, bool/1
-% enumerates), so such builtins are not det.
+% and the result may already be bound. Errors are not results: a call that
+% raises ((+ "a" 1), (car-atom ())) is outside cardinality, so det is exactly
+% one solution for every instantiation that does not raise, semidet at most
+% one. Relational modes are real (append/3 inverts, length/2 enumerates
+% shapes, bool/1 enumerates), so such builtins are not det. This column is
+% the only source of builtin cardinality: call_summaries.pl derives its IR
+% rows' families and worst cases from it.
 
 % Arithmetic and numeric comparisons.
 builtin_spec('+'/2, implementation(metta), typing(signature(unspecified, ['Number','Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(special(arithmetic_native))).
