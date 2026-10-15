@@ -20,12 +20,104 @@ convert_stream(In, Out, Space) :- read_line_to_string(In, Line),
                                      ; convert_line(Line, Space, Out),
                                        convert_stream(In, Out, Space) ).
 
-%Perform simple transformation from S-Expression to space-rel predicate:
-convert_line(Line0, Space, Out) :- sub_string(Line0, 1, _, 1, Inner0),
-                                   string_chars(Inner0, Chars),
-                                   transform_chars(Chars, false, NewChars),
-                                   string_chars(Inner3, NewChars),
-                                   format(Out, "'~w'(~w).~n", [Space, Inner3]).
+%Perform simple transformation from S-Expression to space-rel predicate.
+%Unlike the upstream version this never emits broken Prolog: every value is
+%either written raw (safe tokens only) or quoted/escaped via writeq, stray
+%whitespace is trimmed, blank and non-parenthesized lines are skipped as
+%comments instead of aborting the whole conversion.
+convert_line(Line0, Space, Out) :- string_trim(Line0, Trimmed),
+                                   ( Trimmed == ""
+                                     -> format(Out, "%% skipped blank line~n", [])
+                                      ; sub_string(Trimmed, 0, 1, _, "("),
+                                        sub_string(Trimmed, _, 1, 0, ")")
+                                        -> sub_string(Trimmed, 1, _, 1, Inner0),
+                                           string_chars(Inner0, Chars),
+                                           transform_chars(Chars, false, NewChars),
+                                           format(Out, "'~w'(", [Space]),
+                                           emit_chars(NewChars, false, [], no, Out),
+                                           format(Out, ").~n", [])
+                                         ; format(Out, "%% skipped non-parenthesized line: ~s~n", [Trimmed])
+                                   ).
+
+%Emit the transformed character list as Prolog term arguments.
+%Field is the reversed character buffer of the current value, Pend is
+%yes/no: a comma is owed before the next value at this nesting level.
+%Emission rules guarantee the written clause always parses:
+%  - double-quoted segments are copied verbatim (upstream parity)
+%  - plain fields are parsed back; numbers stay raw, everything else is
+%    written with writeq so apostrophes, %-signs, leading underscores and
+%    uppercase keys become proper quoted atoms instead of syntax errors
+%    or silent Prolog variables
+%  - empty fields (double spaces in the source) are dropped, not emitted
+emit_chars([], false, Field, Pend, Out) :- !, flush_field(Field, Pend, Out).
+emit_chars([], true, _Field, Pend, Out) :- !, put_char(Out, '"'), flush_field([], Pend, Out).
+emit_chars(['"'|T], false, Field, Pend0, Out) :- !,
+                                                flush_field(Field, Pend0, Out, Pend1),
+                                                maybe_comma(Pend1, Out),
+                                                put_char(Out, '"'),
+                                                emit_chars(T, true, [], yes, Out).
+emit_chars(['"'|T], true, _Field, _Pend, Out) :- !,
+                                                 put_char(Out, '"'),
+                                                 emit_chars(T, false, [], yes, Out).
+emit_chars([C|T], true, Field, Pend, Out) :- !,
+                                             put_char(Out, C),
+                                             emit_chars(T, true, Field, Pend, Out).
+emit_chars(['['|T], false, Field, Pend0, Out) :- !,
+                                                 flush_field(Field, Pend0, Out, Pend1),
+                                                 maybe_comma(Pend1, Out),
+                                                 put_char(Out, '['),
+                                                 emit_chars(T, false, [], no, Out).
+emit_chars([']'|T], false, Field, Pend0, Out) :- !,
+                                                 flush_field(Field, Pend0, Out, _),
+                                                 put_char(Out, ']'),
+                                                 emit_chars(T, false, [], yes, Out).
+emit_chars([','|T], false, Field, Pend0, Out) :- !,
+                                                 flush_field(Field, Pend0, Out, Pend1),
+                                                 emit_chars(T, false, [], Pend1, Out).
+emit_chars([C|T], false, Field, Pend, Out) :- emit_chars(T, false, [C|Field], Pend, Out).
+
+%Flush the pending field: write it (with owed comma) and report the new
+%pending-comma state.
+flush_field([], Pend, _Out, Pend) :- !.
+flush_field(Field, Pend0, Out, yes) :- maybe_comma(Pend0, Out),
+                                       write_field(Field, Out).
+
+flush_field(Field, Pend, Out) :- flush_field(Field, Pend, Out, _).
+
+maybe_comma(yes, Out) :- !, put_char(Out, ',').
+maybe_comma(no, _Out).
+
+%Write one field: parse it back; numbers are written raw, valid atoms and
+%operators with writeq (which quotes anything unsafe), unparseable text
+%(apostrophes, %-signs, digit-leading tokens, ...) becomes a quoted atom.
+write_field(Field, Out) :- reverse(Field, Chars),
+                           atomic_list_concat(Chars, A),
+                           ( catch(read_term_from_atom(A, T, []), _, fail),
+                             T \== end_of_file
+                             -> ( ( integer(T) ; float(T) )
+                                  -> write(Out, T)
+                                   ; var(T)
+                                  -> writeq(Out, A)
+                                   ; writeq(Out, T) )
+                              ; writeq(Out, A)
+                           ).
+
+%Trim leading/trailing whitespace (spaces, tabs, CR) from a string.
+string_trim(S0, S) :- string_codes(S0, C0),
+                      strip_ws(C0, C1),
+                      reverse(C1, C2),
+                      strip_ws(C2, C3),
+                      reverse(C3, C4),
+                      ( C4 == [] -> S = "" ; string_codes(S, C4) ).
+
+strip_ws([], []).
+strip_ws([C|T], R) :- is_ws_code(C), !, strip_ws(T, R).
+strip_ws(L, L).
+
+is_ws_code(0' ).
+is_ws_code(0'\t).
+is_ws_code(0'\r).
+is_ws_code(0'\n).
 
 %End of recursion
 transform_chars([], _, []) :- !.
@@ -44,10 +136,10 @@ transform_chars(['('|T], false, ['['|R]) :- !,
 
 %Replace ) with ] only outside quotes
 transform_chars([')'|T], false, [']'|R]) :- !,
-                                            transform_chars(T, false, R).
+                                           transform_chars(T, false, R).
 
 %Replace spaces with commas only outside quotes
-transform_chars([' '|T], false, [','|R]) :- !,
+transform_chars([' '|T], false, [','|R]) :- !, 
                                             transform_chars(T, false, R).
 
 %Keep all other characters unchanged
@@ -181,14 +273,14 @@ ensure_expected_origin(LocalDir, GitPath) :-
     atom_string(Expected, ExpectedString),
     ( Actual == Expected -> true
     ; throw(error(domain_error(git_origin, Actual),
-                  context('git-import!'/5, expected(Expected)))) ).
+                context('git-import!'/5, expected(Expected)))) ).
 
 ensure_clean_checkout(LocalDir) :-
     git_output('check checkout cleanliness', LocalDir,
                [status, '--porcelain', '--untracked-files=all'], Status),
     ( Status == '' -> true
     ; throw(error(permission_error(modify, dirty_git_checkout, LocalDir),
-                  context('git-import!'/5, Status))) ).
+                context('git-import!'/5, Status))) ).
 
 resolve_requested_commit(LocalDir, Commit) :-
     checked_process('fetch requested commit', path(git),
@@ -206,7 +298,7 @@ verify_head(LocalDir, Commit) :-
                ['rev-parse', '--verify', 'HEAD^{commit}'], Head),
     ( Head == Commit -> true
     ; throw(error(consistency_error(git_head, Commit, Head),
-                  context('git-import!'/5, LocalDir))) ).
+                context('git-import!'/5, LocalDir))) ).
 
 git_output(Operation, LocalDir, Args, OutputAtom) :-
     checked_process_output(Operation, path(git), Args, [cwd(LocalDir)], Output),
@@ -237,7 +329,7 @@ checked_process_output(Operation, Executable, Args, Options, Output) :-
     string_concat(Stdout, Stderr, Output),
     ( Status == exit(0) -> true
     ; throw(error(process_error(Operation, Status, Output),
-                  context('git-import!'/5, Args))) ).
+                context('git-import!'/5, Args))) ).
 
 read_process_log(File, Output) :-
     setup_call_cleanup(open(File, read, In), read_string(In, _, Output), close(In)).
