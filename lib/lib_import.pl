@@ -20,12 +20,32 @@ convert_stream(In, Out, Space) :- read_line_to_string(In, Line),
                                      ; convert_line(Line, Space, Out),
                                        convert_stream(In, Out, Space) ).
 
-%Perform simple transformation from S-Expression to space-rel predicate:
-convert_line(Line0, Space, Out) :- sub_string(Line0, 1, _, 1, Inner0),
+%Perform simple transformation from S-Expression to space-rel predicate.
+%Trim surrounding whitespace first: a trailing space used to make the
+%sub_string/5 slice one character too short and emit broken Prolog.
+convert_line(Line0, Space, Out) :- string_trim(Line0, Trimmed),
+                                   sub_string(Trimmed, 1, _, 1, Inner0),
                                    string_chars(Inner0, Chars),
                                    transform_chars(Chars, false, NewChars),
                                    string_chars(Inner3, NewChars),
                                    format(Out, "'~w'(~w).~n", [Space, Inner3]).
+
+%Trim leading/trailing whitespace (spaces, tabs, CR) from a string.
+string_trim(S0, S) :- string_codes(S0, C0),
+                      strip_ws(C0, C1),
+                      reverse(C1, C2),
+                      strip_ws(C2, C3),
+                      reverse(C3, C4),
+                      ( C4 == [] -> S = "" ; string_codes(S, C4) ).
+
+strip_ws([], []).
+strip_ws([C|T], R) :- is_ws_code(C), !, strip_ws(T, R).
+strip_ws(L, L).
+
+is_ws_code(0' ).
+is_ws_code(0'\t).
+is_ws_code(0'\r).
+is_ws_code(0'\n).
 
 %End of recursion
 transform_chars([], _, []) :- !.
