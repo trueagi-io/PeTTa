@@ -171,6 +171,9 @@ checker already knows is a compile-time error.
 (= (greet) (the String (match &self (name $n) $n)))
 ```
 
+`catch` returns `(Error E none)` for an exception other than Prolog
+`error(_,_)`; match errors as `(Error $e $ctx)`.
+
 **Auditing runtime checks.** `--warn-runtime-checks` (independent of the other
 flags) prints a warning for every runtime type check the compiler emits —
 implicit residual guards and explicit `(the ...)` ascriptions alike, each with
@@ -194,7 +197,9 @@ and `--strict` rejected the guard it could not discharge. Whether an accessor
 *succeeds* is a separate question, and belongs to the determinism table — with
 one caveat the certification forces: `(car-atom ())` **raises** (an empty
 expression has no head), because the certified element type leaves the runtime
-no licence to answer `()` where a `Number` was proven. `first` and `last`
+no licence to answer `()` where a `Number` was proven. In typed and untyped
+code alike, the error is `car-atom expects a non-empty expression` and is not
+caught by `collapse`; guard the call with a non-empty check. `first` and `last`
 simply fail on input they have no answer for, which threatens no
 certification. See `examples/strict_list_accessor_types.metta` and
 `examples/fail_strict_car_atom_empty.metta`.
