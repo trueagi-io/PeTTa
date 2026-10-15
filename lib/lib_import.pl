@@ -21,14 +21,22 @@ convert_stream(In, Out, Space) :- read_line_to_string(In, Line),
                                        convert_stream(In, Out, Space) ).
 
 %Perform simple transformation from S-Expression to space-rel predicate.
-%Trim surrounding whitespace first: a trailing space used to make the
-%sub_string/5 slice one character too short and emit broken Prolog.
+%Blank and non-parenthesized lines are skipped as comments instead of
+%making convert_line/3 fail: its failure killed convert_stream/3 mid-file,
+%which silently dropped every line after a blank one and left a partial
+%.pl on disk (reused on the next run by the existing-file fast path).
 convert_line(Line0, Space, Out) :- string_trim(Line0, Trimmed),
-                                   sub_string(Trimmed, 1, _, 1, Inner0),
-                                   string_chars(Inner0, Chars),
-                                   transform_chars(Chars, false, NewChars),
-                                   string_chars(Inner3, NewChars),
-                                   format(Out, "'~w'(~w).~n", [Space, Inner3]).
+                                   ( Trimmed == ""
+                                     -> format(Out, "%% skipped blank line~n", [])
+                                      ; sub_string(Trimmed, 0, 1, _, "("),
+                                        sub_string(Trimmed, _, 1, 0, ")")
+                                        -> sub_string(Trimmed, 1, _, 1, Inner0),
+                                           string_chars(Inner0, Chars),
+                                           transform_chars(Chars, false, NewChars),
+                                           string_chars(Inner3, NewChars),
+                                           format(Out, "'~w'(~w).~n", [Space, Inner3])
+                                         ; format(Out, "%% skipped non-parenthesized line: ~s~n", [Trimmed])
+                                   ).
 
 %Trim leading/trailing whitespace (spaces, tabs, CR) from a string.
 string_trim(S0, S) :- string_codes(S0, C0),
