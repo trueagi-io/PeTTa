@@ -4,7 +4,9 @@
 !(test (map-nested (+ 1) (1 (2 3))) (2 (3 4)))
 
 !(test (fold-flat + 0 (1 2 3)) 6)
-!(test (foldr-flat cons () (1 (2 3) 4)) (1 (2 3) 4))
+(: cons-step (-[det]-> $a (List $a) (List $a)))
+(= (cons-step $item $items) (cons $item $items))
+!(test (foldr-flat cons-step () (1 (2 3) 4)) (1 (2 3) 4))
 !(test (fold-nested + 0 (1 (2 3))) 6)
 
 ;Test set operations
@@ -44,4 +46,3 @@
 
 !(test (prog1 (+ 1 1) (+ 2 2)) 2)
 !(test (progn (+ 1 1) (+ 2 2)) 4)
-

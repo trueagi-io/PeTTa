@@ -87,15 +87,15 @@
 ;; Consistency Conditions: PLN book "5.2.2.2 PLN Deduction and Second-Order Probability", page 74:
 
 ; borrowed from https://github.com/trueagi-io/hyperon-pln/blob/main/metta/pln/dependent-types/DeductionDTL.metta
-(: smallest-intersection-probability (-> Number Number Number))
+(: smallest-intersection-probability (-[det]-> Number Number Number))
 (= (smallest-intersection-probability $As $Bs)
    (clamp (/ (- (+ $As $Bs) 1) $As) 0 1))
 
-(: largest-intersection-probability (-> Number Number Number))
+(: largest-intersection-probability (-[det]-> Number Number Number))
 (= (largest-intersection-probability $As $Bs)
    (clamp (/ $Bs $As) 0 1))
 
-(: conditional-probability-consistency (-> Number Number Number Bool))
+(: conditional-probability-consistency (-[det]-> Number Number Number Bool))
 (= (conditional-probability-consistency $As $Bs $ABs)
    (and (< 0 $As)
         (and (<= (smallest-intersection-probability $As $Bs) $ABs)
@@ -115,11 +115,11 @@
 ;Forward declaration
 (= (STV $stv) (empty))
 
-(: Truth_c2w (-> Number Number))
+(: Truth_c2w (-[semidet]-> Number Number))
 (= (Truth_c2w $c)
    (/safe $c (- 1 $c)))
 
-(: Truth_w2c (-> Number Number))
+(: Truth_w2c (-[semidet]-> Number Number))
 (= (Truth_w2c $w)
    (/safe $w (+ $w 1)))
 
@@ -463,4 +463,3 @@
 
 (= (PLN.Query $kb $term)
    (PLN.Query $kb $term (PLN.Config.MaxSteps))) ;default steps bound
-

@@ -1,0 +1,1 @@
+(= (from-second) 7)

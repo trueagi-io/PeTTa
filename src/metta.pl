@@ -1,6 +1,23 @@
 %%%%%%%%%% Dependencies %%%%%%%%%%
-library(X, Path) :- standard_library_path(Base), atomic_list_concat([Base, '/', X], Path).
-library(X, Y, Path) :- library_path(Base), atom_concat(_, X, Base), atomic_list_concat([Base, '/', Y], Path).
+:- dynamic library_path/1.
+
+library(X, Path) :- resolve_library_path(library_path_candidate(X), Path).
+library(X, Y, Path) :- resolve_library_path(library_path_candidate(X, Y), Path).
+
+library_path_candidate(X, Path) :- standard_library_path(Base),
+                                   atomic_list_concat([Base, '/', X], Path).
+library_path_candidate(X, Y, Path) :- library_path(Base),
+                                      atom_concat(_, X, Base),
+                                      atomic_list_concat([Base, '/', Y], Path).
+
+resolve_library_path(Candidate, Path) :- ( once((call(Candidate, ExistingPath),
+                                                  library_source_exists(ExistingPath)))
+                                           -> Path = ExistingPath
+                                            ; once(call(Candidate, Path)) ).
+
+library_source_exists(Path) :- exists_file(Path), !.
+library_source_exists(Path) :- file_name_extension(Path, metta, MettaPath),
+                               exists_file(MettaPath).
 :- prolog_load_context(directory, Source),
    directory_file_path(Source, '..', Parent),
    directory_file_path(Parent, 'lib', LibPath),
@@ -19,8 +36,9 @@ library(X, Y, Path) :- library_path(Base), atom_concat(_, X, Base), atomic_list_
 :- use_module(library(process)).
 :- use_module(library(filesex)).
 :- current_prolog_flag(argv, Argv),
-  ( member(mork, Argv) -> ensure_loaded([ext_points, parser, translator, specializer, filereader, '../mork_ffi/morkspaces', spaces])
-                        ; ensure_loaded([ext_points, parser, translator, specializer, filereader, spaces])).
+   ( member(mork, Argv) -> ensure_loaded([ext_points, parser, typecheck, translator, specializer, filereader, '../mork_ffi/morkspaces', spaces, load_cache])
+                         ; ensure_loaded([ext_points, parser, typecheck, translator, specializer, filereader, spaces, load_cache])).
+:- seed_builtin_types.
 
 %%%%%%%%%% Standard Library for MeTTa %%%%%%%%%%
 
@@ -38,14 +56,28 @@ parse(Str, R) :- sread(Str, R).
 '%'(A,B,R)  :- R is A mod B.
 '<'(A,B,R)  :- (A<B -> R=true ; R=false).
 '>'(A,B,R)  :- (A>B -> R=true ; R=false).
+'@<'(A,B,R) :- (A@<B -> R=true ; R=false).
+'@>'(A,B,R) :- (A@>B -> R=true ; R=false).
 '=='(A,B,R) :- (A==B -> R=true ; R=false).
 '!='(A,B,R) :- (A==B -> R=false ; R=true).
 '='(A,B,R) :-  (A=B -> R=true ; R=false).
 '=?'(A,B,R) :- (\+ \+ A=B -> R=true ; R=false).
-'=alpha'(A,B,R) :- (A =@= B -> R=true ; R=false).
-'=@='(A,B,R) :- (A =@= B -> R=true ; R=false).
+%Raw =@= success already implies attribute-free variance - identical
+%attributes still correspond after stripping - so it accepts at C speed
+%without copying. A raw failure is final unless checker attributes are
+%present on either side; only that rare case pays for the stripping copies.
+attribute_free_variant(A, B) :-
+    ( A =@= B -> true
+    ; ( term_attvars(A, [_|_]) -> true ; term_attvars(B, [_|_]) )
+      -> copy_term_nat(A, AC), copy_term_nat(B, BC), AC =@= BC
+    ; fail ).
+
+'=alpha'(A,B,R) :- (attribute_free_variant(A, B) -> R=true ; R=false).
+'=@='(A,B,R) :- (attribute_free_variant(A, B) -> R=true ; R=false).
 '<='(A,B,R) :- (A =< B -> R=true ; R=false).
 '>='(A,B,R) :- (A >= B -> R=true ; R=false).
+'@<='(A,B,R) :- (A @=< B -> R=true ; R=false).
+'@>='(A,B,R) :- (A @>= B -> R=true ; R=false).
 min(A,B,R)  :- R is min(A,B).
 max(A,B,R)  :- R is max(A,B).
 exp(Arg,R) :- R is exp(Arg).
@@ -126,7 +158,7 @@ alpha_list_to_set(List, Set) :-
 
 alpha_list_to_set_assoc([], _, []).
 alpha_list_to_set_assoc([H|T], SeenIn, R) :-
-    copy_term(H, HCopy),
+    copy_term_nat(H, HCopy),
     numbervars(HCopy, 0, _),
     term_hash(HCopy, Key),
     ( get_assoc(Key, SeenIn, _) ->
@@ -146,6 +178,12 @@ non_list(X) :- compound(X), X \= [_|_].
 'size-atom'(List, Size) :- non_list(List), !, Size = [].
 'size-atom'(List, Size) :- length(List, Size).
 'car-atom'([H|_], H) :- !.
+%An empty expression has no head, and answering () here instead of raising
+%would be a WRONG answer, not a failure: the typechecker certifies this
+%result as the argument's element type (list_elem_out_type/2), so a quiet ()
+%would arrive where a Number was proven. Raising keeps the certification
+%sound and the det verdict too - an exception is not a solution:
+'car-atom'([], _) :- !, throw(error(car_atom_empty, 'car-atom')).
 'car-atom'(_, []).
 'cdr-atom'([_|T], T) :- !.
 'cdr-atom'(_, []).
@@ -215,11 +253,11 @@ get_type_candidate(X, T) :- match('&self', [':',X,T], T, _).
 'readln!'(Out) :- read_line_to_string(user_input, Str),
                   sread(Str, Out).
 
-test(A,B,true) :- (A =@= B -> E = '✅' ; E = '❌'),
+test(A,B,true) :- (attribute_free_variant(A, B) -> E = '✅' ; E = '❌'),
                   swrite(A, RA),
                   swrite(B, RB),
                   format("is ~w, should ~w. ~w ~n", [RA, RB, E]),
-                  (A =@= B -> true ; halt(1)).
+                  (attribute_free_variant(A, B) -> true ; halt(1)).
 
 assert(Goal, true) :- ( call(Goal) -> true
                                     ; swrite(Goal, RG),
@@ -289,7 +327,12 @@ call_goals([G|Gs]) :- call(G),
 
 %%% Prolog interop: %%%
 argv(K, Arg) :- current_prolog_flag(argv, Argv), nth0(K, Argv, A), ( atom_number(A, N) -> Arg = N ; Arg = A ).
-import_prolog_function(N, true) :- register_fun(N).
+import_prolog_function(N, true) :-
+    ( fun(N) -> WasCallable = true ; WasCallable = false ),
+    register_fun(N),
+    ( WasCallable == false
+      -> notify_mutation(callable_changed(N))
+    ; true ).
 'Predicate'([F|Args], Term) :- Term =.. [F|Args].
 callPredicate(G, true) :- call(G).
 assertzPredicate(G, true) :- assertz(G).
@@ -301,19 +344,91 @@ retractPredicate(_, false).
 ensure_metta_ext(Path, Path) :- file_name_extension(_, metta, Path), !.
 ensure_metta_ext(Path, PathWithExt) :- file_name_extension(Path, metta, PathWithExt).
 
-'import!'(Space, File, true) :- catch(importer_helper(Space, File), _, fail).
-importer_helper(Space, File) :- atom_string(File, SFile),
-                                working_dir(Base),
-                                ( file_name_extension(ModPath, 'py', SFile)
-                                  -> absolute_file_name(SFile, Path, [relative_to(Base)]),
-                                     file_directory_name(Path, Dir),
-                                     file_base_name(ModPath, ModuleName),
-                                     py_call(sys:path:append(Dir), _),
-                                     py_call(builtins:'__import__'(ModuleName), _)
-                                   ; ( Path = SFile ; atomic_list_concat([Base, '/', SFile], Path) ),
-                                     ensure_metta_ext(Path, PathWithExt),
-                                     exists_file(PathWithExt), !,
-                                     load_metta_file(PathWithExt, _, Space) ).
+%The translator preserves the source-level distinction between
+%(import! ... (library Name)) and a plain pathname by rewriting only the
+%former to this helper.
+'library-import!'(Space, Name, true) :-
+    with_library_origin(Name,
+                        ( library(Name, File),
+                          importer_helper(Space, File) )).
+
+current_working_dir(Base) :- working_dir(Base), !.
+current_working_dir(Base) :- absolute_file_name('.', Base, [file_type(directory)]).
+
+import_file_string(File, SFile) :- string(File), !, SFile = File.
+import_file_string(File, SFile) :- atom_string(File, SFile).
+
+python_import_file(File) :- import_file_string(File, SFile),
+                            file_name_extension(_, py, SFile).
+
+resolve_existing_import_path(Base, RequestedPath, CanonPath) :-
+    absolute_file_name(RequestedPath, CanonPath,
+                       [relative_to(Base), access(read), file_errors(fail)]), !.
+
+throw_missing_import(File) :-
+    throw(error(existence_error(source_sink, File), context('import!', File))).
+
+resolve_metta_import_path(File, CanonPath) :-
+    import_file_string(File, SFile),
+    \+ python_import_file(SFile),
+    current_working_dir(Base),
+    ensure_metta_ext(SFile, RequestedPath),
+    ( resolve_existing_import_path(Base, RequestedPath, CanonPath)
+      -> true
+       ; throw_missing_import(File) ).
+
+resolve_python_import_path(File, CanonPath) :-
+    import_file_string(File, SFile),
+    python_import_file(SFile),
+    current_working_dir(Base),
+    ( resolve_existing_import_path(Base, SFile, CanonPath)
+      -> true
+       ; throw_missing_import(File) ).
+
+:- dynamic metta_import_state/3.
+
+% A loading or active entry breaks cycles; a loaded entry makes later imports no-ops.
+% Failed loads remove their loading entry, but may leave partial state; retrying a
+% failed import in the same runtime is unsupported.
+claim_import(Space, CanonPath, skip) :- metta_import_state(Space, CanonPath, loaded), !.
+claim_import(Space, CanonPath, skip) :- metta_import_state(Space, CanonPath, loading), !.
+claim_import(Space, CanonPath, skip) :- active_metta_load(Space, CanonPath), !.
+claim_import(Space, CanonPath, load) :- assertz(metta_import_state(Space, CanonPath, loading)).
+
+clear_import_state(Space, CanonPath) :- retractall(metta_import_state(Space, CanonPath, _)).
+
+mark_import_loaded(Space, CanonPath) :- clear_import_state(Space, CanonPath),
+                                        assertz(metta_import_state(Space, CanonPath, loaded)).
+
+run_new_import(Space, CanonPath, Goal) :-
+    catch(( once(Goal)
+            -> mark_import_loaded(Space, CanonPath)
+             ; clear_import_state(Space, CanonPath), fail ),
+          Error,
+          ( clear_import_state(Space, CanonPath), throw(Error) )).
+
+import_once(Space, CanonPath, Goal) :- claim_import(Space, CanonPath, Action),
+                                       ( Action = skip -> true
+                                                       ; run_new_import(Space, CanonPath, Goal) ).
+
+'import!'(Space, File, true) :- importer_helper(Space, File).
+importer_helper(Space, File) :-
+    ( python_import_file(File)
+      -> resolve_python_import_path(File, CanonPath),
+         file_directory_name(CanonPath, Dir),
+         file_base_name(CanonPath, BaseName),
+         file_name_extension(ModuleName, _, BaseName),
+         import_once(Space, CanonPath,
+                     ( py_call(sys:path:append(Dir), _),
+                       py_call(builtins:'__import__'(ModuleName), _) ))
+       ; resolve_metta_import_path(File, CanonPath),
+         import_once(Space, CanonPath, load_metta_file(CanonPath, _, Space)) ).
+
+%Like import! of a MeTTa file, replaying a stored snapshot of the load when one
+%matches (see load_cache.pl). Output printed while loading is not replayed.
+'cached-import!'(Space, File, true) :-
+    resolve_metta_import_path(File, CanonPath),
+    import_once(Space, CanonPath, load_metta_file_cached(CanonPath, _, Space)).
 
 :- dynamic translator_rule/1.
 'add-translator-rule!'(HV, true) :- ( translator_rule(HV)
@@ -324,14 +439,18 @@ importer_helper(Space, File) :- atom_string(File, SFile),
 %%% Registration: %%%
 :- dynamic fun/1, arity/2.
 register_fun(N) :- fun(N), !.
+%Arities are registered in ascending order: the order current_predicate/1
+%enumerates them in depends on how many atoms the process created before.
 register_fun(N) :- assertz(fun(N)),
-                   forall((current_predicate(N/Arity), \+ (current_op(_, _, N), Arity =< 2)),
+                   findall(Arity, (current_predicate(N/Arity), \+ (current_op(_, _, N), Arity =< 2)), Arities0),
+                   sort(Arities0, Arities),
+                   forall(member(Arity, Arities),
                           (arity(N, Arity) -> true ; assertz(arity(N, Arity)))).
 :- maplist(register_fun, [superpose, empty, let, 'let*', '+','-','*','/', '%', min, max, 'change-state!', 'get-state', 'bind!',
-                          '<','>','==', '!=', '=', '=?', '<=', '>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
+                          '<','>','@<', '@>', '==', '!=', '=', '=?', '<=', '>=', '@<=', '@>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
                           'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom', 'alpha-unique-atom',
                           repr, repra, parse, 'println!', 'readln!', test, assert, 'mm2-exec', atom_concat, atom_chars, copy_term, term_hash,
-                          foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'is-alpha-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!',
+                          foldl, first, last, append, length, 'size-atom', sort, msort, member, 'is-member', 'is-alpha-member', 'exclude-item', list_to_set, maplist, eval, reduce, 'import!', 'cached-import!',
                           'add-atom', 'remove-atom', 'get-atoms', match, 'is-var', 'is-ground', 'is-expr', 'is-space', 'get-mettatype',
                           decons, 'decons-atom', 'py-call', 'get-type', 'get-metatype', '=alpha', concat, sread, cons, reverse,
                           '#+','#-','#*','#div','#//','#mod','#min','#max','#<','#>','#=','#\\=','set_hook',
@@ -339,6 +458,10 @@ register_fun(N) :- assertz(fun(N)),
                           'pow-math', 'sqrt-math', 'sort-atom','abs-math', 'log-math', 'trunc-math', 'ceil-math',
                           'floor-math', 'round-math', 'sin-math', 'cos-math', 'tan-math', 'asin-math','random-int','random-float',
                           'acos-math', 'atan-math', 'isnan-math', 'isinf-math', 'min-atom', 'max-atom',
-                          'foldl-atom', 'map-atom', 'filter-atom','current-time','format-time', library, exists_file,
+                          'foldl-atom', 'map-atom', 'filter-atom','current-time','format-time', library, exists_file, 'library-import!',
                           import_prolog_function, 'Predicate', callPredicate, assertaPredicate, assertzPredicate, retractPredicate,
                           'add-translator-rule!', 'remove-translator-rule!', argv]).
+
+%Fail startup immediately when any of the independently implemented builtin
+%views drifts from the declarative registry.
+:- validate_builtin_registry.

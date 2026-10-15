@@ -1,5 +1,6 @@
 !(import! &self (library lib_patrick))
 
+(: fib-step (-[det]-> Number (Number Number) (Number Number)))
 (= (fib-step $i ($a $b))
    ($b (+ $a $b)))
 

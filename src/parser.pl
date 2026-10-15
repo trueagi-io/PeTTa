@@ -8,8 +8,7 @@
 %prints under two names, and two variables never print under one.
 swrite(Term, String) :-
         setup_call_cleanup(true,
-            ( phrase(swrite_exp(Term, 0, _), Codes),
-              string_codes(String, Codes) ),
+            with_output_to(string(String), swrite_exp(Term, 0, _)),
             swrite_cleanup(Term)).
 
 swrite_cleanup(Term) :-
@@ -21,30 +20,37 @@ swrite_cleanup(Term) :-
 %no constraint on the value.
 petta_swrite_name:attr_unify_hook(_, _).
 
-swrite_exp(Var, C0, C)   --> { var(Var) }, !, "$_",
-                              { (   get_attr(Var, petta_swrite_name, N)
-                                ->  C = C0
-                                ;   N = C0, C is C0 + 1,
-                                    put_attr(Var, petta_swrite_name, N)
-                                ),
-                                number_codes(N, Cs) }, Cs.
-swrite_exp(Num, C, C)    --> { number(Num) }, !, { number_codes(Num, Cs) }, Cs.
-swrite_exp(Str, C, C)    --> { string(Str) }, !, "\"",
-                              { string_codes(Str, Cs), escape_quotes(Cs, Es) }, Es, "\"".
-swrite_exp(Atom, C, C)   --> { atom(Atom) }, !, atom(Atom).
-swrite_exp([H|T], C0, C) --> { \+ is_list([H|T]) }, !, "(", atom(cons), " ",
-                              swrite_exp(H, C0, C1), " ", swrite_exp(T, C1, C), ")".
-swrite_exp([H|T], C0, C) --> !, "(", swrite_seq([H|T], C0, C), ")".
-swrite_exp([], C, C)     --> !, "()".
-swrite_exp(Term, C0, C)  --> { Term =.. [F|Args] }, "(", atom(F),
-                              ( { Args == [] } -> { C = C0 }
-                              ; " ", swrite_seq(Args, C0, C) ), ")".
-swrite_seq([X], C0, C)    --> swrite_exp(X, C0, C).
-swrite_seq([X|Xs], C0, C) --> swrite_exp(X, C0, C1), " ", swrite_seq(Xs, C1, C).
-escape_quotes([], []).
-escape_quotes([0'\\|T], [0'\\,0'\\|R]) :- !, escape_quotes(T, R).
-escape_quotes([0'"|T], [0'\\,0'"|R]) :- !, escape_quotes(T, R).
-escape_quotes([H|T], [H|R]) :- escape_quotes(T, R).
+%Each term is written straight to a string stream: no code list is built, and
+%every clause commits, so printing leaves no choice point.
+swrite_exp(Var, C0, C)   :- var(Var), !,
+                            (   get_attr(Var, petta_swrite_name, N)
+                            ->  C = C0
+                            ;   N = C0, C is C0 + 1,
+                                put_attr(Var, petta_swrite_name, N)
+                            ),
+                            format("$_~d", [N]).
+swrite_exp(Num, C, C)    :- number(Num), !, write(Num).
+swrite_exp(Str, C, C)    :- string(Str), !, put_char('"'),
+                            string_length(Str, Len),
+                            forall(between(1, Len, I),
+                                   ( string_code(I, Str, Code), swrite_string_code(Code) )),
+                            put_char('"').
+swrite_exp(Atom, C, C)   :- atom(Atom), !, write(Atom).
+swrite_exp([H|T], C0, C) :- \+ is_list([H|T]), !, write('(cons '),
+                            swrite_exp(H, C0, C1), put_char(' '), swrite_exp(T, C1, C), put_char(')').
+swrite_exp([H|T], C0, C) :- !, put_char('('), swrite_seq(T, H, C0, C), put_char(')').
+swrite_exp([], C, C)     :- !, write('()').
+swrite_exp(Term, C0, C)  :- Term =.. [F|Args], put_char('('), write(F),
+                            foldl(swrite_arg, Args, C0, C), put_char(')').
+
+swrite_seq([], X, C0, C)      :- swrite_exp(X, C0, C).
+swrite_seq([Y|Ys], X, C0, C)  :- swrite_exp(X, C0, C1), put_char(' '), swrite_seq(Ys, Y, C1, C).
+
+swrite_arg(X, C0, C) :- put_char(' '), swrite_exp(X, C0, C).
+
+swrite_string_code(0'\\) :- !, write('\\\\').
+swrite_string_code(0'") :- !, write('\\"').
+swrite_string_code(Code) :- put_code(Code).
 
 %Read S string or atom, extract codes, and apply DCG (parsing):
 sread(S, T) :- ( atom_string(A, S),

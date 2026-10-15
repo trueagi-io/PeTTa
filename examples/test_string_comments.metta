@@ -30,3 +30,10 @@
 ; Test 8: Comments outside strings still work
 (= (test-func) result) ; This comment should be stripped
 !(test (test-func) result)
+
+; Test 9: Escaped quote before ) and ;
+!(test "\")" "\")")
+!(test "\";" "\";")
+
+; Test 10: Escaped backslash before the closing quote
+!(test (quote "\\") "\\")

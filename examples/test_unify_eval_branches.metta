@@ -6,7 +6,7 @@
 ;; Without the eval fix (lib_he.metta lines 24-25), space-based unify
 ;; returns unevaluated expressions such as (+ 1 2) instead of 3.
 
-!(import! &self lib/lib_he)
+!(import! &self ../lib/lib_he)
 
 ;; --- Knowledge base atoms (like pverify's Constant/Var declarations) ---
 (Constant wff (Type "$c"))

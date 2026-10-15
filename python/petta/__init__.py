@@ -76,6 +76,12 @@ class PeTTa:
         """Compile a MeTTa file to Prolog and return the results of the run."""
         return self._run_helper("load_metta_file", file_path)
 
+    def load_metta_file_cached(self, file_path) -> str:
+        """Load a MeTTa library file, replaying a stored snapshot of the load
+        when one matches the current state and sources. Output printed while
+        loading is not replayed."""
+        return self._run_helper("load_metta_file_cached", file_path)
+
     def process_metta_string(self, metta_code) -> str:
         """Compile a string of MeTTa code to Prolog and return the results of the run."""
         return self._run_helper("process_metta_string", metta_code)
