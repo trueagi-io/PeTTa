@@ -1,0 +1,19 @@
+{
+  // Minimal VS Code launch configuration for the PeTTa DAP server.
+  // Place a copy in your workspace's .vscode/launch.json (adjust the paths),
+  // then start "Debug PeTTa file" with a .metta file open.
+  //
+  // PeTTa ships a generic DAP server over stdio (dap.sh). VS Code needs a tiny
+  // debug-adapter extension to wire a debug "type" to that stdio adapter, or you
+  // can use a generic DAP bridge. See editors/README.md for details.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "petta",
+      "request": "launch",
+      "name": "Debug PeTTa file",
+      "program": "${file}",
+      "stopOnEntry": false
+    }
+  ]
+}

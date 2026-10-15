@@ -36,8 +36,8 @@ library_source_exists(Path) :- file_name_extension(Path, metta, MettaPath),
 :- use_module(library(process)).
 :- use_module(library(filesex)).
 :- current_prolog_flag(argv, Argv),
-   ( member(mork, Argv) -> ensure_loaded([ext_points, parser, typecheck, translator, specializer, filereader, '../mork_ffi/morkspaces', spaces, load_cache])
-                         ; ensure_loaded([ext_points, parser, typecheck, translator, specializer, filereader, spaces, load_cache])).
+   ( member(mork, Argv) -> ensure_loaded([ext_points, 'debugger/debugger', parser, typecheck, translator, specializer, filereader, '../mork_ffi/morkspaces', spaces, load_cache])
+                         ; ensure_loaded([ext_points, 'debugger/debugger', parser, typecheck, translator, specializer, filereader, spaces, load_cache])).
 :- seed_builtin_types.
 
 %%%%%%%%%% Standard Library for MeTTa %%%%%%%%%%
@@ -307,9 +307,16 @@ py_bool_norm(R, R).
 eval(C, Out) :- translate_expr(C, Goals, Out),
                 call_goals(Goals).
 
-call_goals([]).
-call_goals([G|Gs]) :- call(G), 
-                      call_goals(Gs).
+call_goals(Goals) :- call_goals_indexed(Goals, 1).
+
+%Each goal passes through metta_wrap_goal/3 (src/ext_points.pl) so an extension
+%can instrument it; with none loaded the hook fails and the goal is called
+%verbatim, exactly as before.
+call_goals_indexed([], _).
+call_goals_indexed([G|Gs], GoalIndex) :- ( metta_wrap_goal(G, GoalIndex, G1) -> true ; G1 = G ),
+                                         call(G1),
+                                         NextGoalIndex is GoalIndex + 1,
+                                         call_goals_indexed(Gs, NextGoalIndex).
 
 %%% Higher-Order Functions: %%%
 'foldl-atom'([], Acc, _Func, Acc).

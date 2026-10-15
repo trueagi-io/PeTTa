@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "petta",
+      "request": "launch",
+      "name": "Debug PeTTa: fib_buggy",
+      "program": "${workspaceFolder}/tests/debugger/fixtures/fib_buggy.metta"
+    },
+    {
+      "type": "petta",
+      "request": "launch",
+      "name": "Debug PeTTa: current file",
+      "program": "${file}"
+    }
+  ]
+}

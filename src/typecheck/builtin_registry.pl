@@ -280,6 +280,7 @@ builtin_implementation_exemption(alpha_list_to_set_assoc/3, alpha_unique_helper)
 builtin_implementation_exemption(attribute_free_variant/2, identity_helper).
 builtin_implementation_exemption(bool/1, boolean_domain_helper).
 builtin_implementation_exemption(call_goals/1, evaluator_helper).
+builtin_implementation_exemption(call_goals_indexed/2, evaluator_helper).
 builtin_implementation_exemption(claim_import/3, import_helper).
 builtin_implementation_exemption(clear_import_state/2, import_helper).
 builtin_implementation_exemption(current_working_dir/1, import_helper).

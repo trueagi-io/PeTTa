@@ -53,10 +53,15 @@ swrite_string_code(0'") :- !, write('\\"').
 swrite_string_code(Code) :- put_code(Code).
 
 %Read S string or atom, extract codes, and apply DCG (parsing):
-sread(S, T) :- ( atom_string(A, S),
-                 atom_codes(A, Cs),
-                 phrase(sexpr(T, [], _), Cs)
-               -> true ; format(atom(Msg), 'Parse error in form: ~w', [S]), throw(error(syntax_error(Msg), none)) ).
+sread(S, T) :- sread(S, T, _Env).
+
+%As sread/2, but also return the variable-name environment (a list of Name-Var
+%pairs) collected while parsing, where each Var is the actual Prolog variable
+%shared with T. Tooling uses this to map MeTTa $variables back to their names.
+sread(S, T, Env) :- ( atom_string(A, S),
+                      atom_codes(A, Cs),
+                      phrase(sexpr(T, [], Env), Cs)
+                    -> true ; format(atom(Msg), 'Parse error in form: ~w', [S]), throw(error(syntax_error(Msg), none)) ).
 
 %An S-Expression is a parentheses-nesting of S-Expressions that are either numbers, variables, sttrings, or atoms:
 sexpr(S,E,E)  --> blanks, string_lit(S), blanks, !.

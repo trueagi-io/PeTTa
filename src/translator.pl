@@ -1107,6 +1107,11 @@ safe_apply(Goal) :- catch(Goal, error(existence_error(procedure, _), _), fail).
 %overloads statically when possible, and emit runtime guards only where types
 %stay unresolved (see AGENTS.md).
 translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
+        append(Bound, Args, SrcArgs),
+        with_source_expr([Fun|SrcArgs],
+                         translate_typed_call_dispatch(Fun, Bound, Args, GsH, Goals, Out)).
+
+translate_typed_call_dispatch(Fun, Bound, Args, GsH, Goals, Out) :-
         length(Args, NProv), length(Bound, NB), NTotal is NProv + NB,
         findall(ft(ATs, OT), fn_decl_arity(Fun, NTotal, ATs, OT), FullDecls),
         ( FullDecls \== []
@@ -1377,8 +1382,40 @@ cmp_native('!=', A, B, (A \== B)).
 %source expressions where the caller has them, otherwise the values AVs.
 build_call_or_partial(Fun, Src, AVs, Out, Inner, Extra, Goals) :- ( maybe_specialize_call(Fun, AVs, Out, Goal)
                                                                     -> commit_call(Fun, Src, AVs, Out, Goal, Goal1),
-                                                                       append(Inner, [Goal1|Extra], Goals)
+                                                                       wrap_ext_call(Fun, Src, AVs, Goal1, Wrapped),
+                                                                       append(Inner, [Wrapped|Extra], Goals)
                                                                      ; build_direct_call(Fun, Src, AVs, Out, Inner, Extra, Goals) ).
+
+%Record the call's source expression - the arguments as written, before they
+%are translated to value variables - so an extension can report a runtime event
+%against the MeTTa the user wrote rather than its compiled form. Backtrackable,
+%so it unwinds with the translation that set it.
+:- initialization(nb_setval('$metta_src_expr', [])).
+
+%Bracketed, so a nested argument translation restores the enclosing call's
+%expression on the way out and the outer call still sees its own.
+with_source_expr(SourceExpr, Goal) :- ( catch(b_getval('$metta_src_expr', Prev), _, fail) -> true ; Prev = [] ),
+                                      setup_call_cleanup(b_setval('$metta_src_expr', SourceExpr),
+                                                         Goal,
+                                                         b_setval('$metta_src_expr', Prev)).
+
+%Let an extension (the debugger) wrap a generated call goal so a runtime event
+%can be tied back to the source expression. metta_wrap_compiled_goal/3 is the
+%extension point (src/ext_points.pl); with nothing loaded it fails and the goal
+%is emitted exactly as before, so a non-debug run compiles identically.
+wrap_ext_call(Fun, Src, AVs, Goal, Wrapped) :- call_source_expr(Fun, Src, AVs, SourceExpr),
+                                               ( metta_wrap_compiled_goal(SourceExpr, Goal, W) -> Wrapped = W
+                                                                                                ; Wrapped = Goal ).
+
+%Prefer the published source expression when it belongs to this call; otherwise
+%fall back to whatever the call site carries.
+call_source_expr(Fun, _Src, AVs, SourceExpr) :- catch(b_getval('$metta_src_expr', [F|SrcArgs]), _, fail),
+                                                F == Fun,
+                                                length(SrcArgs, N), length(AVs, N),
+                                                !,
+                                                SourceExpr = [Fun|SrcArgs].
+call_source_expr(Fun, Src, _AVs, [Fun|Src]) :- is_list(Src), !.
+call_source_expr(Fun, _Src, AVs, [Fun|AVs]).
 
 build_direct_call(Fun, Src, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                               Arity is N + 1,
@@ -1386,7 +1423,8 @@ build_direct_call(Fun, Src, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                                 \+ ( current_op(_, _, Fun), Arity =< 2 )
                                                                 -> resolve_memoization(Fun, AVs, Out, Goal0),
                                                                    commit_call(Fun, Src, AVs, Out, Goal0, Goal),
-                                                                   append(Inner, [Goal|Extra], Goals)
+                                                                   wrap_ext_call(Fun, Src, AVs, Goal, WrappedGoal),
+                                                                   append(Inner, [WrappedGoal|Extra], Goals)
                                                               ; incomplete_application_kind(Fun, Arity, partial)
                                                                 -> Out = partial(Fun, AVs),
                                                                    append(Inner, Extra, Goals)

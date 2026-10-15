@@ -91,6 +91,13 @@ prolog_interop_example :- register_fun(prologfunc),
 
 main :- current_prolog_flag(argv, RawArgs),
         strip_silent_flags(RawArgs, Args),
+        % An extension (the debugger) may claim the command line - to print its
+        % own help, or to run the program under instrumentation. With none
+        % loaded the hook fails and the normal dispatch below runs unchanged.
+        ( metta_main_override(Args) -> true ; run_metta_main(Args) ),
+        halt.
+
+run_metta_main(Args) :-
         ( Args = [] -> prolog_interop_example
         ; Args = [mork] -> prolog_interop_example,
                            mork_test
@@ -101,8 +108,8 @@ main :- current_prolog_flag(argv, RawArgs),
              append(ResultsList, Results),
              maplist(swrite,Results,ResultsR),
              maplist(format("~w~n"), ResultsR)
-        ),
-        halt.
+        ; true
+        ).
 
 % Several .metta files may be named, and they are loaded in exactly the order
 % given. Load ORDER is semantically significant - a declaration or a

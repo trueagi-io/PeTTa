@@ -42,7 +42,8 @@ remove_sexp(Space, TermIn) :-
 %Add an atom to the space:
 'add-atom'(Space, Term, true) :-
     typed_space_runtime_value_ok(Space, Term),
-    add_sexp(Space, Term).
+    add_sexp(Space, Term),
+    ignore(metta_on_space_event(add, success, Space, Term, true)).
 
 runtime_add_function_tx(Space, Term, FAtom, W, Snapshot) :-
     Term = [=, [FAtom|W], TermBody],
@@ -173,12 +174,14 @@ runtime_source_key([Eq, [F|Args], _], F/N) :-
                                        % so they see data syntax, not a stale
                                        % unknown function call.
                                        notify_mutation(clause_changed(F/N, runtime)),
-                                       ( Refs = [] -> Removed = false ; Removed = true ).
+                                       ( Refs = [] -> Removed = false ; Removed = true ),
+                                       ignore(metta_on_space_event(remove, Removed, Space, Term, Removed)).
 
 %Remove all same atoms:
 'remove-atom'(Space, Term, true) :-
     typed_space_runtime_value_ok(Space, Term),
-    remove_sexp(Space, Term).
+    remove_sexp(Space, Term),
+    ignore(metta_on_space_event(remove, true, Space, Term, true)).
 
 %Updates whose row the translator proved against the space's declared schema
 %(typed_space_update_goal/4). A function atom keeps its own clause.
@@ -218,15 +221,20 @@ match(_, LComma, OutPattern, Result) :- LComma == [','], !,
 match(Space, [Comma|[Head|Tail]], OutPattern, Result) :- Comma == ',', !,
                                                          ( is_list(Head) -> append([Space], Head, List), Term =.. List
                                                                           ; Term =.. [Space, '#primitive', Head] ),
-                                                         space_call(Term),
-                                                         \+ cyclic_term(OutPattern),
-                                                         match(Space, [','|Tail], OutPattern, Result).
+                                                         ( space_call(Term),
+                                                           \+ cyclic_term(OutPattern),
+                                                           match(Space, [','|Tail], OutPattern, Result),
+                                                           ignore(metta_on_space_event(match, success, Space, [','|[Head|Tail]], Result))
+                                                         ; ignore(metta_on_space_event(match, fail, Space, [','|[Head|Tail]], _)),
+                                                           fail ).
 
 % When the pattern list itself is a variable -> enumerate all atoms
 match(Space, PatternVar, OutPattern, Result) :- var(PatternVar), !,
                                                 'get-atoms'(Space, PatternVar),
+                                                ignore(metta_on_space_event(get_atoms, success, Space, PatternVar, _)),
                                                 \+ cyclic_term(OutPattern),
-                                                Result = OutPattern.
+                                                Result = OutPattern,
+                                                ignore(metta_on_space_event(match, success, Space, PatternVar, Result)).
 
 %Match for pattern:
 match(Space, Pattern, OutPattern, Result) :-
@@ -235,9 +243,12 @@ match(Space, Pattern, OutPattern, Result) :-
     ;
         Term =.. [Space, '#primitive', Pattern]
     ),
-    space_call(Term),
-    \+ cyclic_term(OutPattern),
-    Result = OutPattern.
+    ( space_call(Term),
+      \+ cyclic_term(OutPattern),
+      Result = OutPattern,
+      ignore(metta_on_space_event(match, success, Space, Pattern, Result))
+    ; ignore(metta_on_space_event(match, fail, Space, Pattern, _)),
+      fail ).
 
 %Get all atoms in space, irregard of arity:
 'get-atoms'(Space, Pattern) :- current_predicate(Space/Arity),

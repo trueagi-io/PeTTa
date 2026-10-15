@@ -1,0 +1,46 @@
+{
+  "name": "petta-debug",
+  "displayName": "PeTTa Debug",
+  "description": "Debug MeTTa programs with the PeTTa DAP server.",
+  "version": "0.0.1",
+  "publisher": "petta",
+  "engines": { "vscode": "^1.66.0" },
+  "categories": ["Debuggers"],
+  "main": "./extension.js",
+  "activationEvents": ["onDebug"],
+  "contributes": {
+    "languages": [
+      { "id": "metta", "extensions": [".metta"], "aliases": ["MeTTa"] }
+    ],
+    "breakpoints": [
+      { "language": "metta" }
+    ],
+    "debuggers": [
+      {
+        "type": "petta",
+        "label": "PeTTa",
+        "languages": ["metta"],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Absolute path to the .metta file to debug.",
+                "default": "${file}"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "petta",
+            "request": "launch",
+            "name": "Debug PeTTa file",
+            "program": "${file}"
+          }
+        ]
+      }
+    ]
+  }
+}
