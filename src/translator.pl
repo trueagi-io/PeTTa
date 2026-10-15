@@ -105,7 +105,12 @@ translate_clause_core(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                det_boundness_checks(F, Args1, DetChecks),
                                                begin_clause_inference(F, Args1, Assume, SavedInf),
                                                with_compiling_clause(F, Args1, BodyExpr,
-                                                                     translate_declared_body(F, DeclOut, BodyExpr, GoalsBody, ExpOut)),
+                                                                     ( translate_declared_body(F, DeclOut, BodyExpr, GoalsBody0, ExpOut),
+                                                                       %Eta-expanded clauses below publish no inferred
+                                                                       %parameter shape, so keep their field checks.
+                                                                       ( nonvar(ExpOut), ExpOut = partial(_, _) -> CheckArgs = []
+                                                                       ; CheckArgs = Args1 ),
+                                                                       resolve_inferred_field_checks(Assume, CheckArgs, GoalsBody0, GoalsBody) )),
                                                %A body that forced a declared parametric parameter to a concrete type
                                                %broke the universality its declaration claims (skip for specialized copies):
                                                ( ConstrainArgs == false -> true
@@ -1148,7 +1153,7 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
         ; assumed_self_decl(Fun, NTotal, PTs, OutTv)
           -> translate_args(Args, GsT, AVs0),                      %self-recursion under the provisional type
              append(Bound, AVs0, AVs),                             %(before the store: earlier clauses' inference
-             apply_call_args(inferred, Fun, AVs, PTs, GuardGs),    %is stale while later clauses widen it)
+             apply_call_args(provisional, Fun, AVs, PTs, GuardGs), %is stale while later clauses widen it)
              append([GsH, GsT, GuardGs], Inner),
              build_call_or_partial(Fun, AVs, AVs, Out, Inner, [], Goals),
              ( var(Out) -> add_known_type(Out, OutTv) ; true )
@@ -1327,7 +1332,7 @@ overload_out_guard(MultiDecl, Fun, Out, OT, Extra) :- ( MultiDecl == true, groun
                                                               ; Extra = [typecheck_match(Out, OT)] )
                                                          ; Extra = [] ).
 
-overload_branch_guard(Fun, AV, T, G) :- ( arg_statically_ok(AV, T) -> G = []
+overload_branch_guard(Fun, AV, T, G) :- ( arg_statically_ok(AV, T) -> static_arg_checks(declared, Fun, AV, T, G)
                                         ; strict_mode(true)
                                           -> throw(error(strict_runtime_typecheck(Fun, typecheck_match(AV, T)), typecheck))
                                         ; trusted_guard_waiver(Fun)

@@ -331,13 +331,20 @@ add_known_types(V, Cs) :- maplist(add_known_type(V), Cs).
 set_out_type(Out, OT) :- ( var(Out), nonvar(OT), \+ wildcard_type(OT) -> add_known_type(Out, OT)
                                                                           ; true ).
 
-%When F/N has exactly one declared output type, the call result is that type:
+%Literal manual dispatch can use the same complete inferred output evidence
+%as a direct call, after manual_dispatch_arg_checks_status checked its inputs.
 set_unique_decl_out(F, N, Out) :- ( atom(F), unique_fn_decl(F, N, _, OT1)
-                                    -> set_out_type(Out, OT1) ; true ).
+                                    -> set_out_type(Out, OT1)
+                                 ; atom(F), inferred_decl_arity(F, N, _, OT1),
+                                   fully_known_inferred_type(OT1)
+                                    -> set_out_type(Out, OT1)
+                                 ; true ).
 
 manual_dispatch_arg_checks_status(F, N, AVs, Gs, Status) :-
     ( atom(F), unique_fn_decl(F, N, ATs1, _)
       -> apply_call_args_status(declared, F, AVs, ATs1, Gs, Status)
+    ; atom(F), inferred_decl_arity(F, N, ATs1, _)
+      -> apply_call_args_status(inferred, F, AVs, ATs1, Gs, Status)
     ; Gs = [], Status = verified ).
 
 %Call-site output typing. An output type variable that occurs in no argument
