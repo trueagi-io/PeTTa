@@ -9,15 +9,17 @@ add_sexp(Space, TermIn) :-
         assertz(Term)
     ).
 
-%Same but for removal:
+% Remove one matching instance from a space.
 remove_sexp(Space, TermIn) :-
     ( is_list(TermIn), TermIn = [Rel|Args] ->
         Term =.. [Space, Rel | Args],
-        retractall(Term),
-        maybe_uncache_type_decl(Space, [Rel|Args])
+        (   retract(Term)
+        ->  maybe_uncache_type_decl(Space, [Rel|Args])
+        ;   true
+        )
     ;
         Term =.. [Space, '#primitive', TermIn],
-        retractall(Term)
+        retract(Term)
     ).
 
 %Add a function atom. On failure or exception it rolls back its staged raw
@@ -156,11 +158,13 @@ runtime_source_key([Eq, [F|Args], _], F/N) :-
                                            Body0 =@= Body
                                            -> ( Rest == [] -> nb_delete(F)
                                                             ; nb_setval(F, Rest) ) ; true ),
-                                       findall(Ref, translated_from(Ref, Term), Refs),
-                                       forall(member(Ref, Refs),
-                                              ( forget_compiled_dependencies(Ref),
-                                                erase(Ref) )),
-                                       retractall(translated_from(_, Term)),
+                                       (   once(translated_from(Ref, Term))
+                                            ->  Refs = [Ref],
+                                                forget_compiled_dependencies(Ref),
+                                                erase(Ref),
+                                                retractall(translated_from(Ref, _))
+                                            ;   Refs = []
+                                            ),
                                        metta_on_function_changed(F),
                                        invalidate_specializations(F),
                                        length(Args, N),
