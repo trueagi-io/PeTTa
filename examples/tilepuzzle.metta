@@ -179,8 +179,8 @@
          (bfs_loop $Q2 $N1)))
 
 (= (bfs_all $Start)
-   (let* (($Pt (add-unique-item-or-empty $Start))
+   (let* (($Pt (add-unique-or-fail &dup $Start))
           ($Q1 (enqueue $Start (empty-queue))))
         (bfs_loop $Q1 0)))
 
-!(test (let $x (bfs_all (___ 1 2 3 4 5 6 7 8)) $x) 181441)
+!(test (let $x (bfs_all (___ 1 2 3 4 5 6 7 8)) $x) 181440)
