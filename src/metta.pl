@@ -48,13 +48,20 @@ repra(Term, R) :- term_to_atom(Term, R).
 parse(Str, R) :- sread(Str, R).
 
 %%% Arithmetic & Comparison: %%%
-'+'(A,B,R)  :- R is A + B.
-'-'(A,B,R)  :- R is A - B.
-'*'(A,B,R)  :- R is A * B.
-'/'(A,B,R)  :- R is A / B.
-'%'(A,B,R)  :- R is A mod B.
-'<'(A,B,R)  :- (A<B -> R=true ; R=false).
-'>'(A,B,R)  :- (A>B -> R=true ; R=false).
+%Compile this section's arithmetic inline. The loader's optimise setting is kept
+%for clpfd and restored after the section:
+:- current_prolog_flag(optimise, Optimise), nb_setval(petta_loader_optimise, Optimise),
+   set_prolog_flag(optimise, true).
+%SWI arithmetic also accepts strings and singleton lists. Reject those MeTTa
+%values; ordinary numeric calls avoid the helper, and named constants still work:
+arith_arg(A) :- ( ( string(A) ; is_list(A) ) -> type_error(evaluable, A) ; true ).
+'+'(A,B,R)  :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), R is A + B.
+'-'(A,B,R)  :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), R is A - B.
+'*'(A,B,R)  :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), R is A * B.
+'/'(A,B,R)  :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), R is A / B.
+'%'(A,B,R)  :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), R is A mod B.
+'<'(A,B,R)  :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), (A<B -> R=true ; R=false).
+'>'(A,B,R)  :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), (A>B -> R=true ; R=false).
 '@<'(A,B,R) :- (A@<B -> R=true ; R=false).
 '@>'(A,B,R) :- (A@>B -> R=true ; R=false).
 '=='(A,B,R) :- (A==B -> R=true ; R=false).
@@ -63,13 +70,14 @@ parse(Str, R) :- sread(Str, R).
 '=?'(A,B,R) :- (\+ \+ A=B -> R=true ; R=false).
 '=alpha'(A,B,R) :- (A =@= B -> R=true ; R=false).
 '=@='(A,B,R) :- (A =@= B -> R=true ; R=false).
-'<='(A,B,R) :- (A =< B -> R=true ; R=false).
-'>='(A,B,R) :- (A >= B -> R=true ; R=false).
+'<='(A,B,R) :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), (A =< B -> R=true ; R=false).
+'>='(A,B,R) :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), (A >= B -> R=true ; R=false).
 '@<='(A,B,R) :- (A @=< B -> R=true ; R=false).
 '@>='(A,B,R) :- (A @>= B -> R=true ; R=false).
-min(A,B,R)  :- R is min(A,B).
-max(A,B,R)  :- R is max(A,B).
-exp(Arg,R) :- R is exp(Arg).
+min(A,B,R)  :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), R is min(A,B).
+max(A,B,R)  :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), R is max(A,B).
+exp(A,R) :- ( number(A) -> true ; arith_arg(A) ), R is exp(A).
+:- nb_getval(petta_loader_optimise, Optimise), set_prolog_flag(optimise, Optimise).
 :- use_module(library(clpfd)).
 '#+'(A, B, R) :- R #= A + B.
 '#-'(A, B, R) :- R #= A - B.
@@ -87,32 +95,42 @@ exp(Arg,R) :- R is exp(Arg).
 '#='(_, _, false).
 '#\\='(A, B, true)  :- A #\= B, !.
 '#\\='(_, _, false).
-'pow-math'(A, B, Out) :- Out is A ** B.
-'sqrt-math'(A, Out)   :- Out is sqrt(A).
-'abs-math'(A, Out)    :- Out is abs(A).
-'log-math'(Base, X, Out) :- Out is log(X) / log(Base).
-'trunc-math'(A, Out)  :- Out is truncate(A).
-'ceil-math'(A, Out)   :- Out is ceil(A).
-'floor-math'(A, Out)  :- Out is floor(A).
-'round-math'(A, Out)  :- Out is round(A).
-'sin-math'(A, Out)  :- Out is sin(A).
-'cos-math'(A, Out)  :- Out is cos(A).
-'tan-math'(A, Out)  :- Out is tan(A).
-'asin-math'(A, Out) :- Out is asin(A).
-'acos-math'(A, Out) :- Out is acos(A).
-'atan-math'(A, Out) :- Out is atan(A).
-'isnan-math'(A, Out) :- ( A =:= A -> Out = false ; Out = true ).
-'isinf-math'(A, Out) :- ( ( A =:= 1.0Inf ; A =:= -1.0Inf ) -> Out = true ; Out = false ).
+:- set_prolog_flag(optimise, true).
+'pow-math'(A, B, Out) :- ( number(A), number(B) -> true ; arith_arg(A), arith_arg(B) ), Out is A ** B.
+'sqrt-math'(A, Out)   :- ( number(A) -> true ; arith_arg(A) ), Out is sqrt(A).
+'abs-math'(A, Out)    :- ( number(A) -> true ; arith_arg(A) ), Out is abs(A).
+'log-math'(Base, X, Out) :- ( number(Base), number(X) -> true ; arith_arg(Base), arith_arg(X) ), Out is log(X) / log(Base).
+'trunc-math'(A, Out)  :- ( number(A) -> true ; arith_arg(A) ), Out is truncate(A).
+'ceil-math'(A, Out)   :- ( number(A) -> true ; arith_arg(A) ), Out is ceil(A).
+'floor-math'(A, Out)  :- ( number(A) -> true ; arith_arg(A) ), Out is floor(A).
+'round-math'(A, Out)  :- ( number(A) -> true ; arith_arg(A) ), Out is round(A).
+'sin-math'(A, Out)  :- ( number(A) -> true ; arith_arg(A) ), Out is sin(A).
+'cos-math'(A, Out)  :- ( number(A) -> true ; arith_arg(A) ), Out is cos(A).
+'tan-math'(A, Out)  :- ( number(A) -> true ; arith_arg(A) ), Out is tan(A).
+'asin-math'(A, Out) :- ( number(A) -> true ; arith_arg(A) ), Out is asin(A).
+'acos-math'(A, Out) :- ( number(A) -> true ; arith_arg(A) ), Out is acos(A).
+'atan-math'(A, Out) :- ( number(A) -> true ; arith_arg(A) ), Out is atan(A).
+'isnan-math'(A, Out) :- ( number(A) -> true ; arith_arg(A) ), ( A =:= A -> Out = false ; Out = true ).
+'isinf-math'(A, Out) :- ( number(A) -> true ; arith_arg(A) ), ( ( A =:= 1.0Inf ; A =:= -1.0Inf ) -> Out = true ; Out = false ).
 'min-atom'(List, Out) :- non_list(List), !, Out = [].
-'min-atom'(List, Out) :- min_list(List, Out).
+%Partial lists keep the library error instead of being completed by the check:
+'min-atom'(List, Out) :- ( is_list(List) -> List = [H|T], arith_num(H), num_min(T, H, Out) ; min_list(List, Out) ).
 'max-atom'(List, Out) :- non_list(List), !, Out = [].
-'max-atom'(List, Out) :- max_list(List, Out).
+'max-atom'(List, Out) :- ( is_list(List) -> List = [H|T], arith_num(H), num_max(T, H, Out) ; max_list(List, Out) ).
+%After SWI's native list check, check each element while folding, in library(lists)' argument order:
+arith_num(A) :- ( number(A) -> true ; arith_arg(A) ).
+num_min([], Min, Min).
+num_min([H|T], Min0, Min) :- ( number(H) -> true ; arith_arg(H) ), Min1 is min(H, Min0), num_min(T, Min1, Min).
+num_max([], Max, Max).
+num_max([H|T], Max0, Max) :- ( number(H) -> true ; arith_arg(H) ), Max1 is max(H, Max0), num_max(T, Max1, Max).
 
 %%% Random Generators: %%%
 'random-int'(Min, Max, Result) :- random_between(Min, Max, Result).
 'random-int'('&rng', Min, Max, Result) :- random_between(Min, Max, Result).
-'random-float'(Min, Max, Result) :- random(R), Result is Min + R * (Max - Min).
-'random-float'('&rng', Min, Max, Result) :- random(R), Result is Min + R * (Max - Min).
+'random-float'(Min, Max, Result) :- ( number(Min), number(Max) -> true ; arith_arg(Min), arith_arg(Max) ), random(R), Result is Min + R * (Max - Min).
+'random-float'('&rng', Min, Max, Result) :- ( number(Min), number(Max) -> true ; arith_arg(Min), arith_arg(Max) ), random(R), Result is Min + R * (Max - Min).
+:- nb_getval(petta_loader_optimise, Optimise), set_prolog_flag(optimise, Optimise),
+   nb_delete(petta_loader_optimise).
 
 %%% Boolean Logic: %%%
 bool(true).
