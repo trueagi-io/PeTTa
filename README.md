@@ -298,6 +298,38 @@ The exclusion does read the constructor set as it stands at that point in the
 compilation, but that snapshot is now recorded and honoured — see "Knowledge
 that arrives late" below.
 
+**Datatypes.** Group a nominal type and its constructors in one top-level
+source declaration:
+
+```metta
+(datatype Result
+   missing
+   (found Number)
+   (combined Result Result))
+
+(: result-count (-[det]-> Result Number))
+(= (result-count missing) 0)
+(= (result-count (found $n)) $n)
+(= (result-count (combined $a $b)) (+ (result-count $a) (result-count $b)))
+```
+
+This expands to `(: Result Type)`, `(: missing Result)` and deterministic
+constructor signatures such as `(: found (-[det]-> Number Result))`.
+Constructors keep their existing literal representations and pattern matching.
+Nullary constructors are bare symbols; constructors with fields are expressions.
+The type name must be a symbol; constructor names must be distinct within
+the declaration and different from the type name. This syntax groups the
+existing nominal declarations; it does not add parameterized nominal types.
+
+Expansion happens before the file's existing signature prepass. Function
+signatures can therefore stay beside implementations, including mutually
+recursive functions. Value declarations retain their source order: put a
+datatype before code that uses its nullary constructors. A datatype remains
+open to further ordinary constructor declarations, just like the expanded
+form; this syntax does not introduce sealed types. It applies only to
+top-level source forms, including imports and `process_metta_string`, not
+quoted or nested data or atoms added dynamically with `add-atom`.
+
 **Erased nominal newtypes.** `(: KB (Newtype Expression))` declares a
 distinct compile-time role over an existing representation: nothing is
 wrapped at runtime and no guards are emitted. A branded value fits its

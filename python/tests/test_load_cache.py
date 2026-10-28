@@ -82,3 +82,19 @@ def test_predicate_larger_than_a_chunk_replays(repo_root, tmp_path):
 
     assert cold == warm == ["results []", "value ['0', '999', '1000', '2499']"]
     assert len(list(cache.iterdir())) == 1
+
+
+def test_datatype_declarations_replay(repo_root, tmp_path):
+    library = tmp_path / "datatype.metta"
+    library.write_text(
+        "(datatype CachedResult cached-none (cached-some Number))\n"
+        "(: cached-value (-[det]-> CachedResult Number))\n"
+        "(= (cached-value cached-none) 0)\n"
+        "(= (cached-value (cached-some $n)) $n)\n"
+    )
+    cache = tmp_path / "cache"
+    query = "!(cached-value (cached-some 42)) !(cached-value cached-none)"
+    cold = load_in_fresh_process(repo_root, library, cache, query)
+    warm = load_in_fresh_process(repo_root, library, cache, query)
+    assert cold == warm == ["results []", "value ['42', '0']"]
+    assert len(list(cache.iterdir())) == 1

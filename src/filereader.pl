@@ -73,7 +73,9 @@ process_metta_string(S, Results) :- process_metta_string(S, Results, '&self').
 process_metta_string(S, Results, Space) :-
     process_metta_string(S, Results, Space, compile_functions).
 process_metta_string(S, Results, Space, Mode) :- metta_string_forms(S, Forms),
-                                           maplist(parse_form, Forms, ParsedForms),
+                                           maplist(parse_form, Forms, Parsed),
+                                           maplist(expand_datatype_form, Parsed, Expanded),
+                                           append(Expanded, ParsedForms),
                                            %declaration prepass: every function type declaration in the
                                            %file is visible to every definition in it, independent of order
                                            with_decl_notifications_batched(
@@ -129,6 +131,26 @@ parse_form(form(S, L), parsed(T, S, L, Term)) :- sread(S, Term),
                                                                                     register_function_signature(F, Arity), T=function
                                                                                   ; T=expression ).
 parse_form(runnable(S, L), parsed(runnable, S, L, Term)) :- sread(S, Term).
+
+%Datatype is source sugar, expanded before signature and body analysis. The
+%ordinary declarations retain their source position, space and diagnostics;
+%quoted/nested terms and runtime add-atom are deliberately not expanded.
+expand_datatype_form(parsed(expression, S, L, Term), Forms) :-
+    Term = [datatype|_], !,
+    with_form_location(L, S,
+        ( Term = [datatype, Type|Constructors],
+          atom(Type), Constructors = [_|_],
+          maplist(datatype_constructor(Type), Constructors, Names, Decls),
+          sort(Names, Unique), same_length(Names, Unique),
+          \+ memberchk(Type, Names)
+          -> maplist({S,L}/[Decl,parsed(expression,S,L,Decl)]>>true,
+                     [[:, Type, 'Type']|Decls], Forms)
+          ; throw(error(syntax_error('expected (datatype Name constructor (constructor FieldType ...) ...), with distinct constructor names; Name must be a symbol'), none)) ) ).
+expand_datatype_form(Form, [Form]).
+
+datatype_constructor(Type, Name, Name, [:, Name, Type]) :- atom(Name), !.
+datatype_constructor(Type, [Name, Field|Fields], Name, [:, Name, ['-[det]->'|Args]]) :-
+    atom(Name), append([Field|Fields], [Type], Args).
 
 %Report where a static type/determinism error was raised before rethrowing it,
 %and publish the same source location while declaration caching runs so the
