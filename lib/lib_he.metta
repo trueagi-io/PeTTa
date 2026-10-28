@@ -21,9 +21,12 @@
 (= (assertAlphaEqual $A $B)
    (assert (=alpha $A $B)))
 
-(: assertEqualToResult (-[det]-> $a $b Bool))
+; Keep the expression and expected result list unevaluated at the call site.
+; Sorting preserves duplicates; equality remains strict, as in assertEqual.
+(: assertEqualToResult (-[det]-> Atom Atom Bool))
 (= (assertEqualToResult $A $B)
-   (assertEqual $A $B))
+   (let $checked (assert (== (collapse (get-metatype $B)) (Expression)))
+      (assertEqual (sort-atom (collapse (eval $A))) (sort-atom $B))))
 
 (: assertAlphaEqualToResult (-[det]-> $a $b Bool))
 (= (assertAlphaEqualToResult $A $B)
