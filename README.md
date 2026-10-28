@@ -26,13 +26,20 @@ an earlier one.
 
 ### MORK and FAISS spaces
 
-If MORK and FAISS is installed, execute `sh build.sh` to support MORK-based atom spaces and FAISS-based atom-vector spaces.
+With SWI-Prolog, Rust and the native [FAISS](https://github.com/facebookresearch/faiss)
+libraries installed, run `sh build.sh` from a fresh checkout to build MORK-based
+atom spaces and FAISS-based atom-vector spaces.
 
-The following projects are cloned and built by build.sh:
+[`build.sh`](build.sh) pins [mork_ffi](https://github.com/patham9/mork_ffi),
+[faiss_ffi](https://github.com/patham9/faiss_ffi), [MORK](https://github.com/trueagi-io/MORK)
+and [PathMap](https://github.com/Adam-Vandervorst/PathMap) to recorded commits.
+Set `MORK_FFI_COMMIT`, `FAISS_FFI_COMMIT`, `MORK_COMMIT` or `PATHMAP_COMMIT`
+in the environment to override a revision; use commit SHAs for repeatable builds.
 
-**Repository:** [mork_ffi](https://github.com/patham9/mork_ffi) dependent on [trueagi-io/mork](https://github.com/trueagi-io/mork)
-
-**Repository:** [faiss_ffi](https://github.com/patham9/faiss_ffi) dependent on [facebookresearch/faiss](https://github.com/facebookresearch/faiss)
+The FFI checkouts live at the project root; MORK and PathMap live in
+`build/deps/`. Existing dependency directories are left untouched. Failed builds
+leave their checkouts available for inspection; move them aside before retrying.
+The pins do not fix the Rust toolchain or installed native library versions.
 
 ### Extension libraries
 
