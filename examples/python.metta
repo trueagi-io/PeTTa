@@ -12,5 +12,5 @@
        3.141592653589793)
 
 ;Verify py-call on methods of strings and numbers (see #188)
-!(test (py-call (.upper "abc")) ABC)
+!(test (py-call (.upper "abc")) "ABC")
 !(test (py-call (.__add__ 5 3)) 8)

@@ -274,7 +274,7 @@ assert(Goal, true) :- ( call(Goal) -> true
 py_bool_norm('@'(true), true) :- !.
 py_bool_norm('@'(false), false) :- !.
 py_bool_norm(R, R).
-'py-call'(SpecList, Result) :- 'py-call'(SpecList, Result, []).
+'py-call'(SpecList, Result) :- 'py-call'(SpecList, Result, [py_string_as(string)]).
 'py-call'([Spec|Args], Result, Opts) :- ( string(Spec) -> atom_string(A, Spec) ; A = Spec ),
                                         must_be(atom, A),
                                         ( sub_atom(A, 0, 1, _, '.')         % ".method"
