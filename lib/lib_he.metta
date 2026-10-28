@@ -21,10 +21,6 @@
 (= (assertAlphaEqual $A $B)
    (assert (=alpha $A $B)))
 
-(: assertEqualToResult (-[det]-> $a $b Bool))
-(= (assertEqualToResult $A $B)
-   (assertEqual $A $B))
-
 (: assertAlphaEqualToResult (-[det]-> $a $b Bool))
 (= (assertAlphaEqualToResult $A $B)
    (assertAlphaEqual $A $B))

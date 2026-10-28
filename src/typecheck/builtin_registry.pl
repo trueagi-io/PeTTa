@@ -237,6 +237,10 @@ builtin_spec('remove-translator-rule!'/1, implementation(metta), typing(untyped)
 builtin_spec(data/variadic, implementation(compiler), typing(untyped), evaluation(special), cardinality(compiler_derived), lowering(special(explicit_data))).
 builtin_spec('make-list'/variadic, implementation(compiler), typing(untyped), evaluation(special), cardinality(compiler_derived), lowering(special(explicit_list))).
 builtin_spec(collapse/1, implementation(compiler), typing(signature(unspecified, [_], ['List','%Undefined%'])), evaluation(special), cardinality(compiler_derived), lowering(special(collapse_all))).
+builtin_spec(assertEqualToResult/2, implementation(compiler),
+             typing(signature(det, [_,_], 'Bool')),
+             evaluation(special), cardinality(compiler_derived),
+             lowering(special(assert_equal_to_result))).
 builtin_spec(cut/0, implementation(compiler), typing(untyped), evaluation(special), cardinality(compiler_derived), lowering(special(cut))).
 builtin_spec(once/1, implementation(compiler), typing(untyped), evaluation(special), cardinality(compiler_derived), lowering(special(once))).
 builtin_spec(hyperpose/1, implementation(compiler), typing(untyped), evaluation(special), cardinality(compiler_derived), lowering(special(hyperpose))).
@@ -278,6 +282,8 @@ builtin_implementation_exemption('$autoload'/3, generated_autoload_wrapper).
 builtin_implementation_exemption(alpha_list_to_set/2, alpha_unique_helper).
 builtin_implementation_exemption(alpha_list_to_set_assoc/3, alpha_unique_helper).
 builtin_implementation_exemption(attribute_free_variant/2, identity_helper).
+builtin_implementation_exemption(attribute_free_multiset_variant/2, identity_helper).
+builtin_implementation_exemption(attribute_free_multiset_variant_/2, identity_helper).
 builtin_implementation_exemption(bool/1, boolean_domain_helper).
 builtin_implementation_exemption(call_goals/1, evaluator_helper).
 builtin_implementation_exemption(claim_import/3, import_helper).

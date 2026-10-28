@@ -72,6 +72,19 @@ attribute_free_variant(A, B) :-
       -> copy_term_nat(A, AC), copy_term_nat(B, BC), AC =@= BC
     ; fail ).
 
+% Compare result lists as multisets: order is irrelevant, duplicates matter.
+attribute_free_multiset_variant(A, B) :-
+    is_list(A),
+    is_list(B),
+    same_length(A, B),
+    attribute_free_multiset_variant_(A, B).
+
+attribute_free_multiset_variant_([], []).
+attribute_free_multiset_variant_([A|As], Bs) :-
+    select(B, Bs, Rest),
+    attribute_free_variant(A, B),
+    attribute_free_multiset_variant_(As, Rest).
+
 '=alpha'(A,B,R) :- (attribute_free_variant(A, B) -> R=true ; R=false).
 '=@='(A,B,R) :- (attribute_free_variant(A, B) -> R=true ; R=false).
 '<='(A,B,R) :- (A =< B -> R=true ; R=false).

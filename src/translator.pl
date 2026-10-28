@@ -651,6 +651,17 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
         ; special_builtin_form(HV, T, cut), T = []
           -> append(GsH, [(!)], Goals),
                                Out = true
+        ; special_builtin_form(HV, T, assert_equal_to_result), T = [Expr, Expected]
+          -> translate_expr_to_conj(Expr, Conj, Val),
+            translate_expr(Expected, GsE, ExpVal),
+            Goal1 = ( findall(Val, Conj, Results),
+                      ( attribute_free_multiset_variant(Results, ExpVal)
+                      -> Out = true
+                      ;  Out = false
+                      )
+                    ),
+              append(GsH, GsE, G1),
+              append(G1, [Goal1], Goals)
         ; special_builtin_form(HV, T, test_collect), T = [Expr, Expected]
           -> translate_expr_to_conj(Expr, Conj, Val),
                                               translate_expr(Expected, GsE, ExpVal),
