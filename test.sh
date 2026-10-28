@@ -2,6 +2,7 @@
 
 swipl -q -s tests/test_parser_swrite.pl -g run_tests -t halt || exit 1
 swipl -q -s tests/test_det_folds.pl -g "run_tests(det_folds)" -t halt || exit 1
+swipl -q -s tests/test_remove_atom.pl -g "run_tests(remove_atom)" -t halt || exit 1
 
 # strict_* and fail_strict_* examples run with the --strict typechecking flag:
 mode_arg_for_test() {
