@@ -74,7 +74,7 @@ runtime_add_function_tx(Space, Term, FAtom, W, Snapshot) :-
     unified_checker_invalidate_event(
         clause_changed(FAtom/N, runtime_preparing)),
     once(translate_clause(Term, Clause, true, Dependencies)),
-    assertz(Clause, ClauseRef),
+    assert_compiled_clause(assertz, Clause, ClauseRef),
     nb_setarg(2, Refs, ClauseRef),
     assertz(translated_from(ClauseRef, Term)),
     record_compiled_dependencies(ClauseRef, FAtom/N, Dependencies),
@@ -148,7 +148,7 @@ restore_runtime_compiled_clauses([]).
 restore_runtime_compiled_clauses(
         [runtime_compiled_clause(Source, Head, Body, Origin, Dependencies)
          |Clauses]) :-
-    assertz((Head :- Body), Ref),
+    assert_compiled_clause(assertz, (Head :- Body), Ref),
     assertz(translated_from(Ref, Source)),
     runtime_source_key(Source, Key),
     record_compiled_dependencies(Ref, Key, Origin, Dependencies),

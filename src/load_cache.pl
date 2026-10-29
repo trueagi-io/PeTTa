@@ -40,7 +40,7 @@ be written is reported as a warning.
 
 :- dynamic clause_position/3.
 
-snapshot_format(2).
+snapshot_format(3).
 
 % A changed predicate is stored as chunks of this many clauses.
 chunk_clauses(1000).
@@ -120,7 +120,11 @@ predicate_terms(pred(Key, Props, Refs), Key-Props-Clauses) :-
 
 stored_clause(Ref, Stored, Keys0, Keys) :-
     clause(Head, Body, Ref),
-    portable(Head-Body, Stored, Keys0, Keys).
+    % Preserve the generated-code compilation mode on warm replay. Ordinary
+    % dynamic Prolog clauses keep their original assertion path.
+    ( user:translated_from(Ref, _) -> Term=compiled(Head,Body)
+    ; Term=Head-Body ),
+    portable(Term, Stored, Keys0, Keys).
 
 % A clause is at position I of the predicate at position P of Preds.
 with_clause_positions(Preds, Goal) :-
@@ -405,10 +409,15 @@ declare(multifile, P) :- multifile(P).
 declare(discontiguous, P) :- discontiguous(P).
 declare(thread_local, P) :- thread_local(P).
 
-assert_stored(plain, _, _, M, Head-Body) :-
-    assertz(M:(Head :- Body)).
+assert_stored(plain, _, _, M, Stored) :-
+    assert_replayed_clause(M, Stored).
 assert_stored(refers, Keys, Table, M, Stored) :-
-    bind_refs(Keys, Table, Stored, Head-Body),
+    bind_refs(Keys, Table, Stored, Restored),
+    assert_replayed_clause(M, Restored).
+
+assert_replayed_clause(M, compiled(Head,Body)) :-
+    user:assert_compiled_clause(assertz, M:(Head :- Body), _).
+assert_replayed_clause(M, Head-Body) :-
     assertz(M:(Head :- Body)).
 
 bind_refs(Keys, Table, Stored, Term) :-

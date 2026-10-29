@@ -545,12 +545,21 @@ output_cert_core(Kind, F, N, top, Verdict, []) :- !,
     ( output_cert(Kind, F, N) -> Verdict = yes ; Verdict = no ).
 output_cert_core(Kind, F, N, Stack, yes, [output_cert(Kind, F/N)]) :-
     memberchk(c(Kind, F, N), Stack), !.
+% A successful =../2 decomposition always produces a proper argument spine,
+% including a tail returned after a fixed functor prefix. A List declaration
+% alone does not establish this property.
+output_cert_core(proper_list,F,N,_,yes,[clause_set(F/N)]) :-
+    A is N+1,functor(H,F,A),readable_static_clause(H,Body),
+    H=..[_|Args],append(_,[Out],Args),var(Out),
+    nonvar(Body),Body=(_=..Spine),
+    (Spine==Out ; nonvar(Spine),Spine=[_|Tail],Tail==Out),!,
+    (static_compilation_assumption(F,N) -> true ; assertz(static_compilation_assumption(F,N))).
 output_cert_core(Kind, F, N, Stack, Verdict, Dependencies) :-
     atom(F),
     cert_clause_bodies(F, N, Bodies),
     ( Bodies == []
       -> Verdict = no,
-         Dependencies = [clause_set(F/N)]
+         Dependencies = [clause_set(F/N),late_call(F/N)]
     ; output_bodies_verdict(Kind, Bodies, [c(Kind, F, N)|Stack],
                             Verdict, BodyDeps),
       append([clause_set(F/N), decl(F/N)], BodyDeps, Dependencies) ).

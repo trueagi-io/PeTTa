@@ -59,6 +59,30 @@ Types make code *faster*, not slower: resolved arithmetic fuses to native
 see below) `fib` compiles to the same clause a Prolog programmer would write
 by hand — about twice as fast as the untyped translation was before.
 
+Readable static imports with one pure scalar body can also compile directly:
+native arithmetic, a numeric constant fact (including infinity as data), or a
+numeric comparison returning a Boolean. Effects, constrained/aliased input
+heads, dynamic predicates, oracle boundaries and unreadable static code keep
+the call. Re-importing invalidates callers that used the old body.
+Numeric if-conditions absorb private single-use arithmetic temporaries, keeping
+the expression tree and the same effect/source-variable barriers as arithmetic
+fusion. Identity comparisons still compare evaluated terms. As with arithmetic
+fusion, independent failing arithmetic operands need not raise in source order.
+
+Inlined numeric helpers can absorb private arithmetic argument temporaries at
+one guaranteed use. Fusion crosses only fresh aliases and fresh arithmetic
+results; callbacks, potentially failing bindings and branch-only uses remain
+barriers. Unused/repeated arguments keep their eager calculation, and the
+floating-point expression tree stays unchanged.
+
+A private numeric tuple returned by a producer ending in a specialized fold
+can stay in separate Prolog arguments, including the fold accumulator and its
+results. This removes intermediate tuple construction without changing the
+MeTTa source. The producer's guards and effect order remain intact. Escaping or
+previously observed tuples, unsupported fold shapes and fields not proven
+numeric retain their ordinary representation. Generated workers participate
+in specialization invalidation and load-cache replay.
+
 **Inference.** Undeclared functions get local type inference (parameters are
 inferred from how the body uses them, including through self-recursion).
 Inferred types only ever *add* knowledge — they eliminate guards, type call

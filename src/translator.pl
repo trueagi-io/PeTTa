@@ -1,4 +1,7 @@
 :- dynamic translated_from/2.
+:- dynamic static_compilation_assumption/2.
+:- ensure_loaded(constructor_loops).
+:- ensure_loaded(scalar_folds).
 
 
 %Pattern matching, structural and functional/relational constraints on arguments:
@@ -24,6 +27,19 @@ functional_pattern_application([F|Args], F, Args) :-
     atom(F), F \== cons, fun(F),
     is_list(Args).
 
+% Publish generated code with native arithmetic instructions, without changing
+% the host's compilation mode or the compilation of imported Prolog sources.
+assert_compiled_clause(Assert, Clause, Ref) :-
+    current_prolog_flag(optimise, Previous),
+    setup_call_cleanup(
+        set_prolog_flag(optimise, true),
+        catch(call(Assert, Clause, Ref),
+              error(type_error(evaluable,_),_),
+              % An unused branch may contain arithmetic that fails only if
+              % reached. Native compilation must not reject that definition.
+              (set_prolog_flag(optimise, false), call(Assert, Clause, Ref))),
+        set_prolog_flag(optimise, Previous)).
+
 %Flatten (= Head Body) MeTTa function into a Prolog clause. Dependencies are
 %those observed by all nested analyses; assertion sites attach them to the real
 %clause reference with record_compiled_dependencies/3.
@@ -37,7 +53,7 @@ translate_clause(Input, Clause, ConstrainArgs, Dependencies) :-
             analysis_collect(
                 with_compiling_caller(
                     F, N,
-                    translate_clause_core(Input, Clause, ConstrainArgs)),
+                    translate_clause_core(Input, RawClause, ConstrainArgs)),
                 Events)),
         analysis_term_dependencies(SourceBody, TermDependencies),
         analysis_function_decl_dependencies(F, DeclDependencies),
@@ -46,8 +62,109 @@ translate_clause(Input, Clause, ConstrainArgs, Dependencies) :-
                ExtraDependencies),
         analysis_make_proof(compiled_clause(F/N), translated, Events,
                             ExtraDependencies, Proof),
-        analysis_proof_dependencies(Proof, Dependencies),
-        analysis_reemit_proof(Proof).
+        analysis_proof_dependencies(Proof, Dependencies0),
+        analysis_reemit_proof(Proof),
+        % Work on the same plain copy assertion would make. Never alias the
+        % source equation's variables or its inference attributes in place.
+        copy_term_nat(RawClause, (Head :- Body)),
+        goal_sequence(Body, Sequence),goals_list_to_conj(Sequence, LinearBody),
+        % Inlined head aliases must disappear before their private numeric
+        % tuples become eligible for scalar replacement.
+        fold_clause_bindings(LinearBody, Head, Aliased),
+        fold_clause_bindings(Aliased, Head, Folded),
+        (ho_fresh_result(F,Parent)
+          -> fresh_result_clause(Parent,Head,Folded,FinalHead,FinalBody),
+             length(Args,SourceN),Added=[clause_set(Parent/SourceN),decl(Parent/SourceN)]
+        ; fresh_result_calls(Folded,Head,Constructed,ConstructorDeps),
+          scalar_fold_calls(Constructed,Head,FinalBody,ScalarDeps),
+          append(ConstructorDeps,ScalarDeps,Added),FinalHead=Head),
+        append(Dependencies0,Added,AllDeps),sort(AllDeps,Dependencies),
+        maplist([D]>>analysis_emit(dependency(D)),Added),
+        Clause = (FinalHead :- FinalBody).
+
+% Before contains every head/outside-branch variable and the goals already
+% executed on this path. Only a variable first used at an alias can disappear;
+% binding it to the other variable cannot affect an earlier observation. The
+% rest of the conjunction shares the plain copied variables, so substitution
+% preserves term sharing without touching source metadata.
+fold_clause_bindings(Goal, Before, Folded) :-
+    nonvar(Goal), Goal = (A,B), !,
+    ( private_numeric_tuple(A, B, Before, Rest)
+      -> fold_clause_bindings(Rest, Before, Folded)
+    ; private_data_reduce(A, Before, Binding)
+      -> fold_clause_bindings((Binding,B), Before, Folded)
+    ; private_alias(A, Before, B)
+      -> fold_clause_bindings(B, Before, Folded)
+    ; fold_clause_bindings(A, (Before,B), A1),
+      fold_clause_bindings(B, (Before,A1), B1),
+      ( A1 == true -> Folded = B1
+      ; B1 == true -> Folded = A1
+      ; Folded = (A1,B1) ) ).
+fold_clause_bindings(Goal, Outside, Folded) :-
+    compound(Goal), compound_name_arguments(Goal, Op, [A,B]),
+    memberchk(Op, [;,->,*->]), !,
+    fold_clause_bindings(A, (Outside,B), A1),
+    fold_clause_bindings(B, (Outside,A), B1),
+    compound_name_arguments(Folded, Op, [A1,B1]).
+fold_clause_bindings(Goal, Before, Binding) :-
+    private_data_reduce(Goal, Before, Binding), !.
+fold_clause_bindings(Goal, Before, true) :- private_alias(Goal, Before, true), !.
+fold_clause_bindings(Goal, _, Goal).
+
+% A literal tuple with only fresh fields has an unbound head and cannot
+% dispatch as a function or contain a runtime cycle. Its result must also be
+% fresh and outside the tuple. Keep reduce's outer-cell copy at its original
+% point; aliasing the input cell would change destructive-update behavior.
+private_data_reduce(Goal, Before, fresh_data_list(List,Out)) :-
+    nonvar(Goal), Goal = reduce(List, Out),
+    is_list(List), List = [Head|_], var(Head), acyclic_term(List),
+    var(Out), \+ contains_var(Out, List),
+    term_variables([Out|List], Vars),
+    \+ ( member(V, Vars), contains_var(V, Before) ).
+
+% Scalar replacement is safe only when the fresh tuple is consumed once and
+% every field becomes a number before any observable operation. In particular,
+% an unbound returned field must retain the tuple's original cell sharing.
+private_numeric_tuple(Goal, Body, Before, Rest) :-
+    ( private_data_reduce(Goal, Before, fresh_data_list(Fields, Pair)) -> true
+    ; nonvar(Goal),Goal=fresh_data_list(Fields,Pair),
+      is_list(Fields),Fields=[_|_],var(Pair),\+contains_var(Pair,Fields),
+      term_variables([Pair|Fields],Fresh),
+      \+ (member(V,Fresh),contains_var(V,Before)) ),
+    maplist(var, Fields),
+    nonvar(Body), Body = (Binding,Rest),
+    nonvar(Binding), Binding = (Result=Values), Result == Pair,
+    is_list(Values), same_length(Fields, Values),
+    occurrences_of_var(Pair, Body, 1),
+    term_variables(Values, Vars),
+    \+ (member(V, Vars), contains_var(V, Before)),
+    maplist(numeric_tuple_field, Values),
+    include(var, Values, Needed),
+    numeric_tuple_assignments(Rest, Needed),
+    maplist(=, Fields, Values).
+
+numeric_tuple_field(V) :- var(V), !.
+numeric_tuple_field(V) :- number(V).
+
+numeric_tuple_assignments(_, []) :- !.
+numeric_tuple_assignments(Body, Needed) :-
+    ( nonvar(Body), Body = (Goal,Rest) -> true ; Goal=Body, Rest=true ),
+    nonvar(Goal), Goal = (Assigned is _), var(Assigned),
+    exclude(==(Assigned), Needed, Remaining),
+    numeric_tuple_assignments(Rest, Remaining).
+
+% Keep this call boundary: the input tuple and returned outer cell are distinct,
+% while the tail is shared, exactly as reduce/2's inert-data branch constructs.
+fresh_data_list([Head|Tail], [Head|Tail]).
+
+private_alias(Goal, Before, Rest) :-
+    nonvar(Goal), Goal = (X=Y),
+    ( var(X), var(Y)
+      -> ( \+ contains_var(X, Before) -> true ; \+ contains_var(Y, Before) ), X=Y
+    ; var(X)
+      -> ground(Y), \+ contains_var(X, (Before,Rest))
+    ; var(Y)
+      -> ground(X), \+ contains_var(Y, (Before,Rest)) ).
 
 with_compiling_caller(F, N, Goal) :-
     ( nb_current('$compiling_caller', Previous) -> true ; Previous = none ),
@@ -242,7 +359,7 @@ swap_staged_function(F, Us, Staged) :-
 
 assert_staged_clauses([]).
 assert_staged_clauses([staged(_, Term, OriginFile, Clause, Dependencies)|Ss]) :-
-    assertz(Clause, NewRef),
+    assert_compiled_clause(assertz, Clause, NewRef),
     assertz(translated_from(NewRef, Term)),
     Term = [=, [G|SourceArgs], _],
     length(SourceArgs, N),
@@ -842,6 +959,9 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
              append(GsMid, [include([XVar]>>(CondConj, CondGoal), L, Out)], Goals)
         ; special_builtin_form(HV, T, lambda), T = [Args, Body]
           -> next_lambda_name(F),
+                                           %A failed specialization must also discard its private anonymous functions.
+                                           ( nb_current('$spec_created', _), \+ fun(F), \+ current_predicate(F/_)
+                                             -> remember_specialization_symbol(F) ; true ),
                                            % find free (non-argument) variables in Body
                                            term_variables(Body, AllVars),
                                            term_variables(Args, ArgVars),
@@ -859,7 +979,7 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                                    true, LambdaDependencies)),
                                            %translate_clause records arities; keep the function marker idempotent.
                                            ( fun(F) -> true ; assertz(fun(F)) ),
-                                           assertz(Clause, LambdaRef),
+                                           assert_compiled_clause(assertz, Clause, LambdaRef),
                                            assertz(translated_from(LambdaRef, IsolatedLambdaSource)),
                                            length(FullArgs, N),
                                            record_compiled_dependencies(LambdaRef, F/N, LambdaDependencies),
@@ -1129,7 +1249,8 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
                   %single declaration, so the call filters on the output type:
                   overload_out_guard(MultiDecl, Fun, Out, OT, Extra),
                   ( MultiDecl == false, arith_inline(Fun, AVs, Out, ArithGs)
-                    -> append(Inner, ArithGs, Goals)
+                    -> append(Bound, Args, Src),
+                       fuse_arithmetic_goals(Inner, Src, ArithGs, Goals)
                      ; append(Bound, Args, Src),
                        build_call_or_partial(Fun, Src, AVs, Out, Inner, Extra, Goals) ),
                   ( ArgStatus == verified
@@ -1338,34 +1459,105 @@ overload_branch_guard(Fun, AV, T, G) :- ( arg_statically_ok(AV, T) -> G = []
 
 %Type-resolved builtin arithmetic compiles to native is/2, constant-folded when
 %both operands are literals. Only while the builtin definition is untouched:
-arith_inline(Fun, [A, B], Out, Gs) :- builtin_codegen_hook(Fun, 2, arithmetic_native),
-                                      arith_op(Fun, A, B, Expr),
-                                      builtin_untouched(Fun),
-                                      ( number(A), number(B)
+arith_inline(Fun, Args, Out, Gs) :- length(Args,N),
+                                      builtin_codegen_hook(Fun,N,arithmetic_native),
+                                      arith_op(Fun,Args,Expr),
+                                      builtin_untouched(Fun,N),
+                                      append(Args,[Out],Actual),Direct=..[Fun|Actual],
+                                      resolve_memoization(Fun,Args,Out,Goal),Goal==Direct,
+                                      ( maplist(number,Args)
                                         -> catch((Out is Expr, Gs = []), _, Gs = [Out is Expr])
-                                         ; Gs = [Out is Expr] ).
+                                         ; Gs = [Out is Expr] ),
+                                      analysis_emit(dependency(clause_set(Fun/N))).
 
-arith_op('+', A, B, A + B).
-arith_op('-', A, B, A - B).
-arith_op('*', A, B, A * B).
-arith_op('/', A, B, A / B).
-arith_op('%', A, B, A mod B).
-arith_op(min, A, B, min(A, B)).
-arith_op(max, A, B, max(A, B)).
+% Fuse only the trailing, single-use arithmetic temporaries produced while
+% translating this call's arguments. A source variable or an earlier reference
+% is observable and must keep its binding. A non-arithmetic goal is a barrier:
+% postponing a possibly throwing calculation across it would reorder effects.
+% Substitution preserves the expression tree, including floating-point order.
+% It does not preserve which of two failing calculations raises: SWI evaluates
+% arithmetic arguments right to left, so fused siblings run in reverse.
+fuse_arithmetic_goals(Inner, Source, [Out is Expr], Goals) :- !,
+    reverse(Inner, Reversed),
+    fuse_arithmetic_tail(Reversed, Source, Expr, Kept, Fused),
+    reverse(Kept, Prefix),
+    append(Prefix, [Out is Fused], Goals).
+fuse_arithmetic_goals(Inner, _, Arithmetic, Goals) :-
+    append(Inner, Arithmetic, Goals).
 
-builtin_untouched(F) :- functor(H, F, 3), predicate_property(H, number_of_clauses(1)).
+fuse_arithmetic_tail([Goal|Earlier], Source, Expr, Kept, Fused) :-
+    nonvar(Goal), Goal = (Temporary is Child), var(Temporary),
+    \+ contains_var(Temporary, Source),
+    \+ contains_var(Temporary, Earlier),
+    occurrences_of_var(Temporary, Expr, 1), !,
+    substitute_source_var(Temporary, Child, Expr, Combined),
+    fuse_arithmetic_tail(Earlier, Source, Combined, Kept, Fused).
+fuse_arithmetic_tail(Kept, _, Expr, Kept, Expr).
+
+% Argument calculations may precede several independent instructions in an
+% inlined numeric helper. Absorb a private producer only at its one guaranteed
+% use, before any possibly failing binding, callback, or untaken branch. Fresh
+% aliases and fresh arithmetic results cannot fail by output unification.
+% Pure arithmetic error selection follows the existing fusion policy above.
+fuse_inline_arguments([],_,_,Body,Body).
+fuse_inline_arguments([Goal|Rest],Source,Before,Body,Goals) :-
+    fuse_inline_arguments(Rest,Source,[Goal|Before],Body,Tail),
+    ( nonvar(Goal),Goal=(Temp is Expr),var(Temp),
+      \+contains_var(Temp,Source-Before),occurrences_of_var(Temp,Tail,1),
+      fuse_inline_use(Tail,Source-Before-Goal,Temp,Expr,Fused)
+      -> Goals=Fused
+    ; Goals=[Goal|Tail] ).
+
+fuse_inline_use([Goal|Rest],_Before,Temp,Expr,[Fused|Rest]) :-
+    nonvar(Goal),
+    ( Goal=(_ is Arithmetic),contains_var(Temp,Arithmetic)
+    ; Goal=(Test->_;_),nonvar(Test),Test=..[Op,_,_],
+      memberchk(Op,[<,=<,>,>=]),contains_var(Temp,Test) ),!,
+    substitute_source_var(Temp,Expr,Goal,Fused).
+fuse_inline_use([Goal|Rest],Before,Temp,Expr,[Goal|Fused]) :-
+    \+contains_var(Temp,Goal),nonvar(Goal),
+    ( Goal=(Left=Right),var(Left),var(Right),
+      (\+contains_var(Left,Before);\+contains_var(Right,Before))
+    ; Goal=(Result is _),var(Result),\+contains_var(Result,Before) ),
+    fuse_inline_use(Rest,(Before,Goal),Temp,Expr,Fused).
+
+arith_op('+', [A,B], A+B).
+arith_op('-', [A,B], A-B).
+arith_op('*', [A,B], A*B).
+arith_op('/', [A,B], A/B).
+arith_op('%', [A,B], A mod B).
+arith_op(min, [A,B], min(A,B)).
+arith_op(max, [A,B], max(A,B)).
+arith_op(exp, [A], exp(A)).
+arith_op('sqrt-math', [A], sqrt(A)).
+arith_op('abs-math', [A], abs(A)).
+arith_op('pow-math', [A,B], A**B).
+
+builtin_untouched(F,N) :- A is N+1,functor(H,F,A),predicate_property(H,number_of_clauses(1)).
 
 %Reified comparisons whose result only feeds an if-condition compile to the
 %native comparison, skipping the true/false round-trip:
 translate_if_cond(Cond, PreConj, CondGoal) :- translate_expr(Cond, GsC, Cv),
                                               ( var(Cv), append(Pre, [Last], GsC), reified_cond(Last, Cv, Native)
-                                                -> goals_list_to_conj(Pre, PreConj), CondGoal = Native
+                                                -> fuse_numeric_comparison(Pre,Cond,Native,Kept,CondGoal),
+                                                   goals_list_to_conj(Kept,PreConj)
                                                  ; goals_list_to_conj(GsC, PreConj), CondGoal = (Cv == true) ).
+
+% A numeric condition evaluates arithmetic operands just as is/2 does. Keep
+% the same source-variable and effect barriers when absorbing private argument
+% temporaries; identity comparisons must keep their evaluated numeric terms.
+fuse_numeric_comparison(Pre,Source,Native,Kept,Fused) :-
+    compound(Native),Native=..[Op,_,_],memberchk(Op,[<,=<,>,>=]),!,
+    reverse(Pre,Back),fuse_arithmetic_tail(Back,Source,Native,Rest,Fused),reverse(Rest,Kept).
+fuse_numeric_comparison(Pre,_,Native,Pre,Native).
 
 reified_cond(G, Cv, Native) :- nonvar(G), G =.. [F, A, B, R], R == Cv,
                                builtin_codegen_hook(F, 2, reified_comparison),
                                cmp_native(F, A, B, Native),
-                               builtin_untouched(F).
+                               builtin_untouched(F,2).
+reified_cond(G,Cv,Native) :-
+    nonvar(G),var(Cv),G=(Native->Yes;No),\+contains_var(Cv,Native),
+    reified_conditional(Native,Yes,No,Cv).
 
 cmp_native('<', A, B, (A < B)).
 cmp_native('<=', A, B, (A =< B)).
@@ -1387,12 +1579,195 @@ build_direct_call(Fun, Src, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                               ( ( current_predicate(Fun/Arity) ; catch(arity(Fun, Arity), _, fail) ),
                                                                 \+ ( current_op(_, _, Fun), Arity =< 2 )
                                                                 -> resolve_memoization(Fun, AVs, Out, Goal0),
-                                                                   commit_call(Fun, Src, AVs, Out, Goal0, Goal),
-                                                                   append(Inner, [Goal|Extra], Goals)
+                                                                   ( constructor_inline(Fun, AVs, Out, Goal0, Native)
+                                                                     -> append(Inner,[Native|Extra],Goals)
+                                                                     ; static_scalar_inline(Fun,AVs,Out,Goal0,Arithmetic)
+                                                                       -> fuse_arithmetic_goals(Inner,Src,[Arithmetic],WithArithmetic),
+                                                                          append(WithArithmetic,Extra,Goals)
+                                                                     ; numeric_inline(Fun, AVs, Out, Goal0, Inline)
+                                                                     -> fuse_inline_arguments(Inner,Src-Out-Extra,[],Inline,Fused),
+                                                                        append(Fused,Extra,Goals)
+                                                                     ; compiled_inline(Fun, AVs, Out, Goal0, Inlined)
+                                                                       -> commit_call(Fun, Src, AVs, Out, Inlined, Goal),
+                                                                          append(Inner, [Goal|Extra], Goals)
+                                                                     ; commit_call(Fun, Src, AVs, Out, Goal0, Goal),
+                                                                       append(Inner, [Goal|Extra], Goals) )
                                                               ; incomplete_application_kind(Fun, Arity, partial)
                                                                 -> Out = partial(Fun, AVs),
                                                                    append(Inner, Extra, Goals)
                                                                  ; append(Inner, [throw_function_overapplication(Fun, N)|Extra], Goals) ).
+
+% The only clause of a static predicate, if this session may read it. Under
+% protect_static_code clause/2 refuses static code; the caller keeps its call.
+readable_static_clause(Head,Body) :-
+    predicate_property(Head,static),predicate_property(Head,number_of_clauses(1)),
+    catch(clause(Head,Body),error(permission_error(_,_,_),_),fail).
+
+% Inline only readable static scalar bodies whose complete behavior is a
+% native calculation, numeric fact, or reified numeric comparison. Imports
+% invalidate the same dependency for all three forms. Facts remain data: an
+% infinite result must not be sent through is/2, which would throw instead.
+static_scalar_inline(F,Args,Out,Goal,Inline) :-
+    oracle_mode(false),oracle_det_mode(false),length(Args,N),A is N+1,
+    append(Args,[Out],All),Direct=..[F|All],Goal==Direct,
+    findall(ATs-OT-D,(declared_fn_type(F,ATs,OT,D),length(ATs,N)),[Types-ResultType-det]),
+    maplist(==('Number'),Types),functor(Head,F,A),readable_static_clause(Head,Body),
+    Head=..[_|Formals],append(Params,[Result],Formals),
+    maplist(var,Params),term_variables(Params,Unique),same_length(Params,Unique),
+    static_scalar_body(ResultType,Params,Result,Body,Out,Inline),Params=Args,
+    (static_compilation_assumption(F,N) -> true ; assertz(static_compilation_assumption(F,N))),
+    analysis_emit(dependency(clause_set(F/N))).
+
+static_scalar_body('Number',[],Result,true,Out,(Out=Result)) :- number(Result).
+static_scalar_body(Type,Params,Result,Body,Out,Inline) :-
+    var(Result),\+memberchk_eq(Result,Params),
+    ( Type=='Number',nonvar(Body),Body=(Value is Expr),Value==Result,
+      native_scalar_expression(Expr)
+      -> Inline=(Out is Expr)
+    ; Type=='Bool',nonvar(Body),Body=(Test->Yes;No),
+      reified_conditional(Test,Yes,No,Result),
+      Test=..[Op,Left,Right],memberchk(Op,[<,=<,>,>=]),
+      native_scalar_expression(Left),native_scalar_expression(Right),
+      Expr=Test,Inline=(Test->Out=true;Out=false) ),
+    term_variables(Expr,Used),forall(member(V,Used),memberchk_eq(V,Params)).
+
+% Inspect branch literals without binding a runtime value in either arm.
+reified_conditional(Test,Yes,No,Result) :-
+    nonvar(Test),nonvar(Yes),nonvar(No),Yes=(Y=Then),No=(N=Else),
+    Y==Result,N==Result,Then==true,Else==false.
+
+native_scalar_expression(E) :-
+    (var(E);number(E)),!.
+native_scalar_expression(E) :-
+    compound(E),compound_name_arguments(E,F,As),length(As,N),
+    memberchk(F/N,[(+)/2,(-)/2,(-)/1,(*)/2,(/)/2,(**)/2,mod/2,min/2,max/2,
+                  abs/1,sqrt/1,log/1,exp/1,lgamma/1,float/1,ceil/1,ceiling/1,(>>)/2,xor/2,(/\)/2]),
+    maplist(native_scalar_expression,As).
+
+% Keep constructor matching after its evaluated arguments. In particular a
+% caller's output constraint must not suppress an earlier callback exception.
+constructor_inline(F,[H,T],Out,Goal,(Out=[H|T])) :-
+    oracle_mode(false),oracle_det_mode(false),
+    builtin_codegen_hook(F,2,list_cons),builtin_untouched(F,2),
+    Direct=..[F,H,T,Out],Goal==Direct,
+    analysis_emit(dependency(clause_set(F/2))).
+
+% Inline small typed clauses without reinterpreting their source. The head is
+% matched at the call, before the copied body; its primitive calls stay calls.
+% A 128-node goal budget bounds transitive code growth. Cuts and meta calls
+% retain their predicate boundary, and invalidation excludes stale bodies.
+compiled_inline(F, Args, Out, Goal, Inline) :-
+    oracle_mode(false), oracle_det_mode(false),
+    \+ current_compiling_caller(F, _),
+    append(Args,[Out],Actual), Direct=..[F|Actual], Goal==Direct,
+    length(Args,N),
+    findall(ATs-OT-Det,
+            (declared_fn_type(F,ATs,OT,Det),length(ATs,N)),
+            [_-Result-Effect]),
+    memberchk(Effect,[det,semidet]),
+    ( Result == 'Number' -> true
+    ; is_list(Result),Result=[_,_|_],maplist(==('Number'),Result) ),
+    Arity is N+1, functor(Target,F,Arity),
+    % Only translated MeTTa clauses, which are dynamic; an imported static
+    % predicate may refuse clause/3.
+    predicate_property(Target,dynamic),
+    predicate_property(Target,number_of_clauses(1)),
+    clause(Target,RawBody,Ref), \+ compiled_body_stale(Ref),
+    translated_from(Ref,_), compiled_deps(Ref,_,_,Deps),
+    copy_term_nat(Target-RawBody,Head-Copied),
+    ( nonvar(Copied),Copied=(First,Rest),First==(!) -> Body=Rest ; Body=Copied ),
+    inline_body_budget(Body,F,128,_),
+    Head=..[_|Formal],
+    maplist([A,P,(A=P)]>>true,Actual,Formal,Bindings),
+    append(Bindings,[Body],Sequence),goals_list_to_conj(Sequence,Inline),
+    analysis_emit(dependency(inlined_clauses(F/N))),
+    maplist([D]>>analysis_emit(dependency(D)),Deps).
+
+inline_body_budget(Goal,Self,Before,After) :-
+    nonvar(Goal),Before>0,Left is Before-1,
+    ( compound(Goal),compound_name_arguments(Goal,Op,[A,B]),memberchk(Op,[',',';','->','*->'])
+      -> inline_body_budget(A,Self,Left,Middle),
+         inline_body_budget(B,Self,Middle,After)
+    ; callable(Goal),functor(Goal,F,_),
+      \+ memberchk(F,[!,':',Self]),
+      \+ predicate_property(Goal,meta_predicate(_)),After=Left ).
+
+% Inline single-clause, explicitly det numeric functions. Read
+% their source anew, rather than embedding a possibly stale compiled body:
+% dependency invalidation may rebuild caller and callee in either order.
+% Keep entry unification before arithmetic, exactly as the original head does,
+% and respect memoization and oracle call boundaries.
+numeric_inline(F, Args, Out, Goal, [Out=Value|Body]) :-
+    oracle_mode(false), oracle_det_mode(false),
+    \+ current_compiling_caller(F, _),
+    append(Args, [Out], CallArgs), Direct =.. [F|CallArgs], Goal == Direct,
+    length(Args, N),
+    findall(ATs-OT-Det,
+            (declared_fn_type(F, ATs, OT, Det), length(ATs, N)),
+            [ArgTypes-OutType-det]),
+    maplist(==('Number'), ArgTypes),
+    Arity is N+1, functor(Head, F, Arity),
+    predicate_property(Head, dynamic),
+    predicate_property(Head, number_of_clauses(1)),
+    clause(Head, _, Ref), translated_from(Ref, [=,[F|Params],Source]),
+    same_length(Params, Args), maplist(var, Params),
+    term_variables(Params, Unique), same_length(Params, Unique),
+    ( OutType == 'Number'
+      -> numeric_scalar_expr(Source, Params, Arithmetic, Value)
+    ; is_list(OutType), OutType=[_,_|_], maplist(==('Number'), OutType),
+      is_list(Source), same_length(Source, OutType),
+      % Bare tuple fields can stay unbound and retain observable cell sharing.
+      maplist(nonvar, Source),
+      maplist(numeric_expr, Source, Nested, Value), append(Nested, Arithmetic) ),
+    % Lower with fresh formal parameters, then connect actual arguments.
+    % Folding actual constants early could turn a computed result into a
+    % head constraint and suppress an earlier arithmetic exception.
+    Params=Args,
+    det_boundness_checks(F, Args, Checks), append(Checks, Arithmetic, Body),
+    analysis_emit(dependency(clause_set(F/N))),
+    analysis_emit(dependency(inlined_clauses(F/N))).
+
+numeric_scalar_expr(Source, Env, Goals, Value) :-
+    nonvar(Source), Source=[Tag,Binds,Body], Tag=='let*', !,
+    letstar_to_rec_let(Binds, Body, Let),
+    numeric_scalar_expr(Let, Env, Goals, Value).
+numeric_scalar_expr(Source, Env, Goals, Value) :-
+    nonvar(Source), Source=[Tag,Pattern,Rhs,Rest], Tag==let, var(Pattern), !,
+    numeric_scalar_expr(Rhs, Env, First, Computed),
+    numeric_scalar_expr(Rest, [Pattern|Env], Last, Value),
+    append([First,[Pattern=Computed],Last], Goals).
+numeric_scalar_expr(Source, Env, Goals, Value) :-
+    nonvar(Source), Source=[Tag,Cond,Then,Else], Tag==if, !,
+    nonvar(Cond), Cond=[Op,L,R], atom(Op),
+    unique_fn_decl(Op, 2, ATs, OT), ATs==['Number','Number'], OT=='Bool',
+    builtin_codegen_hook(Op, 2, reified_comparison), builtin_untouched(Op,2),
+    numeric_scalar_expr(L, Env, LGs, LV), numeric_scalar_expr(R, Env, RGs, RV),
+    cmp_native(Op, LV, RV, Test),
+    numeric_scalar_expr(Then, Env, TGs, TV),
+    numeric_scalar_expr(Else, Env, EGs, EV),
+    append(TGs, [Value=TV], TOut), goals_list_to_conj(TOut, TConj),
+    append(EGs, [Value=EV], EOut), goals_list_to_conj(EOut, EConj),
+    append(LGs,RGs,Before),fuse_numeric_comparison(Before,Cond,Test,Kept,Guard),
+    append(Kept,[(Guard -> TConj ; EConj)],Goals),
+    analysis_emit(dependency(clause_set(Op/2))),
+    analysis_emit(dependency(decl(Op/2))),
+    analysis_emit(dependency(effect(Op/2))).
+numeric_scalar_expr(Source, Env, Goals, Value) :-
+    term_variables(Source, Vars),
+    forall(member(V,Vars), memberchk_eq(V,Env)),
+    numeric_expr(Source, Goals, Value).
+
+numeric_expr(X, [], X) :- (var(X);number(X)), !.
+numeric_expr(Source, Goals, Value) :-
+    nonvar(Source), Source=[Op|Inputs], atom(Op),is_list(Inputs),length(Inputs,N),
+    unique_fn_decl(Op,N,ArgTypes,OutType),
+    maplist(==('Number'),ArgTypes),OutType=='Number',
+    maplist(numeric_expr,Inputs,Nested,Values),append(Nested,Inner),
+    arith_inline(Op,Values,Value,Tail),
+    fuse_arithmetic_goals(Inner,Source,Tail,Goals),
+    analysis_emit(dependency(clause_set(Op/N))),
+    analysis_emit(dependency(decl(Op/N))),
+    analysis_emit(dependency(effect(Op/N))).
 
 %A det function commits to its clause with the clause-entry cut. An
 %effect-polymorphic function cannot: its determinism is its closure argument's.

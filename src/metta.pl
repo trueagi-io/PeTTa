@@ -354,7 +354,8 @@ import_prolog_function(N, true) :-
     register_fun(N),
     ( WasCallable == false
       -> notify_mutation(callable_changed(N))
-    ; true ).
+    ; findall(clause_changed(N/A,runtime),static_compilation_assumption(N,A),Events),
+      retractall(static_compilation_assumption(N,_)),notify_mutations(Events) ).
 'Predicate'([F|Args], Term) :- Term =.. [F|Args].
 callPredicate(G, true) :- call(G).
 assertzPredicate(G, true) :- assertz(G).

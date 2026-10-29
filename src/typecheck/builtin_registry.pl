@@ -59,10 +59,10 @@ builtin_spec('/'/2, implementation(metta), typing(signature(unspecified, ['Numbe
 builtin_spec('%'/2, implementation(metta), typing(signature(unspecified, ['Number','Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(special(arithmetic_native))).
 builtin_spec(min/2, implementation(metta), typing(signature(unspecified, ['Number','Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(special(arithmetic_native))).
 builtin_spec(max/2, implementation(metta), typing(signature(unspecified, ['Number','Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(special(arithmetic_native))).
-builtin_spec(exp/1, implementation(metta), typing(signature(unspecified, ['Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
-builtin_spec('pow-math'/2, implementation(metta), typing(signature(unspecified, ['Number','Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
-builtin_spec('sqrt-math'/1, implementation(metta), typing(signature(unspecified, ['Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
-builtin_spec('abs-math'/1, implementation(metta), typing(signature(unspecified, ['Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
+builtin_spec(exp/1, implementation(metta), typing(signature(unspecified, ['Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(special(arithmetic_native))).
+builtin_spec('pow-math'/2, implementation(metta), typing(signature(unspecified, ['Number','Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(special(arithmetic_native))).
+builtin_spec('sqrt-math'/1, implementation(metta), typing(signature(unspecified, ['Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(special(arithmetic_native))).
+builtin_spec('abs-math'/1, implementation(metta), typing(signature(unspecified, ['Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(special(arithmetic_native))).
 builtin_spec('log-math'/2, implementation(metta), typing(signature(unspecified, ['Number','Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
 builtin_spec('trunc-math'/1, implementation(metta), typing(signature(unspecified, ['Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
 builtin_spec('ceil-math'/1, implementation(metta), typing(signature(unspecified, ['Number'], 'Number')), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
@@ -140,8 +140,8 @@ builtin_spec('is-space'/1, implementation(metta), typing(signature(unspecified, 
 % argument knows: (cdr-atom $xs) on a (List Choice) would come back as
 % (List %Undefined%), and a global (List $item) for append would reject legal
 % heterogeneous lists. The rules keep element types and reject nothing.
-builtin_spec(cons/2, implementation(metta), typing(contextual(cons_list)), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
-builtin_spec('cons-atom'/2, implementation(metta), typing(contextual(cons_list)), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
+builtin_spec(cons/2, implementation(metta), typing(contextual(cons_list)), evaluation(eager), cardinality(fixed(det)), lowering(special(list_cons))).
+builtin_spec('cons-atom'/2, implementation(metta), typing(contextual(cons_list)), evaluation(eager), cardinality(fixed(det)), lowering(special(list_cons))).
 builtin_spec('decons-atom'/1, implementation(metta), typing(untyped), evaluation(eager), cardinality(fixed(semidet)), lowering(generic)).
 builtin_spec(decons/1, implementation(metta), typing(untyped), evaluation(eager), cardinality(fixed(semidet)), lowering(generic)).
 builtin_spec('first-from-pair'/1, implementation(metta), typing(untyped), evaluation(eager), cardinality(fixed(semidet)), lowering(generic)).

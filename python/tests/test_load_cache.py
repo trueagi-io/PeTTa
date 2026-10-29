@@ -48,6 +48,27 @@ def test_second_load_replays_the_snapshot(repo_root, tmp_path):
     assert len(list(cache.iterdir())) == 1
 
 
+def test_scalar_fold_workers_replay(repo_root, tmp_path):
+    library = tmp_path / "scalar.metta"
+    library.write_text('''
+!(import! &self (library lib_roman))
+(: cache-step (-[det]-> Number (Number Number) Number (Number Number)))
+(= (cache-step $k ($a $b) $x) ((+ $a $x) (+ $b (* $k $x))))
+(: cache-totals (-[det]-> Number (List Number) (Number Number)))
+(= (cache-totals $k $xs) (fold-flat (cache-step $k) (data 0 0) $xs))
+(: cache-sum (-[det]-> Number (List Number) Number))
+(= (cache-sum $k $xs) (let ($a $b) (cache-totals $k $xs) (+ $a $b)))
+!(println! scalar-loading)
+''')
+    cache = tmp_path / "cache"
+    cold = load_in_fresh_process(repo_root, library, cache, "!(cache-sum 2 (1 2 3))")
+    warm = load_in_fresh_process(repo_root, library, cache, "!(cache-sum 2 (1 2 3))")
+    assert cold[0] == "scalar-loading"
+    assert cold[1:] == warm
+    assert warm[-1] == "value ['18']"
+    assert len(list(cache.iterdir())) == 1
+
+
 def test_changed_import_reloads(repo_root, tmp_path):
     library = write_library(tmp_path, 2)
     cache = tmp_path / "cache"

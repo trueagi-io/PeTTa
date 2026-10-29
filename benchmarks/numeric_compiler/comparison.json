@@ -1,0 +1,124 @@
+{
+  "before_commit": "ee5cacb6a6ecdd554a1c773aaf47e9a0f8a5af0f",
+  "after_compiler_commit": "c27e536364f7a6d6147c13abcda67169a76bf499",
+  "application_commit": "af4d6cca",
+  "harness_repository": "PeTTaChainer",
+  "harness_commit": "ceeb991eec82cc2f0e88f5c40a6f3139ebc6ae5b",
+  "checks_per_compiler": 6973,
+  "max_absolute_difference": 1.4210854715202004e-14,
+  "timing_pairs_per_case_per_compiler": 7,
+  "application_source_hashes_equal": true,
+  "source_hashes_equal": true,
+  "rows": [
+    {
+      "operation": "cold_trace",
+      "scope": "complete_trace",
+      "calls_per_trace": 67,
+      "before_metta_over_prolog": 2.336654593416225,
+      "after_metta_over_prolog": 1.158455213981354,
+      "normalized_cpu_reduction_percent": 50.42248789164535,
+      "before_metta_us": 2125.429005000001,
+      "after_metta_us": 867.7505749999988
+    },
+    {
+      "operation": "warm_trace",
+      "scope": "complete_trace",
+      "calls_per_trace": 67,
+      "before_metta_over_prolog": 2.304368749187746,
+      "after_metta_over_prolog": 1.2078373002647629,
+      "normalized_cpu_reduction_percent": 47.584894965681734,
+      "before_metta_us": 868.3166459999967,
+      "after_metta_us": 424.72010399999857
+    },
+    {
+      "operation": "cloud-bayes",
+      "scope": "isolated_api_group",
+      "calls_per_trace": 4,
+      "before_metta_over_prolog": 1.5399798129617261,
+      "after_metta_over_prolog": 1.0931904675091604,
+      "normalized_cpu_reduction_percent": 29.012675470939442,
+      "before_metta_us": 40.062001999999985,
+      "after_metta_us": 20.453886000000086
+    },
+    {
+      "operation": "cloud-merge",
+      "scope": "isolated_api_group",
+      "calls_per_trace": 2,
+      "before_metta_over_prolog": 2.6307584558973645,
+      "after_metta_over_prolog": 1.4699391827740949,
+      "normalized_cpu_reduction_percent": 44.12488993510841,
+      "before_metta_us": 153.20067150000006,
+      "after_metta_us": 72.84672150000016
+    },
+    {
+      "operation": "cloud-merge-weight",
+      "scope": "isolated_api_group",
+      "calls_per_trace": 2,
+      "before_metta_over_prolog": 2.0791685644918747,
+      "after_metta_over_prolog": 1.257716287366259,
+      "normalized_cpu_reduction_percent": 39.50869069273223,
+      "before_metta_us": 200.33631900000026,
+      "after_metta_us": 91.11247749999986
+    },
+    {
+      "operation": "cloud-mp",
+      "scope": "isolated_api_group",
+      "calls_per_trace": 11,
+      "before_metta_over_prolog": 1.9956633839123465,
+      "after_metta_over_prolog": 1.1663709978892094,
+      "normalized_cpu_reduction_percent": 41.55472274073458,
+      "before_metta_us": 56.379835500000475,
+      "after_metta_us": 29.14234349999978
+    },
+    {
+      "operation": "cloud-not",
+      "scope": "isolated_api_group",
+      "calls_per_trace": 4,
+      "before_metta_over_prolog": 1.3871904883381216,
+      "after_metta_over_prolog": 1.4850394163031535,
+      "normalized_cpu_reduction_percent": -7.053748478498911,
+      "before_metta_us": 1.216476999999827,
+      "after_metta_us": 1.1806915000001084
+    },
+    {
+      "operation": "cloud-restated",
+      "scope": "isolated_api_group",
+      "calls_per_trace": 2,
+      "before_metta_over_prolog": 2.176098284714865,
+      "after_metta_over_prolog": 1.2467041543848645,
+      "normalized_cpu_reduction_percent": 42.709198240638266,
+      "before_metta_us": 81.03899700000028,
+      "after_metta_us": 40.14141799999926
+    },
+    {
+      "operation": "cloud-reweigh",
+      "scope": "isolated_api_group",
+      "calls_per_trace": 4,
+      "before_metta_over_prolog": 1.7555948739471878,
+      "after_metta_over_prolog": 0.893793373139473,
+      "normalized_cpu_reduction_percent": 49.088859485564875,
+      "before_metta_us": 49.07037699999961,
+      "after_metta_us": 20.4760395000001
+    },
+    {
+      "operation": "cloud-stv",
+      "scope": "isolated_api_group",
+      "calls_per_trace": 2,
+      "before_metta_over_prolog": 1.48054011083328,
+      "after_metta_over_prolog": 0.96364907185394,
+      "normalized_cpu_reduction_percent": 34.912329304501085,
+      "before_metta_us": 37.2218525000001,
+      "after_metta_us": 19.884275499999937
+    },
+    {
+      "operation": "stv-cloud",
+      "scope": "isolated_api_group",
+      "calls_per_trace": 36,
+      "before_metta_over_prolog": 3.366562957386904,
+      "after_metta_over_prolog": 1.0731379032322375,
+      "normalized_cpu_reduction_percent": 68.12363479264332,
+      "before_metta_us": 234.6474599999997,
+      "after_metta_us": 68.3138690000007
+    }
+  ]
+}

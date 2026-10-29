@@ -168,7 +168,7 @@ process_form(Space, compile_functions, parsed(function, FormStr, Line, Term), []
                                                                   with_form_location(Line, FormStr,
                                                                                      translate_clause(Term, Clause, true,
                                                                                                       Dependencies)),
-                                                                  assertz(Clause, Ref),
+                                                                  assert_compiled_clause(assertz, Clause, Ref),
                                                                   assertz(translated_from(Ref, Term)),
                                                                   Term = [=, [Fn|Args], _],
                                                                   length(Args, N),
