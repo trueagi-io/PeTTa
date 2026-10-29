@@ -26,13 +26,42 @@ an earlier one.
 
 ### MORK and FAISS spaces
 
-If MORK and FAISS is installed, execute `sh build.sh` to support MORK-based atom spaces and FAISS-based atom-vector spaces.
+If MORK and FAISS are installed, execute `sh build.sh` to support MORK-based atom spaces and FAISS-based atom-vector spaces.
 
-The following projects are cloned and built by build.sh:
+The following projects are cloned and built by `build.sh` at recorded Git
+commits, rather than at whichever revisions their default branches happen to
+reference:
 
-**Repository:** [mork_ffi](https://github.com/patham9/mork_ffi) dependent on [trueagi-io/mork](https://github.com/trueagi-io/mork)
+| Repository | Default commit | Override |
+|---|---|---|
+| [mork_ffi](https://github.com/patham9/mork_ffi) | `f6553aa4559142895c5547f56e490d29e29469f1` | `MORK_FFI_COMMIT` |
+| [faiss_ffi](https://github.com/patham9/faiss_ffi) | `d02f69a21954fc09cf160f2e2d49d9d57b64277b` | `FAISS_FFI_COMMIT` |
+| [MORK](https://github.com/trueagi-io/mork) | `ed57c6716d8c510296fb5fbb8be6fbfe2df241d7` | `MORK_COMMIT` |
+| [PathMap](https://github.com/Adam-Vandervorst/PathMap) | `7c632f9d5c1cd42efb99e860ebdc1be64851035f` | `PATHMAP_COMMIT` |
 
-**Repository:** [faiss_ffi](https://github.com/patham9/faiss_ffi) dependent on [facebookresearch/faiss](https://github.com/facebookresearch/faiss)
+Set any of `MORK_FFI_COMMIT`, `FAISS_FFI_COMMIT`, `MORK_COMMIT`, or
+`PATHMAP_COMMIT` in the environment before running `sh build.sh` to select
+another full commit SHA.
+
+**MORK compatibility note:** Issue #263 reports the following known version
+combination: `mork_ffi` `f6553aa4559142895c5547f56e490d29e29469f1`,
+[MORK](https://github.com/trueagi-io/mork) `ed57c6716d8c510296fb5fbb8be6fbfe2df241d7`,
+and [PathMap](https://github.com/Adam-Vandervorst/PathMap)
+`7c632f9d5c1cd42efb99e860ebdc1be64851035f`. This is the combination reported
+by the issue author; documenting it does not imply that this change independently
+built and verified the complete native dependency stack.
+
+The script checks out MORK and PathMap under `build/deps/MORK` and
+`build/deps/PathMap`, respectively. It adjusts the cloned `mork_ffi/Cargo.toml`
+paths so the FFI builds against this in-repository MORK checkout. MORK's
+`../PathMap` dependency resolves to the adjacent PathMap checkout.
+
+The script pins all four Git revisions, but that alone does not make the
+complete binary build reproducible: the Rust toolchain, SWI-Prolog, FAISS,
+and other native libraries must also be compatible and installed.
+
+The FAISS FFI also depends on the installed FAISS library and native build
+environment.
 
 ### Extension libraries
 
