@@ -138,10 +138,10 @@ maybe_cache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term = 
 %%% (: Heap (Foreign 1)) enter only a nominal name and arity; native values stay
 %%% opaque. Typed spaces (: &jobs (SpaceOf Row)) opt one statically named space
 %%% into row checking. Representations are normalized when cached, so aliases
-%%% are erased and later lookup is one non-recursive expansion. Kind
-%%% declarations are source-ordered, not hoisted by precache_fn_type_decl/2;
-%%% declare-before-use stays cheapest, while a fresh late alias repairs prior
-%%% declarations.
+%%% are erased and later lookup is one non-recursive expansion. Newtype, Alias,
+%%% and Foreign declarations are hoisted by precache_fn_type_decl/2. SpaceOf
+%%% remains source-ordered because it validates rows already present in the
+%%% named space; a fresh late alias can still repair prior declarations.
 %Keyword, notification kind, store, conflict-warning noun, "already" phrase:
 decl_kind('Newtype', newtype, declared_newtype,      'Newtype',     'a Newtype').
 decl_kind('Alias',   alias,   declared_type_alias,   'type alias',  'an Alias').
@@ -536,15 +536,19 @@ renormalize_alias_alias_decls(Name) :-
                   assertz(declared_type_alias(A, TN)) ))
     ; true ).
 
-%Declaration prepass: only function (arrow) declarations are hoisted, so
-%definitions may call helpers declared later in the same file. Value
-%declarations stay order-sensitive - they are knowledge atoms whose position
-%is meaningful (see examples/types_nondet.metta):
-precache_fn_type_decl(Space, Term) :- ( is_list(Term), Term = [C, Name, Type],
-                                        C == (:), atom(Name), nonvar(Type),
-                                        fn_type_shape(Type, _, _, _)
-                                        -> maybe_cache_type_decl(Space, Term)
-                                         ; true ).
+%Declaration prepass: function (arrow) declarations and type-kind
+%declarations are visible throughout the file, independent of source order.
+%Ordinary value declarations stay order-sensitive - they are knowledge atoms
+%whose position is meaningful (see examples/types_nondet.metta):
+precache_fn_type_decl(Space, Term) :-
+    ( is_list(Term), Term = [C, Name, Type],
+      C == (:), atom(Name), nonvar(Type),
+      ( fn_type_shape(Type, _, _, _)
+      ; kind_decl(Type, Keyword, _),
+        Keyword \== 'SpaceOf'
+      )
+    -> maybe_cache_type_decl(Space, Term)
+    ; true ).
 
 %%% Builtin signatures are the typing column of builtin_spec/6. They seed the
 %%% store once after loading, and lib_builtin_types adds them to a space as

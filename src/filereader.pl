@@ -74,8 +74,8 @@ process_metta_string(S, Results, Space) :-
     process_metta_string(S, Results, Space, compile_functions).
 process_metta_string(S, Results, Space, Mode) :- metta_string_forms(S, Forms),
                                            maplist(parse_form, Forms, ParsedForms),
-                                           %declaration prepass: every function type declaration in the
-                                           %file is visible to every definition in it, independent of order
+                                           %declaration prepass: function signatures and hoistable type-kind
+                                           %declarations are visible throughout the file, independent of order
                                            with_decl_notifications_batched(
                                                forall(member(parsed(expression, FormStr, Line, Decl), ParsedForms),
                                                       with_form_location(Line, FormStr,
