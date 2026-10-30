@@ -15,18 +15,26 @@ add_sexp(Space, TermIn) :-
         assertz(space_primitive(Space, TermIn))
     ).
 
-%Same but for removal:
-remove_sexp(Space, TermIn) :-
+%Same but for removal, of every row the atom unifies with. Removed says whether
+%there was one:
+remove_sexp(Space, TermIn) :- remove_sexp(Space, TermIn, _).
+remove_sexp(Space, TermIn, Removed) :-
     ( var(TermIn) ->
         instantiation_error(TermIn)
     ; is_list(TermIn), TermIn = [Rel|Args] ->
         Term =.. [Space, Rel | Args],
-        retractall(Term),
+        retract_reporting(Term, Removed),
         maybe_uncache_type_decl(Space, [Rel|Args])
     ;
         must_be(atom, Space),
-        retractall(space_primitive(Space, TermIn))
+        retract_reporting(space_primitive(Space, TermIn), Removed)
     ).
+
+%The first retract decides the report atomically, so of several threads removing
+%the same row exactly one is told true. Pattern variables stay unbound.
+retract_reporting(Term, Removed) :-
+    ( \+ \+ retract(Term) -> retractall(Term), Removed = true
+                          ; Removed = false ).
 
 %%An unbound atom would match every row, so it is not added:
 'add-atom'(_, Term, _) :- var(Term), !, instantiation_error(Term).
@@ -162,7 +170,7 @@ runtime_source_key([Eq, [F|Args], _], F/N) :-
 
 %%Remove a function atom:
 'remove-atom'(Space, Term, Removed) :- Term = [=,[F|Args],Body], atom(F), !,
-                                       remove_sexp(Space, Term),
+                                       remove_sexp(Space, Term, Removed),
                                        ( atom(F), nb_current(F, Prev) -> true ; Prev = [] ),
                                        (   select(Meta, Prev, Rest),
                                            Meta = fun_meta(Args0, Body0, _),
@@ -186,13 +194,12 @@ runtime_source_key([Eq, [F|Args], _], F/N) :-
                                        % fun/1 marker before rebuilding callers
                                        % so they see data syntax, not a stale
                                        % unknown function call.
-                                       notify_mutation(clause_changed(F/N, runtime)),
-                                       ( Refs = [] -> Removed = false ; Removed = true ).
+                                       notify_mutation(clause_changed(F/N, runtime)).
 
 %Remove all same atoms:
-'remove-atom'(Space, Term, true) :-
+'remove-atom'(Space, Term, Removed) :-
     typed_space_runtime_value_ok(Space, Term),
-    remove_sexp(Space, Term).
+    remove_sexp(Space, Term, Removed).
 
 %Updates whose row the translator proved against the space's declared schema
 %(typed_space_update_goal/4). A function atom keeps its own clause.
@@ -202,7 +209,7 @@ runtime_source_key([Eq, [F|Args], _], F/N) :-
 
 'remove-atom-proven'(Space, Term, Removed) :- Term = [=,_,_], !,
                                               'remove-atom'(Space, Term, Removed).
-'remove-atom-proven'(Space, Term, true) :- remove_sexp(Space, Term).
+'remove-atom-proven'(Space, Term, Removed) :- remove_sexp(Space, Term, Removed).
 
 %Typed spaces accept open payloads and removal patterns.  At the operation
 %boundary reject only a value that has become a definite contradiction; this
