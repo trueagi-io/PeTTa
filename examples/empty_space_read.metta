@@ -13,7 +13,7 @@
 !(test (collapse (get-atoms &unwritten))
        ())
 !(test (remove-atom &unwritten (foo 1))
-       true)
+       False)
 !(add-atom &unwritten (foo 1))
 !(test (collapse (match &unwritten (foo $x) $x))
        (1))
