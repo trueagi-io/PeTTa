@@ -101,7 +101,12 @@ predicate_state(M:F/A, pred(M:F/A, Props, Refs)) :-
                  predicate_property(M:H, P) ), Props),
     findall(R, clause(M:H, _, R), Refs).
 
+% SWI exposes flag scope/access/type, but no volatility property.  Scope is
+% not a substitute: thread-local settings can affect compilation, while pid
+% and system_thread_id identify this execution rather than its configuration.
+% Keep read-only configuration flags (e.g. version and threads) in the key.
 volatile_flag(pid, _).
+volatile_flag(system_thread_id, _).
 volatile_flag(_, V) :- blob(V, Type), \+ memberchk(Type, [text, reserved_symbol]).
 
 % The fingerprint covers the stored form of every clause and global variable,
