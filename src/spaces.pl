@@ -12,16 +12,8 @@ remove_sexp(Space, Atom) :- ( var(Atom) -> instantiation_error(Atom)
                            ; must_be(atom, Space), retractall(space_primitive(Space, Atom)) ).
 
 %Add a function atom:
-'add-atom'(Space, Term, true) :- Term = [=,[FAtom|W],_], atom(FAtom), !,
-                                 add_sexp(Space, Term),
-                                 register_fun(FAtom),
-                                 length(W, N),
-                                 Arity is N + 1,
-                                 assertz(arity(FAtom,Arity)),
-                                 once(translate_clause(Term, Clause)),
-                                 assertz(Clause, Ref),
-                                 assertz(translated_from(Ref, Term)),
-                                 metta_on_function_changed(FAtom),
+'add-atom'(Space, Term, true) :- Term = [=,[FAtom|_],_], atom(FAtom), !,
+                                 install_definition(Space, Term, runtime, Clause),
                                  maybe_print_compiled_clause("added function", Term, Clause).
 
 %Add an atom to the space:
@@ -32,15 +24,11 @@ remove_sexp(Space, Atom) :- ( var(Atom) -> instantiation_error(Atom)
 
 %%Remove a function atom:
 'remove-atom'(Space, Term, Removed) :- Term = [=,[F|_],_], atom(F), !,
+                                       with_mutex(petta_definitions, transaction((
                                        remove_sexp(Space, Term),
-                                       findall(Ref, translated_from(Ref, Term), Refs),
-                                       forall(member(Ref, Refs), erase(Ref)),
-                                       retractall(translated_from(_, Term)),
-                                       metta_on_function_changed(F),
-                                       ( \+ ( current_predicate(F/A), functor(H2, F, A), clause(H2, _, _) )
-                                         -> retractall(fun(F)), metta_on_function_removed(F)
-                                         ; true ),
-                                       ( Refs = [] -> Removed = false ; Removed = true ).
+                                       findall(Ref-A, ( translated_from(Ref, Term), clause(H, _, Ref), functor(H, F, A) ), Refs),
+                                       ( Refs = [] -> Removed = false
+                                       ; removed_equations(F, Refs), Removed = true ) ))).
 
 %Remove all same atoms:
 'remove-atom'(Space, Term, true) :- remove_sexp(Space, Term).
