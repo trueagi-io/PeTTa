@@ -51,10 +51,7 @@
          (add-atom $space (= $head $bodyreduced))))
 
 ;Error Handling
-(: if-error (-[det]-> $x $a $b %Undefined%))
-(= (if-error $X $A $B)
-   (if (= $X (cons Error $_)) 
-       $A $B))
+!(import! &self (library lib_error))
 
 (: return-on-error (-[det]-> $r $b %Undefined%))
 (= (return-on-error $result $B)

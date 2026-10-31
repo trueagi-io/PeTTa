@@ -106,9 +106,7 @@
 
 ;Error handling
 
-(: if-error (-[det]-> $value $result $result $result))
-(= (if-error $value $then $else)
-   (if (= $value (cons Error $_)) $then $else))
+!(import! &self (library lib_error))
 
 (: checked-number (-[det]-> %Undefined% Number))
 (= (checked-number $value) (the Number $value))
