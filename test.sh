@@ -196,4 +196,15 @@ if [ $status -eq 0 ] && [ "${SKIP_SOUNDNESS:-0}" != "1" ]; then
     fi
 fi
 
+if [ $status -eq 0 ]; then
+    echo ""
+    echo "Running tests/regression/test_specializer_regressions.sh"
+    if sh tests/regression/test_specializer_regressions.sh; then
+        echo "OK: test_specializer_regressions.sh"
+    else
+        echo "FAILURE in test_specializer_regressions.sh"
+        status=1
+    fi
+fi
+
 exit $status

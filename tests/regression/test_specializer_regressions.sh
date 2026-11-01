@@ -9,8 +9,9 @@ TMPDIR=${TMPDIR:-/tmp}
 run_ok() {
     name="$1"
     file="$2"
+    shift 2
     log="$TMPDIR/petta-${name}-$$.log"
-    timeout 15s sh "$ROOT/run.sh" "$ROOT/$file" > "$log" 2>&1
+    timeout 15s sh "$ROOT/run.sh" "$ROOT/$file" "$@" > "$log" 2>&1
     printf '%s\n' "$log"
 }
 
@@ -26,15 +27,18 @@ log=$(run_ok repro2 tests/regression/repro2_exponential_failed_specialization.me
 count=$(grep -c 'Not specialized' "$log" || true)
 [ "$count" -eq 11 ] || { echo "repro2 expected 11 failed-specialization attempts, got $count"; cat "$log"; exit 1; }
 
-# Failed specializations must not leave observable type atoms in &self.
+# Failed specializations must remove temporary type atoms from &self while
+# preserving the user's function-typed wrap declaration. Require an actual
+# failed attempt so a type error or a skipped specialization cannot pass.
 log=$(run_ok repro3 tests/regression/repro3_failed_specialization_self_leak.metta)
-if grep -q ' (wrap_Spec_' "$log"; then
+count=$(grep -Fc 'Not specialized wrap_Spec_[myfun]/3' "$log" || true)
+[ "$count" -eq 1 ] || { echo "repro3 expected 1 failed wrap specialization, got $count"; cat "$log"; exit 1; }
+if grep -Fq '(wrap_Spec_' "$log"; then
     echo "repro3 leaked wrap_Spec_ into &self output"
     cat "$log"
     exit 1
 fi
-
-grep -q 'partial wrap' "$log" || { echo "repro3 missing parent wrap type output"; cat "$log"; exit 1; }
+grep -Fq 'partial wrap ((-> (-> Number Number) Number Number))' "$log" || { echo "repro3 missing parent wrap type output"; cat "$log"; exit 1; }
 
 # Variant-normalized names should not embed fresh Prolog variable ids inside
 # compound partial/2 keys.  This repro still has an unbound arithmetic variable
@@ -52,6 +56,12 @@ if grep -Eq 'app_Spec_\[partial\(lambda_1,\[_[0-9]+\]\)\]' "$log"; then
     exit 1
 fi
 grep -Fq 'app_Spec_[partial(lambda_1,[_])]' "$log" || { echo "repro4 missing normalized specialization key"; cat "$log"; exit 1; }
+
+# Python booleans must select the corresponding MeTTa if branch. Silence
+# compiler diagnostics (including ANSI colour codes) to check only results.
+log=$(run_ok repro5 tests/regression/repro5_pybool_if_condition.metta -s)
+grep -qx 'py-true-taken' "$log" || { echo "repro5 did not take the true branch"; cat "$log"; exit 1; }
+grep -qx 'py-false-not-taken' "$log" || { echo "repro5 did not take the false branch"; cat "$log"; exit 1; }
 
 # Higher-order specialization must preserve the generic call's exception
 # behavior: whether the callee is chosen at runtime or specialized at compile
