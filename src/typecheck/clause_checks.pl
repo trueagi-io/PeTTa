@@ -21,6 +21,32 @@ head_arg_soft(A, T) :- ( var(A) -> true
                        ; check_value(A, T, St) -> St \== mismatch
                        ; true ).
 
+%Use the hoisted declarations at this source arity and keep only those whose
+%inputs can reach this head. Quoting requires every surviving declaration to
+%request a plain Atom result. Specialized source records quotation explicitly.
+clause_plain_atom_output(F, Args) :-
+    atom(F), is_list(Args), length(Args, N),
+    \+ ho_specialization(_, F),
+    findall(Effect-OT,
+            ( fn_decl_copy(F, N, scheme(ATs, OT), Effect, _, _),
+              clause_head_survives(Args, ATs-OT) ),
+            Decls),
+    Decls = [_|_],
+    forall(member(effect_model(Top, _)-OT, Decls),
+           ( Top == unspecified, OT == 'Atom' )).
+
+%Analyses must see the same unevaluated datum that the translator emits.
+effective_clause_body(F, Args, Body, Effective) :-
+    ( nonvar(Body), clause_plain_atom_output(F, Args) -> Effective = [quote, Body]
+    ; Effective = Body ).
+
+%Elaborated arguments drive calls; source arguments select declarations.
+meta_source_args(fun_meta(_, _, source(_, SourceArgs)), SourceArgs) :- !.
+meta_source_args(fun_meta(Args, _, _), Args).
+
+meta_has_head_goals(fun_meta(_, _, source(head_goals, _))).
+meta_has_head_goals(fun_meta(_, _, head_goals)).
+
 bind_param_type(Arg, T) :- ( functional_pattern_application(Arg, _, _)
                            -> ( functional_pattern_signature(Arg, T, PatternArgs, ArgTypes)
                                 -> maplist(bind_param_type, PatternArgs, ArgTypes)
@@ -75,8 +101,9 @@ refine_alias_arg_types([I|Is], ArgTypes, Expected) :-
 
 functional_output_alias_positions(F, N, Positions) :-
     findall(source(Args, Body),
-            ( translated_from(_, [=, [F|Args], Body]),
-              length(Args, N) ),
+            ( translated_from(_, [=, [F|Args], Body0]),
+              length(Args, N),
+              effective_clause_body(F, Args, Body0, Body) ),
             Sources),
     Sources \== [],
     maplist(source_clause_output_aliases, Sources, PerClause),

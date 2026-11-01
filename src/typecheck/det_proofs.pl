@@ -69,7 +69,7 @@ inferred_unknown_call_determinism(F, N, Det) :-
 %bound argument position carries distinct top-level head keys. It is
 %exactly-one when those keys also cover that argument's known domain.
 inferred_selection_determinism(F, N, Args, Metas, Det) :-
-    ( member(MetaWithGoals, Metas), MetaWithGoals = fun_meta(_, _, head_goals)
+    ( member(MetaWithGoals, Metas), meta_has_head_goals(MetaWithGoals)
       -> Det = unspecified
     ; maplist(call_head_status(Args), Metas, Statuses),
       ( memberchk(unknown, Statuses)
@@ -125,7 +125,7 @@ call_other_positions_yes([A|As], [P|Ps], Skip, I) :-
 %deliberately a small, provable-only relation: a universal head, or a complete
 %constructor/literal discriminator with otherwise-unconstrained positions.
 inferred_total_selection_determinism(_, _, Metas, unspecified) :-
-    member(Meta, Metas), Meta = fun_meta(_, _, head_goals), !.
+    member(Meta, Metas), meta_has_head_goals(Meta), !.
 inferred_total_selection_determinism(_, _, Metas, nondet) :-
     selection_heads_overlap(Metas), !.
 inferred_total_selection_determinism(F, N, Metas, det) :-
@@ -559,15 +559,17 @@ output_cert_core(Kind, F, N, Stack, Verdict, Dependencies) :-
 %current file's pending prepass bodies, so mutually recursive functions
 %certify in source order. A body in both stores is qualified twice, which is
 %idempotent.
-:- dynamic pending_clause_body/4.   % pending_clause_body(File, F, N, Body)
+:- dynamic pending_clause_body/4.   % pending_clause_body(File, F, N, Args-Body)
 
 cert_clause_bodies(F, N, Bodies) :-
-    findall(B, ( atom(F), nb_current(F, Ms),
+    findall(Effective, ( atom(F), nb_current(F, Ms),
                  member(Meta, Ms),
-                 Meta = fun_meta(As, B, _),
-                 length(As, N) ), Rs),
+                 Meta = fun_meta(As, _, _),
+                 length(As, N),
+                 effective_fun_meta(F, Meta, fun_meta(_, Effective, _)) ), Rs),
     current_metta_file(File),
-    findall(B, pending_clause_body(File, F, N, B), Ps),
+    findall(Effective, ( pending_clause_body(File, F, N, As-B),
+                        effective_clause_body(F, As, B, Effective) ), Ps),
     append(Rs, Ps, Bodies).
 
 output_bodies_verdict(_, [], _, yes, []).
@@ -758,7 +760,8 @@ clause_set_determinism(Metas, Det) :-
 
 %The proof of Subject, a property of F/N established by its clause set Metas
 %analysed under the commitment gate Enf:
-clause_set_subject_proof(Subject, F/N, Enf, Metas, Proof) :-
+clause_set_subject_proof(Subject, F/N, Enf, Metas0, Proof) :-
+    maplist(effective_fun_meta(F), Metas0, Metas),
     with_det_enforced(Enf, clause_set_determinism_proof(Metas, ClauseProof)),
     analysis_proof_verdict(ClauseProof, Det),
     analysis_proof_requirements(ClauseProof, Bounds),
@@ -770,6 +773,12 @@ clause_set_subject_proof(Subject, F/N, Enf, Metas, Proof) :-
     sort(Ds0, Deps),
     Proof = analysis_proof(Subject, Det, requirements(Bounds),
                            certificates(Certs), dependencies(Deps)).
+
+effective_fun_meta(F, Meta,
+                      fun_meta(Args, Effective, HeadForm)) :-
+    Meta = fun_meta(Args, Body, HeadForm),
+    meta_source_args(Meta, SourceArgs),
+    effective_clause_body(F, SourceArgs, Body, Effective).
 
 clause_set_determinism_proof(Metas, Proof) :-
     analysis_collect(clause_set_determinism_core(Metas, Det), Events),

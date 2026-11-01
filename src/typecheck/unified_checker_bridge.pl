@@ -699,11 +699,19 @@ clause_result_for_source([_|Results], Source, Outcome) :-
     clause_result_for_source(Results, Source, Outcome).
 
 try_lower_source_clause(Source, Outcome) :-
-    catch(( lower_clause_with_origins(Source, IR, _, Env, Origins)
+    effective_clause_source(Source, Effective),
+    catch(( lower_clause_with_origins(Effective, IR, _, Env, Origins)
             -> Outcome = lowered(IR, Env, Origins)
           ; Outcome = unsupported(lowering_failed) ),
           Error,
           unsupported_lowering_error(Error, Outcome)).
+
+effective_clause_source(Source, [=, [F|Args], Body]) :-
+    nonvar(Source), Source = [Eq, Head, RawBody], Eq == (=),
+    is_list(Head), Head = [F|Args], atom(F),
+    current_predicate(user:effective_clause_body/4), !,
+    user:effective_clause_body(F, Args, RawBody, Body).
+effective_clause_source(Source, Source).
 
 unsupported_lowering_error(error(domain_error(Domain, _), Context),
                            unsupported(Domain)) :-

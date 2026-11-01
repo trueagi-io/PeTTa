@@ -838,7 +838,8 @@ list_literal_implications(Value, Peer, Facts) :-
     append([Nonempty, Unique, Base], Facts).
 
 literal_facts(Value, Facts) :-
-    ( is_list(Value)
+    ( var(Value) -> Facts = []
+    ; is_list(Value)
       -> literal_list_derived_facts(Value, Derived),
          Facts = [literal(Value)|Derived]
     ; Facts = [literal(Value)] ).
@@ -1087,6 +1088,15 @@ test(open_quoted_list_is_not_ground) :-
     analysis_result_has_fact(Analysis, proper_list),
     \+ analysis_result_has_fact(Analysis, ground),
     var(X).
+
+test(quoted_variable_is_not_a_literal) :-
+    lower_expr([quote, X], IR, _, _),
+    state_empty(S0), analyze_ir(IR, S0, Analysis),
+    analysis_card(Analysis, card(1,1)),
+    var(X),
+    \+ analysis_result_has_fact(Analysis, proper_bool),
+    \+ analysis_result_has_fact(Analysis, nonvar),
+    \+ analysis_result_has_fact(Analysis, ground).
 
 test(typed_wildcard_is_not_assumed_exhaustive) :-
     Source = [case, X, [[[':', Y, 'Bool'], true]]],

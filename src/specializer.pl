@@ -26,6 +26,11 @@ normalize_specialization_key(Term, Normalized) :-
 %Specialize a call by creating and translating a specialized version of the MeTTa code:
 specialize_call(HV, AVs, Out, Goal) :- %1. Retrieve a copy of all meta-clauses stored for HV:
                                        atom(HV), nb_current(HV, MetaList0),
+                                       %A quoted body can refer to variables bound only by head
+                                       %goals, which the specialization does not copy. Keep its call.
+                                       \+ ( member(Meta0, MetaList0), meta_has_head_goals(Meta0),
+                                            meta_source_args(Meta0, SourceArgs0),
+                                            clause_plain_atom_output(HV, SourceArgs0) ),
                                        copy_term(MetaList0, MetaList),
                                        %2. Copy all clause variables eligible for specialization across all meta-clauses:
                                        bagof(HoVar, ArgsNorm^BodyExpr^HoBinds^HoBindsPerArg^
@@ -51,8 +56,12 @@ specialize_call(HV, AVs, Out, Goal) :- %1. Retrieve a copy of all meta-clauses s
                                                findall(TypeChain, catch(match('&self', [':', HV, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
                                                forall(member(TypeChain, TypeChains), add_sexp('&self', [':', SpecName, TypeChain])),
                                                %4.3 Translate specialized MeTTa clauseses to Prolog, keeping track of the function we are compiling through recursion:
-                                               maplist({SpecName}/[Meta,clause_info(Input,Clause,Dependencies)]>>
-                                                       ( Meta = fun_meta(ArgsNorm, BodyExpr, _),
+                                               maplist({HV,SpecName}/[Meta,clause_info(Input,Clause,Dependencies)]>>
+                                                       ( Meta = fun_meta(ArgsNorm, RawBody, _),
+                                                         %Preserve the original source head's result mode
+                                                         %before replacing it with specialized value slots:
+                                                         meta_source_args(Meta, SourceArgs),
+                                                         effective_clause_body(HV, SourceArgs, RawBody, BodyExpr),
                                                          Input = [=,[SpecName|ArgsNorm],BodyExpr],
                                                          %a typecheck error in the specialized instance just means: don't specialize
                                                          catch(translate_clause(Input,Clause,false,Dependencies), error(_, typecheck), fail) ), MetaList, ClauseInfos),
