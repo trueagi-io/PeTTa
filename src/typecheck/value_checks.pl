@@ -246,6 +246,7 @@ list_elems_status([E|Es], ET, St) :- elem_status(E, ET, S1),
                                        ; S1 == unknown -> St = unknown
                                        ; St = S2 ) ).
 
+elem_status(_, ET, ok) :- nonvar(ET), wildcard_type(ET), !.
 elem_status(E, ET, St) :- ( var(E) -> ( known_singleton(E, K) -> ( type_unify(K, ET) -> St = ok
                                                                                       ; St = mismatch )
                                                                ; St = unknown )
@@ -272,10 +273,15 @@ arg_statically_ok(AV, T) :- \+ \+ ( var(AV) -> ( known_singleton(AV, K) -> type_
 %   $current is inferred Number, yet (score none 0.42) is correct. Only a
 %   definite conflict is rejected, which still catches (f "a") against an
 %   inferred (= (f $x) (+ $x 1)) whose body guard inference elided.
+%   Tagged field requirements are stronger: they replaced checks in a
+%   destructured callee, so unresolved actual values need a caller check.
 check_call_arg(Mode, Fun, AV, T, Gs) :- ( var(AV)
                                           -> ( known_singleton(AV, K)
                                                -> ( nonvar(T), wildcard_type(T) -> Gs = []  %wildcards carry no knowledge
-                                                  ; type_unify(K, T) -> oracle_arg_check(AV, T, Gs)
+                                                  ; Mode == inferred, inferred_pattern_requirement(T),
+                                                    inferred_unknown_field(K, T)
+                                                    -> type_guard(Fun, AV, T, Gs)
+                                                  ; type_unify(K, T) -> static_arg_checks(Mode, Fun, AV, T, Gs)
                                                   %brands are erased at runtime, so a
                                                   %conflicting brand on a promised type
                                                   %rejects now:
@@ -288,16 +294,47 @@ check_call_arg(Mode, Fun, AV, T, Gs) :- ( var(AV)
                                              ; var(T) -> Gs = []
                                              ; wildcard_type(T) -> Gs = []
                                              %an untyped value is not evidence of a wrong one:
-                                             ; Mode == inferred -> Gs = []
+                                             ; soft_inferred_requirement(Mode, T) -> Gs = []
                                              ; type_guard(Fun, AV, T, Gs) )
                                         ; check_value(AV, T, St),   %also binds an open T: knowledge
-                                          ( St == ok -> oracle_arg_check(AV, T, Gs)
+                                          ( St == ok -> static_arg_checks(Mode, Fun, AV, T, Gs)
                                           ; St == mismatch
-                                            -> ( Mode == declared
+                                            -> ( ( Mode == declared ; Mode == inferred, inferred_pattern_requirement(T) )
                                                  -> throw(error(literal_type_mismatch(AV, T), typecheck))
                                                   ; type_guard(Fun, AV, T, Gs) )
-                                          ; Mode == inferred -> Gs = []
+                                          ; soft_inferred_requirement(Mode, T) -> Gs = []
                                           ; type_guard(Fun, AV, T, Gs) ) ).
+
+%These fields justified omitting checks in the callee. Unknown actual fields
+%must therefore be checked here, even when they have no conflicting type.
+inferred_pattern_requirement(T) :-
+    tagged_tuple_type(T, _, Fields),
+    member(Field, Fields), nonvar(Field), \+ wildcard_type(Field),
+    ( tagged_tuple_type(Field, _, _) -> inferred_pattern_requirement(Field)
+    ; true ), !.
+
+static_arg_checks(Mode, Fun, AV, T, Gs) :-
+    ( ( Mode == declared ; Mode == inferred, inferred_pattern_requirement(T) ),
+      nonvar(T), \+ wildcard_type(T), assumed_field_value(AV)
+      -> Gs = ['$inferred_field_check'(Fun, AV, T)]
+    ; oracle_arg_check(AV, T, Gs) ).
+
+%A wildcard in an actual partial shape is absence of evidence, not proof of
+%a concrete field required by another inferred shape.
+inferred_unknown_field(K, T) :-
+    nonvar(K), nonvar(T), \+ wildcard_type(T),
+    ( wildcard_type(K)
+    ; is_list(K), is_list(T), same_length(K, T),
+      ( tagged_tuple_type(T, Tag, Ts), K = [Tag|Ks] -> true
+      ; Ks = K, Ts = T ),
+      nth0(I, Ks, Actual), nth0(I, Ts, Required),
+      inferred_unknown_field(Actual, Required)
+    ), !.
+
+%A self-recursive provisional type is still being inferred from this body's
+%uses (e.g. a queue accumulator); it is not an exported field obligation.
+soft_inferred_requirement(provisional, _).
+soft_inferred_requirement(inferred, T) :- \+ inferred_pattern_requirement(T).
 
 %Open structured types (e.g. (List $a)) still guard their outer shape; only a
 %fully unconstrained type variable needs no check at all:
@@ -323,12 +360,27 @@ type_guard(Fun, AV, T, Gs) :- ( nonvar(T), \+ wildcard_type(T)
 undecidable_arrow_commitment(T) :- is_arrow_type(T), T = [H|_], arrow_atom_det(H, L),
                                    committed_det(L).
 
-%Inline the primitive fast path into the compiled goal so hot code only pays a
-%native type test; the reflective check runs only when that test fails:
-guard_goal(AV, 'Number', ( number(AV) -> true ; typecheck_or_error(AV, 'Number') )) :- !.
-guard_goal(AV, 'String', ( string(AV) -> true ; typecheck_or_error(AV, 'String') )) :- !.
-guard_goal(AV, 'Bool', ( ( AV == true ; AV == false ) -> true ; typecheck_or_error(AV, 'Bool') )) :- !.
+%Inline primitive tests, including primitive-only tagged shapes, into hot code.
+%Reflection and the existing error/variable-constraint semantics remain in the
+%fallback. Build these goals at compile time, never inspect declarations per call.
+guard_goal(AV, T, ( Test -> true ; typecheck_or_error(AV, T) )) :-
+    primitive_guard_test(AV, T, Test), !.
 guard_goal(AV, T, typecheck_or_error(AV, T)).
+
+primitive_guard_test(V, T, number(V)) :- T == 'Number', !.
+primitive_guard_test(V, T, string(V)) :- T == 'String', !.
+primitive_guard_test(V, T, ( V == true ; V == false )) :- T == 'Bool', !.
+primitive_guard_test(V, T, ( nonvar(V), V = [ActualTag|Fields], ActualTag == Tag, Tests )) :-
+    tagged_tuple_type(T, Tag, Types),
+    primitive_field_tests(Fields, Types, Tests).
+
+%Inspect each cons before matching it, and test the terminal tail with ==.
+%Together with non-binding tag/leaf tests this never instantiates an input,
+%including attributed variables or open tails, before falling back.
+primitive_field_tests(Tail, [], Tail == []).
+primitive_field_tests(Fields, [T|Ts], ( nonvar(Fields), Fields = [V|Vs], Test, Rest )) :-
+    primitive_guard_test(V, T, Test),
+    primitive_field_tests(Vs, Ts, Rest).
 
 apply_call_args(Mode, Fun, AVs, ATs, Gs) :-
     open_nominal_intersection_obligations(AVs, ATs, Obligations),

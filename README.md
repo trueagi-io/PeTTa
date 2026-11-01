@@ -61,9 +61,9 @@ by hand — about twice as fast as the untyped translation was before.
 
 **Inference.** Undeclared functions get local type inference (parameters are
 inferred from how the body uses them, including through self-recursion).
-Inferred types only ever *add* knowledge — they eliminate guards, type call
-outputs, and enable the fused code generation — and, unlike a declaration,
-they are never *demanded* of callers. How a body uses a parameter is not what
+For scalar parameters, inferred types only ever *add* knowledge — they
+eliminate guards, type call outputs, and enable fused code generation — and,
+unlike a declaration, these estimates are not *demanded* of callers. How a body uses a parameter is not what
 it requires of one: in
 
 ```metta
@@ -72,7 +72,7 @@ it requires of one: in
 
 `$current` is inferred `Number` from the branch the sentinel test rules out,
 so `(score none 0.42)` is a correct program and runs — a declared parameter
-type would (rightly) reject it. Inference stays silent wherever the compiler
+type would (rightly) reject it. This scalar inference stays silent wherever the compiler
 cannot see that a value is definitely of another type: no compile error, no
 strict-mode rejection and no runtime guard, so nothing fails that would not
 have failed without inference (`examples/inferred_sentinel_param.metta`). An
@@ -82,20 +82,24 @@ guard, because inference already elided the checks inside the callee
 unaffected — they are checked, and rejected, exactly as before
 (`examples/fail_declared_sentinel_param.metta`).
 
-A variable bound by a *destructuring* head pattern is a parameter too, and is
-inferred the same way: `(= (tvf (stv $s $c)) (* $s $c))` infers `(-> (stv
-Number Number) Number)` and multiplies without guarding, where before only a
-plain `$s`/`$c` parameter did. The pattern's own type is rebuilt from its
-fields' — that shape is what keeps `(tvf (stv "a" "b"))` an error rather than a
-silently wrong number — and is kept only when it reads back as the shape it was
-built from, so a pattern headed by a declared *type name* (which reads
-positionally, see **Tuple types** below) simply infers nothing. A pattern
-headed by a uniquely declared constructor takes its field types straight from
-that declaration, whether it appears in a head, a `let`/`let*` binder or a
-`case` branch, and needs no type for the scrutinee to do it. See
+Fields of a tagged *destructuring* head pattern are inferred the same way:
+`(= (tvf (stv $s $c)) (* $s $c))` infers `(-> (stv Number Number) Number)`
+and multiplies without guarding. The rebuilt argument shape carries those
+field requirements to callers. Unknown fields remain wildcards rather than
+invalidating the whole shape: `(= (fa (pair $a $unused)) (only-a $a))` can
+export `(pair A %Undefined%)` when `only-a` requires `A`. Known mismatches
+against these shapes are rejected statically; unresolved actual values get a
+check at the call site, keeping the callee guard-free.
+
+A variable-headed pattern such as `($x)` cannot export a tagged shape. Its
+fields remain unknown, so declared calls using them retain residual runtime
+checks. This also applies inside nested patterns and to a tag whose type-name
+interpretation prevents the shape from reading back as the original pattern.
+Head declarations and uniquely declared constructors still supply field types
+without inference, in heads, `let`/`let*` binders, and `case` branches. See
 `examples/strict_destructured_param.metta`,
-`examples/destructured_param_shapes.metta` and
-`examples/fail_destructured_param_mismatch.metta`.
+`examples/type_destructured_partial.metta`, and
+`examples/type_destructured_call_guard.metta`.
 
 **Match schemas.** Space reads are typed through declared relation schemas:
 with `(: age (-> String Number Atom))` declared, the pattern variables of

@@ -16,8 +16,8 @@
 
 !(test (inner (box (pt 2 3))) 5)
 
-; A field the body never constrains leaves the whole shape unknown rather than
-; half-claimed, so passing anything in that position is still fine:
+; Unconstrained fields survive as wildcards in the rebuilt tagged shape,
+; so callers still accept arbitrary values in those positions.
 (= (fst (pair $a $b)) $a)
 
 !(test (fst (pair 1 "two")) 1)

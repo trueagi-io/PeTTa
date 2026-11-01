@@ -77,8 +77,6 @@ assume_param_type(Arg, t(Ps, Ts), t(Ps1, [T|Ts])) :- ( var(Arg)
                                                           ; add_known_type(Arg, T), Ps1 = [a(Arg, T)|Ps] )
                                                      ; value_single_type(Arg, T)
                                                        -> ctor_pattern_field_types(Arg), Ps1 = Ps
-                                                     %a destructured variable is a parameter too
-                                                     %(its pattern type is rebuilt in infer_param_type/4):
                                                      ; is_list(Arg) -> assume_pattern_vars(Arg, Ps, Ps1)
                                                      ; Ps1 = Ps ).
 
@@ -126,13 +124,16 @@ assumed_self_decl(F, N, PTs, OutTv) :- nb_current('$assume_decl', D),
                                        D = d(F, N, PTs, OutTv).
 
 store_inferred_type(F, Pairs, Args, ExpOut) :- ( nb_current('$assump_taint', Taints) -> true ; Taints = [] ),
-                                               maplist(infer_param_type(Pairs, Taints), Args, ATs0),
+                                               inferred_clause_arg_types(Pairs, Taints, Args, ATs),
                                                infer_out_type(ExpOut, OT0),
-                                               maplist(normalize_inferred_param, ATs0, ATs1),
-                                               maplist(pattern_type_roundtrip, Args, ATs1, ATs),
-                                               normalize_inferred(OT0, OT),
+                                               normalize_inferred_output(OT0, OT),
                                                ( member(T, [OT|ATs]), T \== '%Undefined%'
                                                  -> merge_inferred(F, ATs, OT) ; true ).
+
+inferred_clause_arg_types(Pairs, Taints, Args, ATs) :-
+    maplist(infer_param_type(Pairs, Taints), Args, Raw),
+    maplist(normalize_inferred_param, Raw, Normalized),
+    maplist(pattern_type_roundtrip, Args, Normalized, ATs).
 
 %A structural parameter type is stored only if it still accepts the pattern it
 %was read off: (Statement $s $p) under (: Statement Type) infers
@@ -157,7 +158,24 @@ infer_param_type(Pairs, Taints, Arg, T) :- ( var(Arg) -> ( memberchk_eq(Arg, Tai
 
 infer_out_type(Out, T) :- ( var(Out) -> ( known_singleton(Out, K) -> T = K ; T = '%Undefined%' )
                           ; value_single_type(Out, T0) -> T = T0
+                          ; Out = [Tag|Fields], atom(Tag), Fields \== [], is_list(Fields),
+                            maplist(infer_out_type, Fields, Types),
+                            tagged_tuple_type([Tag|Types], Tag, Types),
+                            maplist(fully_known_inferred_type, Types)
+                            -> T = [Tag|Types]
                           ; T = '%Undefined%' ).
+
+%Export only complete output shapes as positive evidence. A partial input
+%shape is an obligation, but an unknown output field cannot certify a caller.
+normalize_inferred_output(T, TN) :-
+    ( inferred_pattern_requirement(T), fully_known_inferred_type(T)
+      -> normalize_inferred_param(T, TN)
+    ; normalize_inferred(T, TN) ).
+
+fully_known_inferred_type(T) :- nonvar(T), \+ wildcard_type(T),
+    ( tagged_tuple_type(T, _, Fields) -> maplist(fully_known_inferred_type, Fields)
+    ; is_list(T) -> maplist(fully_known_inferred_type, T)
+    ; true ).
 
 %Only clearly usable shapes are recorded; everything else is no-knowledge:
 normalize_inferred(T, '%Undefined%') :- var(T), !.
@@ -167,16 +185,81 @@ normalize_inferred(T, ['List', ETN]) :- ground(T), list_type(T, ET), !,
 normalize_inferred(T, T) :- ground(T), is_arrow_type(T), !.
 normalize_inferred(_, '%Undefined%').
 
-%A destructured parameter's shape survives only if it reads back as the tagged
-%shape it was built from (tagged_tuple_type/3), and collapses when any field
-%is undefined: a partly known tuple is not checkable. Parameter shapes are
-%verified against their patterns afterwards (pattern_type_roundtrip/3).
-normalize_inferred_param(T, TN) :- ( is_list(T), T = [Tag|Fs], atom(Tag), Fs \== [],
-                                     maplist(normalize_inferred_param, Fs, FTs),
-                                     \+ memberchk('%Undefined%', FTs),
-                                     TN0 = [Tag|FTs], tagged_tuple_type(TN0, Tag, FTs)
-                                     -> TN = TN0
-                                      ; normalize_inferred(T, TN) ).
+%Keep unknown fields as wildcards in tagged shapes. Variable-headed or
+%otherwise unreadable patterns still drop their shape; their deferred checks
+%are retained at the consuming body calls instead.
+normalize_inferred_param(T, TN) :-
+    ( is_list(T), T = [Tag|Fs], atom(Tag), Fs \== [],
+      maplist(normalize_inferred_param, Fs, FTs),
+      Tagged = [Tag|FTs], tagged_tuple_type(Tagged, Tag, FTs)
+      -> TN = Tagged
+    ; normalize_inferred(T, TN) ).
+
+%Successful checks that used a field assumption are provisional until the
+%whole parameter shape is known. Resolve them once, after body translation:
+%erase checks covered by a caller shape, keep existing residual checks for
+%lost fields. This avoids a speculative second translation and its effects.
+assumed_field_value(Value) :-
+    nb_current('$assumptions', Pairs), Pairs \== [],
+    nb_current('$compiling_clause', clause(_, Args, _)),
+    term_variables(Value, Vars),
+    member(a(V, _), Pairs), memberchk_eq(V, Vars),
+    \+ ( member(Direct, Args), Direct == V ), !.
+
+resolve_inferred_field_checks(none, _, Goals, Goals) :- !.
+resolve_inferred_field_checks(_, _, Goals, Goals) :-
+    \+ ( sub_term(Check, Goals), compound(Check),
+         functor(Check, '$inferred_field_check', 3) ), !.
+resolve_inferred_field_checks(assume(Pairs), Args, Goals0, Goals) :-
+    ( nb_current('$assump_taint', Taints) -> true ; Taints = [] ),
+    inferred_clause_arg_types(Pairs, Taints, Args, Types),
+    exclude(assumption_exported(Args, Types), Pairs, Lost),
+    maplist(resolve_field_goal(Lost), Goals0, Goals1),
+    exclude(==(true), Goals1, Goals).
+
+assumption_exported(Args, Types, a(V, _)) :-
+    nth0(I, Args, Arg), nth0(I, Types, Type),
+    pattern_exports_var(Arg, Type, V), !.
+
+pattern_exports_var(Arg, Type, V) :-
+    nonvar(Type), \+ wildcard_type(Type),
+    ( var(Arg) -> Arg == V
+    ; is_list(Arg), tagged_tuple_type(Type, Tag, FieldTypes), Arg = [Tag|Fields]
+      -> nth0(I, Fields, Field), nth0(I, FieldTypes, FieldType),
+         pattern_exports_var(Field, FieldType, V)
+    ; is_list(Arg), is_list(Type), same_length(Arg, Type)
+      -> nth0(I, Arg, Field), nth0(I, Type, FieldType),
+         pattern_exports_var(Field, FieldType, V)
+    ).
+
+resolve_field_goal(Lost, Goal0, Goal) :-
+    ( var(Goal0) -> Goal = Goal0
+    ; Goal0 = '$inferred_field_check'(Fun, Value, Type)
+      -> ( field_check_without_assumptions(Value, Type, Lost)
+           -> oracle_arg_check(Value, Type, Checks)
+         ; type_guard(Fun, Value, Type, Checks) ),
+         goals_list_to_conj(Checks, Goal)
+    ; compound(Goal0)
+      -> compound_name_arguments(Goal0, F, Args0),
+         maplist(resolve_field_goal(Lost), Args0, Args),
+         ( F == ',', Args = [true, Right] -> Goal = Right
+         ; F == ',', Args = [Left, true] -> Goal = Left
+         ; compound_name_arguments(Goal, F, Args) )
+    ; Goal = Goal0 ).
+
+%Recheck a copy with only lost assumptions removed. Merely mentioning an
+%unused wildcard field is not a dependency; aggregate and union checks can
+%also remain proven without every variable in the value carrying a type.
+field_check_without_assumptions(_, _, []) :- !.
+field_check_without_assumptions(Value, Type, Lost) :-
+    term_variables(Value, Vars),
+    ( member(a(V, _), Lost), memberchk_eq(V, Vars)
+      -> copy_term(Value-Type-Lost, CopyValue-CopyType-CopyLost),
+         maplist(clear_field_assumption, CopyLost),
+         arg_statically_ok(CopyValue, CopyType)
+    ; arg_statically_ok(Value, Type) ).
+
+clear_field_assumption(a(V, _)) :- ( var(V) -> del_attr(V, tknown) ; true ).
 
 %Clauses of the same function are joined position-wise; disagreement widens:
 merge_inferred(F, ATs, OT) :- length(ATs, N),
