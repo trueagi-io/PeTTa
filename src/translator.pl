@@ -20,7 +20,8 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                ( ConstrainArgs -> maplist(constrain_args, Args0, Args1, GoalsA),
                                                                   flatten(GoalsA,GoalsPrefix)
                                                                 ; Args1 = Args0, GoalsPrefix = [] ),
-                                               ( declared_output_type(F, 'Atom')
+                                               length(Args0, SourceArity),
+                                               ( declared_output_type(F, SourceArity, 'Atom')
                                                  -> GoalsBody = [],
                                                     ExpOut = BodyExpr
                                                   ; translate_expr(BodyExpr, GoalsBody, ExpOut) ),
@@ -474,12 +475,15 @@ next_lambda_name(Name) :- flag(lambda_counter, Prev, Prev + 1),
                             -> next_lambda_name(Name)
                             ; Name = Candidate ).
 
-declared_output_type(F, OutType) :- atom(F),
-                                    nonvar(OutType),
-                                    catch(match('&self', [':', F, TypeChain], TypeChain, TypeChain), _, fail),
-                                    TypeChain = [->|Types],
-                                    append(_, [DeclaredOutType], Types),
-                                    DeclaredOutType == OutType.
+% Select a declaration by name and source arity without binding wildcard rows.
+declared_output_type(F, Arity, OutType) :-
+    atom(F), nonvar(OutType), current_predicate('&self'/3),
+    clause('&self'(':', F, _), true, Ref),
+    % The indexed lookup may bind a wildcard; inspect the original row by ref.
+    clause('&self'(Colon, Target, Type), true, Ref),
+    Colon == (:), Target == F, is_list(Type), Type = [Arrow|Types], Arrow == (->),
+    TypeCount is Arity + 1, length(Types, TypeCount),
+    last(Types, DeclaredOut), DeclaredOut == OutType.
 
 %The key of a case with an Empty case runs once, and Empty only if the key yields no value. Soft-cut does exactly
 %this, but would make a cut inside the key local to it; so a key containing a cut instead records in a fresh
