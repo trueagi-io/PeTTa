@@ -2,7 +2,6 @@
 
 swipl -q -s tests/test_parser_swrite.pl -g run_tests -t halt || exit 1
 swipl -q -s tests/test_det_folds.pl -g "run_tests(det_folds)" -t halt || exit 1
-sh tests/test_he_assert.sh || exit 1
 
 # strict_* and fail_strict_* examples run with the --strict typechecking flag:
 mode_arg_for_test() {
@@ -43,7 +42,7 @@ run_test() {
     fi
 }
 
-# fail_* examples must be rejected at compile time with a type/determinism error:
+# fail_* examples must exit nonzero with a type/determinism error or assertion failure:
 run_expected_fail_test() {
     f="$1"
     mode_arg=$(mode_arg_for_test "$f")
@@ -55,10 +54,10 @@ run_expected_fail_test() {
         echo "Expected non-zero exit status, got success"
         return 1
     fi
-    echo "$output" | grep -E -q "Type mismatch|Type conflict|Determinism check failed|Conflicting determinism declarations|Deterministic function .* overlapping clauses|Deterministic function .* is not exhaustive|Strict mode rejected residual runtime type goal|Strict mode cannot express the unresolved nominal intersection|SpaceOf declaration .* rejects existing row|Strict mode requires a declared or inferable type|No matching typed overload|Declared output type variable|Declared parametric parameter|Arrows are prefix|--strict-det requires|Effect-polymorphic declaration|Effect variable|car-atom expects a non-empty expression|Syntax error|is unbound: a -\[.*\]-> function requires bound arguments|is not a proper list: its -\[.*\]-> proof requires a bound proper list"
+    echo "$output" | grep -E -q "Assertion failed:|Type mismatch|Type conflict|Determinism check failed|Conflicting determinism declarations|Deterministic function .* overlapping clauses|Deterministic function .* is not exhaustive|Strict mode rejected residual runtime type goal|Strict mode cannot express the unresolved nominal intersection|SpaceOf declaration .* rejects existing row|Strict mode requires a declared or inferable type|No matching typed overload|Declared output type variable|Declared parametric parameter|Arrows are prefix|--strict-det requires|Effect-polymorphic declaration|Effect variable|car-atom expects a non-empty expression|Syntax error|is unbound: a -\[.*\]-> function requires bound arguments|is not a proper list: its -\[.*\]-> proof requires a bound proper list"
     if [ $? -ne 0 ]; then
         echo "FAILURE in $f:"
-        echo "Expected type error output"
+        echo "Expected type error or assertion failure output"
         echo "$output"
         return 1
     fi
