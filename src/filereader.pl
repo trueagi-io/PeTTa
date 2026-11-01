@@ -121,7 +121,7 @@ precache_pending_bodies(File, ParsedForms) :-
     forall(( member(parsed(function, _, _, Term), ParsedForms),
              Term = [=, [F|Args], Body], atom(F) ),
            ( length(Args, N),
-             assertz(pending_clause_body(File, F, N, Body)) )).
+             assertz(pending_clause_body(File, F, N, Args-Body)) )).
 
 %First pass to convert MeTTa to Prolog Terms and register functions:
 parse_form(form(S, L), parsed(T, S, L, Term)) :- sread(S, Term),

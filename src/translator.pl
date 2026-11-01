@@ -81,7 +81,11 @@ translate_clause_core(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                ( GoalsPrefix == [] -> HeadForm = clean
                                                ; HeadForm = head_goals ),
                                                ( atom(F), nb_current(F, Prev) -> true ; Prev = [] ),
-                                               nb_setval(F, [fun_meta(Args1, BodyExpr, HeadForm) | Prev]),
+                                               %Retain source patterns for result-mode selection after
+                                               %constrain_args has replaced functional heads by values:
+                                               %Specialization must not bind variables in this snapshot.
+                                               copy_term_nat(Args0, SourceArgs0),
+                                               nb_setval(F, [fun_meta(Args1, BodyExpr, source(HeadForm, SourceArgs0)) | Prev]),
                                                clause_param_types(F, Args1, DeclOut),
                                                %Snapshot the declared arg positions that stay bare type variables after
                                                %head binding; checked below to enforce their claimed universality:
@@ -105,7 +109,7 @@ translate_clause_core(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                det_boundness_checks(F, Args1, DetChecks),
                                                begin_clause_inference(F, Args1, Assume, SavedInf),
                                                with_compiling_clause(F, Args1, BodyExpr,
-                                                                     translate_declared_body(F, DeclOut, BodyExpr, GoalsBody, ExpOut)),
+                                                                     translate_declared_body(F, Args0, DeclOut, BodyExpr, GoalsBody, ExpOut)),
                                                %A body that forced a declared parametric parameter to a concrete type
                                                %broke the universality its declaration claims (skip for specialized copies):
                                                ( ConstrainArgs == false -> true
@@ -325,13 +329,13 @@ translate_expr_to_conj(Input, Expectation, Conj, Out) :-
 %%% The expectation follows result positions through if/case, match and
 %%% let/let*, and no farther. Tagged structural types keep the ordinary
 %%% bottom-up constructor check.
-%A function declared to return Atom returns its body as source data:
-translate_declared_body(F, out('Atom', _), Expr, [], Expr) :-
-        declared_output_type(F, 'Atom'), !.
-translate_declared_body(_, out(OT, _), Expr, Goals, Out) :-
+%Plain Atom results preserve source data; effect arrows evaluate their bodies.
+translate_declared_body(F, Args, _, Expr, [], Expr) :-
+        clause_plain_atom_output(F, Args), !.
+translate_declared_body(_, _, out(OT, _), Expr, Goals, Out) :-
         contextual_expected_type(OT), !,
         translate_expr(Expr, expected(OT), Goals, Out).
-translate_declared_body(_, _, Expr, Goals, Out) :-
+translate_declared_body(_, _, _, Expr, Goals, Out) :-
         translate_expr(Expr, none, Goals, Out).
 
 contextual_product_type(T) :- nonvar(T), is_list(T),
@@ -1562,10 +1566,3 @@ next_lambda_name(Name) :- flag(lambda_counter, Prev, Prev + 1),
                           ( ( fun(Candidate) ; current_predicate(Candidate/_) )
                             -> next_lambda_name(Name)
                             ; Name = Candidate ).
-
-declared_output_type(F, OutType) :- atom(F),
-									nonvar(OutType),
-									catch(match('&self', [':', F, TypeChain], TypeChain, TypeChain), _, fail),
-									TypeChain = [->|Types],
-									append(_, [DeclaredOutType], Types),
-									DeclaredOutType == OutType.
