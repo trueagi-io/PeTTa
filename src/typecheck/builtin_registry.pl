@@ -446,5 +446,6 @@ validate_builtin_implementation_coverage :-
 metta_source_predicate(File, F, A) :-
     source_file(user:H0, File),
     functor(H0, F, A),
+    \+ sub_atom(F, 0, _, _, '__aux_'),
     functor(H, F, A),
     catch(( clause(user:H, _, Ref), clause_property(Ref, file(File)) ), _, fail).
