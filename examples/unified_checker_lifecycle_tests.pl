@@ -97,7 +97,7 @@ test(late_prolog_callable_recompiles_data_consumer,
     assertion(BeforeRegistration == [['ucl-late-prolog', true]]),
     assertion(( user:compiled_deps(Ref, 'ucl-late-consumer'/_, _, Deps),
                 clause(_, _, Ref),
-                memberchk(late_call('ucl-late-prolog'/1), Deps) )),
+                memberchk(late_symbol('ucl-late-prolog'), Deps) )),
     setup_call_cleanup(
         assertz(user:'ucl-late-prolog'(true, true), ImplementationRef),
         ( user:import_prolog_function('ucl-late-prolog', Imported),

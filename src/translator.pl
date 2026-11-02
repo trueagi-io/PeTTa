@@ -9,6 +9,7 @@ constrain_args([F, A, B], Out, Goals) :- nonvar(F),
                                          constrain_args(B, B1, G2),
                                          Out = [A1|B1],
                                          append(G1, G2, Goals), !.
+constrain_args([Q, X], [Q, X], []) :- Q == quote, !.
 constrain_args([C|Fields], Out, Goals) :- erased_constructor(C, Fields), !,
                                           maplist(constrain_args, Fields, Out, NestedGoalsList),
                                           flatten(NestedGoalsList, Goals).
@@ -28,11 +29,12 @@ functional_pattern_application([F|Args], F, Args) :-
     is_list(Args).
 
 %`data` and `make-list` are erased constructors: (data A B) is the bare tuple
-%(A B), whose first field is never called. A pattern or an unevaluated
-%position (an Atom argument, a space row) spells that same tuple, so the
-%marker is dropped there too and the fields are left exactly as written.
-%Without this a (data $a $b) case pattern stays a literal three-element list
-%that no constructed value can ever match.
+%(A B), whose first field is never called. A pattern that destructures an
+%evaluated value (a case branch, a clause head, like a let pattern) spells
+%that same tuple, so the marker is dropped there too: a (data $a $b) case
+%pattern used to stay a literal three-element list that no constructed value
+%could match. Raw positions - space rows and match patterns, Atom arguments,
+%a quoted payload - keep the literal term, as before.
 erased_constructor(C, Fields) :-
     atom(C),
     ( builtin_codegen_symbol(C, explicit_data)
@@ -325,19 +327,32 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                             \+ cyclic_term(Out).
 
 %A statement's value is discarded, so it can only matter through its effects.
-%One headed by a symbol that is not a function builds inert data and does
-%nothing: a call to a helper that is missing, misspelled or not yet defined.
-%The head may still be defined or imported later in the load, which
-%recompiles this clause into a call, so the statement is only recorded here;
-%report_inert_statements/0 judges it once the outermost load is complete.
+%One that is pure data - a head that is not a function, applied to fields
+%that are themselves pure data - has none: usually a call to a helper that is
+%missing, misspelled or not yet defined. A field that evaluates (a call, a
+%special form) has effects, failure or bindings of its own, so the statement
+%is not judged. The head may still be defined or imported later in the load,
+%which recompiles this clause into a call, so the statement is only recorded
+%here; report_inert_statements/0 judges it once the outermost load completes.
 :- dynamic inert_statement/2.
 check_statement(Expr) :-
-    ( nonvar(Expr), Expr = [H|Args], atom(H), is_list(Args),
-      \+ fun(H), \+ translator_rule(H), \+ special_builtin_form(H, Args, _)
-      -> length(Args, N),
-         ( current_compiling_caller(F, Arity) -> Where = F/Arity ; Where = toplevel ),
-         ( inert_statement(H/N, Where) -> true ; assertz(inert_statement(H/N, Where)) )
+    ( inert_expression(Expr)
+      -> ( current_compiling_caller(F, Arity) -> Where = F/Arity ; Where = toplevel ),
+         copy_term_nat(Expr, Stored),
+         ( inert_statement(Stored, Where) -> true ; assertz(inert_statement(Stored, Where)) )
     ; true ).
+
+inert_expression(Expr) :- nonvar(Expr), Expr = [H|Args], atom(H), is_list(Args),
+                          inert_head(H, Args), maplist(inert_field, Args).
+
+inert_head(H, Args) :- \+ fun(H), \+ translator_rule(H), \+ special_builtin_form(H, Args, _).
+
+inert_field(X) :- ( var(X) ; atomic(X) ), !.
+inert_field([H|Args]) :- is_list(Args),
+                         ( var(H) -> fail
+                         ; atom(H) -> inert_head(H, Args)
+                         ; inert_field(H) ),
+                         maplist(inert_field, Args).
 
 %A let binder that occurs nowhere else in its clause discards the value; one
 %shared with the head or a later use is an output or a test.
@@ -347,12 +362,13 @@ singleton_binder(Pat) :-
     findall(x, ( sub_term(V, Params-Body), V == Pat ), [_]).
 
 report_inert_statements :-
-    findall(H/N-Where, ( retract(inert_statement(H/N, Where)), \+ fun(H) ), Found),
+    findall(H/N-Where, ( retract(inert_statement(Expr, Where)), inert_expression(Expr),
+                         Expr = [H|Args], length(Args, N) ), Found),
     sort(Found, Inert),
     ( Inert == [] -> true
     ; strict_mode(true) -> throw(error(inert_statements(Inert), typecheck))
     ; forall(member(Head-Where, Inert),
-             format(user_error, "Warning: inert statement in ~w: ~w is not a function, so the discarded expression only builds data~n", [Where, Head])) ).
+             format(user_error, "Warning: discarded statement in ~w is pure data: ~w is not a function (missing or misspelled helper?)~n", [Where, Head])) ).
 
 %Calling reduce from aggregate function foldall needs this argument wrapping
 agg_reduce(AF, Acc, Val, NewAcc) :- reduce([AF, Acc, Val], NewAcc).
@@ -490,6 +506,13 @@ rewrite_streamops([intersection, [superpose|A], [superpose|B]],
 rewrite_streamops([subtraction, [superpose|A], [superpose|B]],
                   [call, [superpose, ['subtraction-atom', [collapse, [superpose|A]],
                                                           [collapse, [superpose|B]]]]]).
+%and/or short-circuit by lowering to and-then/or-else, the forms the checker
+%models as branches, so a binding made only in a skipped right operand is
+%never assumed afterwards (short_circuit_source/2 in relational_ir, which
+%lowers the same source the same way).
+rewrite_streamops([Op, A, B], Rewritten) :-
+    short_circuit_source([Op, A, B], Rewritten),
+    builtin_untouched(Op), !.
 rewrite_streamops(X, X).
 
 equality_case_shape(T, _) :-
@@ -568,18 +591,13 @@ bind_typed_space_pattern(Space, Pattern) :-
 elaborate_typed_space_pattern(Space, Pattern, RuntimePattern, Goals) :-
     atom(Space), declared_space_type(Space, _), !,
     constrain_typed_space_args(Pattern, RuntimePattern, Goals).
-elaborate_typed_space_pattern(_, Pattern, RuntimePattern, []) :-
-    erase_explicit_data(Pattern, RuntimePattern).
+elaborate_typed_space_pattern(_, Pattern, Pattern, []).
 
 %A schema-backed functional pattern is an exact-one inverse constraint.
 %Registered nondet functions can also appear as literal payload tags, and
 %executing them would turn inspection into enumeration, so only a unique
 %declared det arrow elaborates.
 constrain_typed_space_args(X, X, []) :- (var(X); atomic(X)), !.
-constrain_typed_space_args([C|Fields], Out, Goals) :-
-    erased_constructor(C, Fields), !,
-    maplist(constrain_typed_space_args, Fields, Out, NestedGoalsList),
-    flatten(NestedGoalsList, Goals).
 constrain_typed_space_args([F, A, B], Out, Goals) :-
     nonvar(F), F == cons, !,
     constrain_typed_space_args(A, A1, G1),
@@ -927,8 +945,7 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                                              ; Out = partial(F, FreeVars) ),
                                            Goals = GsH
         %--- Spaces ---:
-        ; special_builtin_form(HV, T, typed_space_update), T = [Space, Atom0] ->
-                                                                   erase_explicit_data(Atom0, Atom),
+        ; special_builtin_form(HV, T, typed_space_update), T = [Space, Atom] ->
                                                                    check_typed_space_value(Space, Atom),
                                                                    translate_expr(Space, G1, S),
                                                                    typed_space_update_goal(HV, Space, Atom, Update),
@@ -937,9 +954,8 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                                                    append([GsH,G1,[Goal]], Goals)
         ; special_builtin_form(HV, T, typed_space_match),
           T = [Space, Pattern, Body] -> translate_expr(Space, G1, S),
-                                                     erase_explicit_data(Pattern, ErasedPattern),
-                                                     type_match_pattern(ErasedPattern),
-                                                     bind_typed_space_pattern(Space, ErasedPattern),
+                                                     type_match_pattern(Pattern),
+                                                     bind_typed_space_pattern(Space, Pattern),
                                                      elaborate_typed_space_pattern(
                                                          Space, Pattern,
                                                          RuntimePattern,
@@ -1043,10 +1059,6 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
             -> set_out_type(Out, ['|', VT, ['Error', '%Undefined%', '%Undefined%']])
              ; true ),
           append(Inner, [Goal], Goals)
-        %--- and/or evaluate left to right and stop at the deciding operand: ---
-        ; atom(HV), T = [A, B], builtin_codegen_hook(HV, 2, short_circuit_bool), builtin_untouched(HV)
-          -> translate_short_circuit(HV, A, B, Goal, Out),
-             append(GsH, [Goal], Goals)
         %--- Automatic 'smart' dispatch, translator deciding when to create a predicate call, data list, or dynamic dispatch: ---
         %Known function or closure => type-directed call:
         ; ( atom(HV), fun(HV) -> Fun = HV, Bound = []
@@ -1087,26 +1099,6 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
             -> Out = [HV|AVs],
                Goals = Inner
           ; append(Inner, [reduce([HV|AVs], Out)], Goals) ) ).
-
-%`and` stops at a False left operand and `or` at a True one, so the right
-%operand is evaluated only when the left one leaves the result open: once
-%per left result, in order. An unbound operand still enumerates both Bools,
-%as the relational and/3 and or/3 do, and a non-Bool operand fails.
-translate_short_circuit(Op, A, B, Goal, Out) :-
-    short_circuit_decider(Op, Decided),
-    translate_expr_to_conj(A, ConjA, Av),
-    translate_expr_to_conj(B, ConjB, Bv),
-    check_call_arg(declared, Op, Av, 'Bool', GsA),
-    check_call_arg(declared, Op, Bv, 'Bool', GsB),
-    goals_list_to_conj(GsA, GA),
-    goals_list_to_conj(GsB, GB),
-    set_out_type(Out, 'Bool'),
-    Goal = ( ConjA, GA, bool(Av),
-             ( Av == Decided -> Out = Decided
-             ; ConjB, GB, bool(Bv), Out = Bv ) ).
-
-short_circuit_decider(and, false).
-short_circuit_decider(or, true).
 
 %Values of these types can never dispatch as functions in reduce/2:
 nonfunction_type(K) :- nonvar(K), ( primitive_type(K)
@@ -1380,7 +1372,7 @@ expression_arg_value(A, AV) :- ( maybe_closure_expr(A),
                                          callable_expression_value(AVExpr) ),
                                        error(_, typecheck), fail)
                                  -> AV = AVExpr
-                                  ; erase_explicit_data(A, AV) ).
+                                  ; AV = A ).
 
 %An underapplied call to a known function (would compile to partial(...)):
 maybe_closure_expr([F|Args]) :- atom(F), fun(F), is_list(Args),

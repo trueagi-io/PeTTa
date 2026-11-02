@@ -21,11 +21,14 @@
 (= (inc $x) (+ $x 1))
 !(test (case (data inc 5) (((data inc $v) (literal inc $v)) ($_ called))) (literal inc 5))
 
-; Space rows and match patterns are unevaluated source, and erase it too:
+; Raw positions keep the literal term, as before: a space row, a match
+; pattern and an Atom argument are source, not constructed values.
 !(bind! &rows (new-space))
-!(add-atom &rows (row (data 1 2)))
-!(test (match &rows (row (data $a $b)) (matched $a $b)) (matched 1 2))
-!(test (match &rows (row $r) $r) (1 2))
+!(add-atom &rows (data 1 2))
+!(test (match &rows $r $r) (quote (data 1 2)))
+!(test (collapse (match &rows (data $a $b) (found $a $b))) ((found 1 2)))
 
-; A quoted expression keeps its literal `data` head:
+; A quoted payload is literal too, in a pattern as in a value:
 !(test (case (quote (data 1 2)) (((data $a $b) erased) ($_ quoted))) quoted)
+!(test (case (quote (quote (data 1 2))) (((quote (data $a $b)) (matched $a $b)) ($_ fallback)))
+       (matched 1 2))

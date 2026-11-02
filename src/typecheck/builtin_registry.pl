@@ -114,12 +114,11 @@ builtin_spec('#\\='/2, implementation(metta), typing(untyped), evaluation(eager)
 
 % Boolean generators. Their worst case enumerates unbound Bool operands; the
 % named argument rule upgrades calls whose operands are manifest booleans.
-% A direct and/or call short-circuits (translate_short_circuit/5): it yields at
-% most as many results as the eager call whenever the eager call has any, so
-% the eager cardinality stays a sound bound. As a value (a closure argument)
-% and/3 and or/3 receive operands that are already evaluated.
-builtin_spec(and/2, implementation(metta), typing(signature(unspecified, ['Bool','Bool'], 'Bool')), evaluation(eager), cardinality(argument_sensitive(manifest_booleans, nondet)), lowering(special(short_circuit_bool))).
-builtin_spec(or/2, implementation(metta), typing(signature(unspecified, ['Bool','Bool'], 'Bool')), evaluation(eager), cardinality(argument_sensitive(manifest_booleans, nondet)), lowering(special(short_circuit_bool))).
+% A direct and/or call is lowered to and-then/or-else (short_circuit_source/2);
+% these entries describe the eager call that remains: (and X True), and/3 and
+% or/3 as closure values, and a redefined builtin.
+builtin_spec(and/2, implementation(metta), typing(signature(unspecified, ['Bool','Bool'], 'Bool')), evaluation(eager), cardinality(argument_sensitive(manifest_booleans, nondet)), lowering(generic)).
+builtin_spec(or/2, implementation(metta), typing(signature(unspecified, ['Bool','Bool'], 'Bool')), evaluation(eager), cardinality(argument_sensitive(manifest_booleans, nondet)), lowering(generic)).
 builtin_spec(not/1, implementation(metta), typing(signature(unspecified, ['Bool'], 'Bool')), evaluation(eager), cardinality(argument_sensitive(manifest_booleans, nondet)), lowering(generic)).
 builtin_spec(xor/2, implementation(metta), typing(signature(unspecified, ['Bool','Bool'], 'Bool')), evaluation(eager), cardinality(argument_sensitive(manifest_booleans, nondet)), lowering(generic)).
 builtin_spec(implies/2, implementation(metta), typing(signature(unspecified, ['Bool','Bool'], 'Bool')), evaluation(eager), cardinality(argument_sensitive(manifest_booleans, nondet)), lowering(generic)).

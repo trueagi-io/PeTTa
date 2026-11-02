@@ -182,9 +182,9 @@ mutation_consumer_file_relevant(_, _).
 %any other clause change invalidates everything that read its function.
 mutation_candidate_dependency(clause_changed(F/N, Mode), D) :-
     ( Mode == prevalidated
-      -> member(D, [late_call(F/N), late_symbol(F)])
+      -> D = late_symbol(F)
     ; member(D, [effect(F/N), decl(F/N), clause_set(F/N), output_cert(_, F/N),
-                 late_call(F/N), late_symbol(F)]) ).
+                 late_symbol(F)]) ).
 mutation_candidate_dependency(declaration_changed(F/N, _), D) :-
     member(D, [effect(F/N), decl(F/N), clause_set(F/N)]).
 mutation_candidate_dependency(declaration_changed(Kind, Name, _),
@@ -197,7 +197,6 @@ mutation_candidate_dependency(declaration_changed(newtype, Name, added),
                               ctor_set(Name)).
 mutation_candidate_dependency(constructor_set_changed(Type, _), ctor_set(Type)).
 mutation_candidate_dependency(callable_changed(F), late_symbol(F)).
-mutation_candidate_dependency(callable_changed(F), late_call(F/_)).
 
 recompile_affected_functions([], _, State, State, []).
 recompile_affected_functions([F|Fs], Event,

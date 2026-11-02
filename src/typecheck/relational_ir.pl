@@ -1,5 +1,7 @@
 :- module(relational_ir,
           [ lower_expr/4,
+            short_circuit_source/2,
+            short_circuit_branch/2,
             lower_expr_with_origins/5,
             lower_clause_with_origins/5,
             ir_result/2,
@@ -140,6 +142,14 @@ lower_expr_core([Or, A, B], sequence([AIR,
     lower_expr_(A, AIR, AId, S1, S2),
     literal_node(true, ThenIR, S2, S3),
     lower_expr_(B, ElseIR, _, S3, S).
+
+% A direct and/or call short-circuits; it is lowered as a branch when the
+% skipped right operand could leave a binding unmade (short_circuit_branch/2),
+% unless the program redefined the builtin.
+lower_expr_core([Op, A, B], IR, Result, S0, S) :-
+    short_circuit_branch([Op, A, B], Rewritten),
+    catch(user:builtin_untouched(Op), _, true), !,
+    lower_expr_(Rewritten, IR, Result, S0, S).
 
 % First-match case and pattern bindings.
 lower_expr_core([Case, Value, Pairs], sequence([ValueIR, MatchIR], Result),
@@ -282,6 +292,12 @@ lower_pattern([Cons, Head, Tail], construct(Id, pattern_cons, [HeadIR, TailIR]),
     fresh_id(Id, S0, S1),
     lower_pattern(Head, HeadIR, _, S1, S2),
     lower_pattern(Tail, TailIR, _, S2, S).
+% A quoted payload is literal structure: `data` inside it is not erased.
+lower_pattern([Quote, Payload], construct(Id, pattern(Quote), [PayloadIR]),
+              Id, S0, S) :-
+    Quote == quote, !,
+    fresh_id(Id, S0, S1),
+    lower_literal_pattern(Payload, PayloadIR, _, S1, S).
 % The erased constructors `data` and `make-list` spell the bare tuple of their
 % fields in a pattern as in an expression: a positional pattern, untagged.
 lower_pattern([Erased|Fields],
@@ -306,6 +322,45 @@ lower_pattern(Source, opaque(Id, pattern_compound(Name), Children), Id, S0, S) :
     compound_name_arguments(Source, Name, Args),
     fresh_id(Id, S0, S1),
     lower_patterns(Args, Children, _, S1, S).
+
+% (and A B) is (and-then A B) and (or A B) is (or-else A B): the right operand
+% runs only when the left one leaves the result open. A variable operand is
+% wrapped in the eager (and $x True), which keeps the relational reading of
+% and/or: an unbound operand enumerates both Bools. A literal True right
+% operand is the eager form itself.
+short_circuit_source([Op, A, B], [Form, A1, B1]) :-
+    atom(Op), short_circuit_form(Op, Form), B \== true,
+    short_circuit_operand(A, A1),
+    short_circuit_operand(B, B1).
+
+% The checkers model the short circuit as a branch when skipping the right
+% operand can matter for bindings: when it has a variable that the always
+% evaluated left operand does not. Otherwise the eager reading binds nothing
+% more, and its precise and/or edge refinement stays sound.
+short_circuit_branch([Op, A, B], Rewritten) :-
+    short_circuit_source([Op, A, B], Rewritten),
+    term_variables(A, AVs),
+    term_variables(B, BVs),
+    member(V, BVs), \+ ( member(W, AVs), W == V ), !.
+
+short_circuit_operand(X, [and, X, true]) :- var(X), !.
+short_circuit_operand(X, X).
+
+short_circuit_form(and, 'and-then').
+short_circuit_form(or, 'or-else').
+
+lower_literal_pattern(Source, IR, Id, S0, S) :-
+    is_list(Source), Source \== [], !,
+    fresh_id(Id, S0, S1),
+    lower_literal_patterns(Source, Children, S1, S),
+    IR = construct(Id, positional_pattern, Children).
+lower_literal_pattern(Source, IR, Id, S0, S) :-
+    lower_pattern(Source, IR, Id, S0, S).
+
+lower_literal_patterns([], [], S, S).
+lower_literal_patterns([P|Ps], [IR|IRs], S0, S) :-
+    lower_literal_pattern(P, IR, _, S0, S1),
+    lower_literal_patterns(Ps, IRs, S1, S).
 
 pattern_variable_role(Var, state(_, Env), existing) :-
     env_var_id(Env, Var, _), !.

@@ -237,13 +237,12 @@ unbound variable or later holds a function:
 This is the unambiguous form for positional tuples with a computed head.
 Existing parenthesized forms retain their call-or-data behavior.
 
-`data` is erased in every position, so the spelling that builds a tuple also
-matches it. In a pattern (a `case` branch, a clause head, a `let` or `match`
-pattern) `(data $a $b)` is the pattern `($a $b)`, and its first field is
-never a functional pattern. In an unevaluated position (an `Atom` argument,
-an `add-atom`/`remove-atom` row) `(data a b)` is the tuple `(a b)` with its
-fields left as written. Only `(quote (data ...))` keeps a literal `data`
-head. See `examples/data_pattern.metta`.
+A pattern that destructures an evaluated value - a `case` branch, a clause
+head, a `let` pattern - erases `data` the same way, so the spelling that
+builds a tuple also matches it: `(data $a $b)` is the pattern `($a $b)`, and
+its first field is never a functional pattern. Raw positions keep the literal
+term as before: space rows and `match` patterns, `Atom` arguments, and any
+quoted payload. See `examples/data_pattern.metta`.
 
 Because `list` is already used as data by an existing example,
 `(make-list E1 E2 ...)` is the explicit runtime-list constructor. Under an
@@ -788,13 +787,17 @@ Notes and caveats:
   declared and defined after their callers within the same file. Across files,
   a caller compiled before its callee exists builds data; the callee's later
   definition, or a later `import_prolog_function`, recompiles that caller into
-  a call, whether or not the callee was declared (`examples/late_call_recompile.metta`).
+  a call, at any arity, whether or not the callee was declared
+  (`examples/late_call_recompile.metta`). The caller's whole clause set is
+  recompiled, so a late definition costs a second compile of its callers.
   Forms that ran in between saw the data. A statement whose value is discarded
   (a non-final `progn` element, a later `prog1` element, a `let` binder used
   nowhere else) and whose head is still not a function when the outermost load
-  completes only builds inert data: usually a missing or misspelled helper.
-  It is a warning, and an error under `--strict`
-  (`examples/fail_strict_inert_statement.metta`). Value declarations like `(: a A)` stay
+  completes, and whose fields are pure data too, is reported: usually a
+  missing or misspelled helper. A statement with an evaluated field, such as
+  `(row (println! x))`, is not judged. It is a warning, and an error under
+  `--strict` (`examples/fail_strict_inert_statement.metta`,
+  `examples/strict_inert_statement_effects.metta`). Value declarations like `(: a A)` stay
   order-sensitive (they are knowledge atoms). A function declaration arriving
   after its function was already compiled in an earlier file warns and
   recompiles that function's clauses against it — see "Knowledge that arrives
@@ -804,12 +807,16 @@ Notes and caveats:
   underapplied closures like `(+ 1)`. A Prolog native imported with
   `import_prolog_function` follows the same rule as a MeTTa function with the
   same declaration (`examples/native_arguments.metta`).
-- `and` and `or` short-circuit: they evaluate the left operand, and the right
-  one only for a left result that does not decide the result (`True` for
-  `and`, `False` for `or`), once per left result, in order. So `(and False X)`
-  never evaluates `X`, and a failing `X` no longer removes the result. An
-  unbound operand still enumerates both Bools. As values passed to a
-  higher-order function they receive evaluated operands, as before
+- `and` and `or` short-circuit: a direct `(and A B)` compiles as
+  `(and-then A B)` and `(or A B)` as `(or-else A B)`, so the right operand
+  runs only for a left result that does not decide the result, once per left
+  result, in order. A variable operand passes through `(and $x True)`, so an
+  unbound operand still enumerates both Bools. When the right operand has a
+  variable the left one lacks, the determinism and unified checkers model the
+  same branch, so a binding made only in a skipped operand is never assumed
+  afterwards (`examples/fail_strictdet_short_circuit_binding.metta`); otherwise
+  skipping it binds nothing and they keep the eager reading. A redefined
+  `and`/`or`, and `and`/`or` passed as values, stay eager
   (`examples/and_or_short_circuit.metta`).
 - Interpreters that call `eval` per iteration pay for a (typed) translation
   each time — that pattern was always slow and types do not change it.
