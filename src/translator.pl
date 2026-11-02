@@ -9,6 +9,10 @@ constrain_args([F, A, B], Out, Goals) :- nonvar(F),
                                          constrain_args(B, B1, G2),
                                          Out = [A1|B1],
                                          append(G1, G2, Goals), !.
+constrain_args([Q, X], [Q, X], []) :- Q == quote, !.
+constrain_args([C|Fields], Out, Goals) :- erased_constructor(C, Fields), !,
+                                          maplist(constrain_args, Fields, Out, NestedGoalsList),
+                                          flatten(NestedGoalsList, Goals).
 constrain_args(Pattern, Var, Goals) :-
                                         functional_pattern_application(Pattern, F, Args), !,
                                         translate_expr([F|Args], GoalsExpr, Var),
@@ -23,6 +27,25 @@ constrain_args(In, Out, Goals) :- maplist(constrain_args, In, Out, NestedGoalsLi
 functional_pattern_application([F|Args], F, Args) :-
     atom(F), F \== cons, fun(F),
     is_list(Args).
+
+%`data` and `make-list` are erased constructors: (data A B) is the bare tuple
+%(A B), whose first field is never called. A pattern that destructures an
+%evaluated value (a case branch, a clause head, like a let pattern) spells
+%that same tuple, so the marker is dropped there too: a (data $a $b) case
+%pattern used to stay a literal three-element list that no constructed value
+%could match. Raw positions - space rows and match patterns, Atom arguments,
+%a quoted payload - keep the literal term, as before.
+erased_constructor(C, Fields) :-
+    atom(C),
+    ( builtin_codegen_symbol(C, explicit_data)
+    ; builtin_codegen_symbol(C, explicit_list) ), !,
+    is_list(Fields).
+
+erase_explicit_data(X, X) :- ( var(X) ; atomic(X) ; \+ is_list(X) ), !.
+erase_explicit_data([Q, X], [Q, X]) :- Q == quote, !.
+erase_explicit_data([C|Fields], Out) :- erased_constructor(C, Fields), !,
+                                        maplist(erase_explicit_data, Fields, Out).
+erase_explicit_data(L, Out) :- maplist(erase_explicit_data, L, Out).
 
 %Flatten (= Head Body) MeTTa function into a Prolog clause. Dependencies are
 %those observed by all nested analyses; assertion sites attach them to the real
@@ -234,9 +257,11 @@ stage_function_clauses(F, [Ref-Term|Us],
 swap_staged_function(F, Us, Staged) :-
     forall(member(Ref-_, Us),
            ( clause(_, _, Ref) -> erase(Ref) ; true )),
-    forall(member(Ref-_, Us),
+    forall(member(Ref-[=, [_|Args], _], Us),
            ( retractall(translated_from(Ref, _)),
-             forget_compiled_dependencies(Ref) )),
+             forget_compiled_dependencies(Ref),
+             length(Args, N),
+             erase_eta_closure(F, N) )),
     assert_staged_clauses(Staged),
     invalidate_specializations(F).
 
@@ -246,8 +271,42 @@ assert_staged_clauses([staged(_, Term, OriginFile, Clause, Dependencies)|Ss]) :-
     assertz(translated_from(NewRef, Term)),
     Term = [=, [G|SourceArgs], _],
     length(SourceArgs, N),
+    assert_eta_closure(Clause, N),
     record_compiled_dependencies(NewRef, G/N, OriginFile, Dependencies),
     assert_staged_clauses(Ss).
+
+%%% A clause whose body is a partial application is eta-expanded: the missing
+%%% arguments become extra head arguments, so F/N compiles above arity N+1.
+%%% A call at the source arity then returns the closure, as reduce/2 does for
+%%% any underapplied function. One closure serves all clauses of F/N: a
+%%% closure per clause would apply every clause once per closure.
+assert_eta_closure((Head :- _), N) :-
+    functor(Head, F, A),
+    ( A =:= N + 1 -> true
+    ; eta_closure(F, N, Closure),
+      ( eta_closure_ref(Closure, _) -> true ; assertz(Closure) ) ).
+
+erase_eta_closure(F, N) :-
+    eta_closure(F, N, Closure),
+    forall(eta_closure_ref(Closure, Ref), erase(Ref)).
+
+%The closure stays while some source clause of F/N still compiles above N+1:
+refresh_eta_closure(F, N) :-
+    erase_eta_closure(F, N),
+    ( translated_from(Ref, [=, [F|Args], _]), length(Args, N),
+      clause(Head, _, Ref), functor(Head, _, A), A > N + 1
+      -> eta_closure(F, N, Closure), assertz(Closure)
+    ; true ).
+
+eta_closure(F, N, Closure) :-
+    length(Vs, N),
+    append(Vs, [partial(F, Vs)], Args),
+    Closure =.. [F|Args].
+
+eta_closure_ref(Closure, Ref) :-
+    functor(Closure, F, A), functor(Head, F, A),
+    catch(clause(Head, true, Ref), error(_, _), fail),
+    Head =@= Closure.
 
 %Every compiled clause of F, in the order it was asserted (which is source
 %order - process_form/3 records translated_from/2 as it goes):
@@ -256,11 +315,6 @@ function_source_clauses(F, Us) :- findall(Ref-Term,
                                             Term = [=, Head, _], nonvar(Head), Head = [F0|_], F0 == F,
                                             clause(_, _, Ref) ),
                                           Us).
-
-%Record atoms compiled as plain symbol heads, so late function registrations can be flagged:
-:- dynamic symbol_head/1.
-note_symbol_head(HV) :- atom(HV), \+ symbol_head(HV), !, assertz(symbol_head(HV)).
-note_symbol_head(_).
 
 %Print compiled clause:
 maybe_print_compiled_clause(_, _, _) :- silent(true), !.
@@ -307,6 +361,50 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                           ; % --- Case 3: leave unevaluated ---
                             Out = [F|Args],
                             \+ cyclic_term(Out).
+
+%A statement's value is discarded, so it can only matter through its effects.
+%One that is pure data - a head that is not a function, applied to fields
+%that are themselves pure data - has none: usually a call to a helper that is
+%missing, misspelled or not yet defined. A field that evaluates (a call, a
+%special form) has effects, failure or bindings of its own, so the statement
+%is not judged. The head may still be defined or imported later in the load,
+%which recompiles this clause into a call, so the statement is only recorded
+%here; report_inert_statements/0 judges it once the outermost load completes.
+:- dynamic inert_statement/2.
+check_statement(Expr) :-
+    ( inert_expression(Expr)
+      -> ( current_compiling_caller(F, Arity) -> Where = F/Arity ; Where = toplevel ),
+         copy_term_nat(Expr, Stored),
+         ( inert_statement(Stored, Where) -> true ; assertz(inert_statement(Stored, Where)) )
+    ; true ).
+
+inert_expression(Expr) :- nonvar(Expr), Expr = [H|Args], atom(H), is_list(Args),
+                          inert_head(H, Args), maplist(inert_field, Args).
+
+inert_head(H, Args) :- \+ fun(H), \+ translator_rule(H), \+ special_builtin_form(H, Args, _).
+
+inert_field(X) :- ( var(X) ; atomic(X) ), !.
+inert_field([H|Args]) :- is_list(Args),
+                         ( var(H) -> fail
+                         ; atom(H) -> inert_head(H, Args)
+                         ; inert_field(H) ),
+                         maplist(inert_field, Args).
+
+%A let binder that occurs nowhere else in its clause discards the value; one
+%shared with the head or a later use is an output or a test.
+singleton_binder(Pat) :-
+    var(Pat),
+    nb_current('$compiling_clause', clause(_, Params, Body)),
+    findall(x, ( sub_term(V, Params-Body), V == Pat ), [_]).
+
+report_inert_statements :-
+    findall(H/N-Where, ( retract(inert_statement(Expr, Where)), inert_expression(Expr),
+                         Expr = [H|Args], length(Args, N) ), Found),
+    sort(Found, Inert),
+    ( Inert == [] -> true
+    ; strict_mode(true) -> throw(error(inert_statements(Inert), typecheck))
+    ; forall(member(Head-Where, Inert),
+             format(user_error, "Warning: discarded statement in ~w is pure data: ~w is not a function (missing or misspelled helper?)~n", [Where, Head])) ).
 
 %Calling reduce from aggregate function foldall needs this argument wrapping
 agg_reduce(AF, Acc, Val, NewAcc) :- reduce([AF, Acc, Val], NewAcc).
@@ -679,12 +777,15 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                         append(GsH, [transaction(Conj)], Goals)
         %--- Sequential execution ---:
         ; special_builtin_form(HV, T, progn), T = Exprs
-          -> translate_args(Exprs, GsList, Outs),
+          -> append(Statements, [_], Exprs),
+                                    maplist(check_statement, Statements),
+                                    translate_args(Exprs, GsList, Outs),
                                     append(GsH, GsList, Tmp),
                                     last(Outs, Out),
                                     Goals = Tmp
         ; special_builtin_form(HV, T, prog1), T = Exprs
           -> Exprs = [First|Rest],
+                                    maplist(check_statement, Rest),
                                     translate_expr(First, GsF, Out),
                                     translate_args(Rest, GsRest, _),
                                     append(GsH, GsF, Tmp1),
@@ -767,7 +868,8 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                           append(GsH, [(ConjA, GA, (Av == true -> Out = true ; (ConjB, GB, Out = Bv)))], Goals)
         %--- Unification constructs ---:
         ; special_builtin_form(HV, T, let_bind), T = [Pat, Val, In]
-          -> translate_expr(Pat, Gp, Pv),
+          -> ( singleton_binder(Pat) -> check_statement(Val) ; true ),
+                                                           translate_expr(Pat, Gp, Pv),
                                                            translate_let_value(Pat, Val, In, Gv, V),
                                                            note_candidates(Pv, V),        %the bound variable gets the value's type
                                                            bind_pattern_from(Pat, V),     %destructuring patterns type their fields
@@ -862,6 +964,7 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                            assertz(Clause, LambdaRef),
                                            assertz(translated_from(LambdaRef, IsolatedLambdaSource)),
                                            length(FullArgs, N),
+                                           assert_eta_closure(Clause, N),
                                            record_compiled_dependencies(LambdaRef, F/N, LambdaDependencies),
                                            format(atom(Label), "metta lambda (~w)", [F]),
                                            maybe_print_compiled_clause(Label, ['|->', Args, Body], Clause),
@@ -993,8 +1096,7 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
           -> translate_typed_call(Fun, Bound, T, GsH, Goals, Out)
         %Literals (numbers, strings, etc.), known non-function atom => data:
         ; ( atomic(HV), \+ atom(HV) ; atom(HV), \+ fun(HV) )
-          -> note_symbol_head(HV),
-             translate_args(T, GsT, AVs),
+          -> translate_args(T, GsT, AVs),
              append(GsH, GsT, Goals),
              Out = [HV|AVs]
         %Plain data list: evaluate inner fun-sublists
@@ -1485,14 +1587,15 @@ translate_case(Pairs, Kv, Expectation, Out, Goal, KGo) :-
         translate_case(Pairs, Kv, Expectation, Out, Goal, KGo, []).
 
 translate_case([[K,VExpr]|Rs], Kv, Expectation, Out, Goal, KGo, Prior) :-
+                                                      erase_explicit_data(K, KTyped),
                                                       ( case_scrutinee_value_type(Kv, KT)
-                                                        -> bind_pattern_typed(K, KT, Prior)
-                                                         ; ctor_pattern_field_types(K) ),
+                                                        -> bind_pattern_typed(KTyped, KT, Prior)
+                                                         ; ctor_pattern_field_types(KTyped) ),
                                                       translate_expr_to_conj(VExpr, Expectation, ConV, VOut),
                                                       constrain_args(K, Kc, Gc),
                                                       build_branch(ConV, VOut, Out, Then),
                                                       ( Rs == [] -> Goal = ((Kv = Kc) -> Then), KGi=[]
-                                                                  ; translate_case(Rs, Kv, Expectation, Out, Next, KGi, [K|Prior]),
+                                                                  ; translate_case(Rs, Kv, Expectation, Out, Next, KGi, [KTyped|Prior]),
                                                                     Goal = ((Kv = Kc) -> Then ; Next) ),
                                                       append([Gc,KGi], KGo).
 

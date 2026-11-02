@@ -282,6 +282,19 @@ lower_pattern([Cons, Head, Tail], construct(Id, pattern_cons, [HeadIR, TailIR]),
     fresh_id(Id, S0, S1),
     lower_pattern(Head, HeadIR, _, S1, S2),
     lower_pattern(Tail, TailIR, _, S2, S).
+% A quoted payload is literal structure: `data` inside it is not erased.
+lower_pattern([Quote, Payload], construct(Id, pattern(Quote), [PayloadIR]),
+              Id, S0, S) :-
+    Quote == quote, !,
+    fresh_id(Id, S0, S1),
+    lower_literal_pattern(Payload, PayloadIR, _, S1, S).
+% The erased constructors `data` and `make-list` spell the bare tuple of their
+% fields in a pattern as in an expression: a positional pattern, untagged.
+lower_pattern([Erased|Fields],
+              construct(Id, positional_pattern, Children), Id, S0, S) :-
+    ( Erased == data ; Erased == 'make-list' ), is_list(Fields), !,
+    fresh_id(Id, S0, S1),
+    lower_patterns(Fields, Children, _, S1, S).
 % A variable in the first position is a field binder, not a constructor tag.
 % Preserve every field of such a fixed-width positional pattern so matching
 % can use exact list-shape facts and later body occurrences share the same IDs.
@@ -299,6 +312,19 @@ lower_pattern(Source, opaque(Id, pattern_compound(Name), Children), Id, S0, S) :
     compound_name_arguments(Source, Name, Args),
     fresh_id(Id, S0, S1),
     lower_patterns(Args, Children, _, S1, S).
+
+lower_literal_pattern(Source, IR, Id, S0, S) :-
+    is_list(Source), Source \== [], !,
+    fresh_id(Id, S0, S1),
+    lower_literal_patterns(Source, Children, S1, S),
+    IR = construct(Id, positional_pattern, Children).
+lower_literal_pattern(Source, IR, Id, S0, S) :-
+    lower_pattern(Source, IR, Id, S0, S).
+
+lower_literal_patterns([], [], S, S).
+lower_literal_patterns([P|Ps], [IR|IRs], S0, S) :-
+    lower_literal_pattern(P, IR, _, S0, S1),
+    lower_literal_patterns(Ps, IRs, S1, S).
 
 pattern_variable_role(Var, state(_, Env), existing) :-
     env_var_id(Env, Var, _), !.

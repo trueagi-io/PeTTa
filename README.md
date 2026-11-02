@@ -237,6 +237,16 @@ unbound variable or later holds a function:
 This is the unambiguous form for positional tuples with a computed head.
 Existing parenthesized forms retain their call-or-data behavior.
 
+A pattern that destructures an evaluated value - a `case` branch, a clause
+head, a `let` pattern - erases `data` the same way, so the spelling that
+builds a tuple also matches it: `(data $a $b)` is the pattern `($a $b)`, and
+its first field is never a functional pattern. Raw positions keep the literal
+term as before: space rows and `match` patterns, `Atom` arguments, and any
+quoted payload. To match a literal `data`-headed value (from `quote`, a
+space row or an `Atom` argument) in a `case` or clause-head pattern, write
+the head explicitly: `(data data $a $b)` matches the literal `(data 1 2)`.
+See `examples/data_pattern.metta`.
+
 Because `list` is already used as data by an existing example,
 `(make-list E1 E2 ...)` is the explicit runtime-list constructor. Under an
 expected `(List T)`, each element is checked against `T` at compile time;
@@ -778,14 +788,28 @@ Notes and caveats:
 
 - Function type declarations are pre-cached per file, so helpers may be
   declared and defined after their callers within the same file. Across files,
-  imports must still precede use. Value declarations like `(: a A)` stay
+  a caller compiled before its callee exists builds data; the callee's later
+  definition, or a later `import_prolog_function`, recompiles that caller into
+  a call, at any arity, whether or not the callee was declared
+  (`examples/late_call_recompile.metta`). The caller's whole clause set is
+  recompiled, so a late definition costs a second compile of its callers.
+  Forms that ran in between saw the data. A statement whose value is discarded
+  (a non-final `progn` element, a later `prog1` element, a `let` binder used
+  nowhere else) and whose head is still not a function when the outermost load
+  completes, and whose fields are pure data too, is reported: usually a
+  missing or misspelled helper. A statement with an evaluated field, such as
+  `(row (println! x))`, is not judged. It is a warning, and an error under
+  `--strict` (`examples/fail_strict_inert_statement.metta`,
+  `examples/strict_inert_statement_effects.metta`). Value declarations like `(: a A)` stay
   order-sensitive (they are knowledge atoms). A function declaration arriving
   after its function was already compiled in an earlier file warns and
   recompiles that function's clauses against it — see "Knowledge that arrives
   late". Results already printed by a form that ran before the recompile are
   not revisited, which is what the warning is for.
-- `Expression`-typed arguments are passed unevaluated (as data), except
-  underapplied closures like `(+ 1)`.
+- `Atom`-typed arguments are passed unevaluated (as data), except
+  underapplied closures like `(+ 1)`. A Prolog native imported with
+  `import_prolog_function` follows the same rule as a MeTTa function with the
+  same declaration (`examples/native_arguments.metta`).
 - Interpreters that call `eval` per iteration pay for a (typed) translation
   each time — that pattern was always slow and types do not change it.
 - The executable specification lives in `examples/type_*.metta`,

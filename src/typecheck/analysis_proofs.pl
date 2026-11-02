@@ -150,9 +150,11 @@ analysis_reemit_proof(Proof) :-
 
 % Conservative dependency inventory for an expression or clause-set term.
 % Every named call records its declaration, effect and both certificate
-% families; a declared-but-undefined call or bare symbol gets a late_*
-% dependency, so its first definition invalidates the decision. Type
-% dependencies are attached only for types the term carries.
+% families. A head that is not yet a function compiles as data, so it gets a
+% late_symbol dependency whether or not it is declared: a definition at any
+% arity (the caller may underapply or overapply it) or a native import that
+% arrives later recompiles the consumer, and load order cannot silently decide
+% call versus data. A declared bare symbol gets late_symbol too. Type dependencies are attached only for types the term carries.
 analysis_term_dependencies(Term, Dependencies) :-
     analysis_term_inventory(Term, Calls0-[], Symbols0-[]),
     sort(Calls0, Calls),
@@ -179,8 +181,9 @@ analysis_call_dependency(F, N, D) :-
     member(D, [effect(F/N), decl(F/N),
                output_cert(proper_list, F/N),
                output_cert(bound_bool, F/N)]).
-analysis_call_dependency(F, N, late_call(F/N)) :-
-    fn_decl(F, N, _, _, _, _).
+analysis_call_dependency(F, N, late_symbol(F)) :-
+    length(Args, N),
+    \+ special_builtin_form(F, Args, _).
 
 analysis_known_type_dependencies(Term, Dependencies) :-
     term_variables(Term, Vars),

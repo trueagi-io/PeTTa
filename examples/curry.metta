@@ -8,6 +8,14 @@
 !(test ((f 1) 2) 3)
 !(test (repr (g 1 2)) "(partial g (1 2))")
 
+; A body that is a partial application compiles with the missing argument in
+; the head; a call at the source arity returns the closure.
+(= (add-one) (f 1))
+!(test (add-one 2) 3)
+!(test (repr (collapse (add-one))) "((partial add-one ()))")
+!(test ((add-one) 2) 3)
+!(test (((|-> ($x) (f $x)) 1) 2) 3)
+
 (= (h $A $B)
    (append ($A) $B))
 

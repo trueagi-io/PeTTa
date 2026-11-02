@@ -259,14 +259,12 @@ function_dependency_candidate(F, N, clause_set(F/N)).
 function_dependency_candidate(F, N, decl(F/N)).
 function_dependency_candidate(F, N, effect(F/N)).
 function_dependency_candidate(F, N, output_cert(_, F/N)).
-function_dependency_candidate(F, N, late_call(F/N)).
 function_dependency_candidate(F, _, late_symbol(F)).
 
 symbol_dependency_candidate(Name, clause_set(Name/_)).
 symbol_dependency_candidate(Name, decl(Name/_)).
 symbol_dependency_candidate(Name, effect(Name/_)).
 symbol_dependency_candidate(Name, output_cert(_, Name/_)).
-symbol_dependency_candidate(Name, late_call(Name/_)).
 symbol_dependency_candidate(Name, late_symbol(Name)).
 
 
