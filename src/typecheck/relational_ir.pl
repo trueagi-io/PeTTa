@@ -282,6 +282,13 @@ lower_pattern([Cons, Head, Tail], construct(Id, pattern_cons, [HeadIR, TailIR]),
     fresh_id(Id, S0, S1),
     lower_pattern(Head, HeadIR, _, S1, S2),
     lower_pattern(Tail, TailIR, _, S2, S).
+% The erased constructors `data` and `make-list` spell the bare tuple of their
+% fields in a pattern as in an expression: a positional pattern, untagged.
+lower_pattern([Erased|Fields],
+              construct(Id, positional_pattern, Children), Id, S0, S) :-
+    ( Erased == data ; Erased == 'make-list' ), is_list(Fields), !,
+    fresh_id(Id, S0, S1),
+    lower_patterns(Fields, Children, _, S1, S).
 % A variable in the first position is a field binder, not a constructor tag.
 % Preserve every field of such a fixed-width positional pattern so matching
 % can use exact list-shape facts and later body occurrences share the same IDs.

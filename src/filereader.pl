@@ -27,7 +27,9 @@ load_metta_file_impl(Filename, Results, Space) :-
         assertz(active_metta_load(Space, CanonPath), Ref),
         load_metta_file_contents(CanonPath, Results, Space),
         erase(Ref)
-    ).
+    ),
+    %Only the outermost load knows that no later import defines a head:
+    ( active_metta_load(_, _) -> true ; report_inert_statements ).
 
 load_metta_file_contents(CanonPath, Results, Space) :-
     claim_source_compile(CanonPath, Mode),
@@ -107,15 +109,8 @@ with_unified_file_analysis_for_mode(compile_functions, ParsedForms, Goal) :- !,
 with_unified_file_analysis_for_mode(_, _, Goal) :-
     call(Goal).
 
-register_function_signature(F, Arity) :- warn_if_used_as_symbol(F),
-                                         register_fun(F),
+register_function_signature(F, Arity) :- register_fun(F),
                                          ( catch(arity(F, Arity), _, fail) -> true ; assertz(arity(F, Arity)) ).
-
-%A function arriving after expressions already compiled its name as a plain symbol
-%cannot be called by those expressions anymore, which usually means an import came too late:
-warn_if_used_as_symbol(F) :- \+ fun(F), symbol_head(F), !,
-                             format(user_error, "Warning: ~w is defined or imported after already being used; earlier expressions treat it as a plain symbol. Move the import or definition above the first use.~n", [F]).
-warn_if_used_as_symbol(_).
 
 precache_pending_bodies(File, ParsedForms) :-
     forall(( member(parsed(function, _, _, Term), ParsedForms),

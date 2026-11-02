@@ -9,6 +9,9 @@ constrain_args([F, A, B], Out, Goals) :- nonvar(F),
                                          constrain_args(B, B1, G2),
                                          Out = [A1|B1],
                                          append(G1, G2, Goals), !.
+constrain_args([C|Fields], Out, Goals) :- erased_constructor(C, Fields), !,
+                                          maplist(constrain_args, Fields, Out, NestedGoalsList),
+                                          flatten(NestedGoalsList, Goals).
 constrain_args(Pattern, Var, Goals) :-
                                         functional_pattern_application(Pattern, F, Args), !,
                                         translate_expr([F|Args], GoalsExpr, Var),
@@ -23,6 +26,24 @@ constrain_args(In, Out, Goals) :- maplist(constrain_args, In, Out, NestedGoalsLi
 functional_pattern_application([F|Args], F, Args) :-
     atom(F), F \== cons, fun(F),
     is_list(Args).
+
+%`data` and `make-list` are erased constructors: (data A B) is the bare tuple
+%(A B), whose first field is never called. A pattern or an unevaluated
+%position (an Atom argument, a space row) spells that same tuple, so the
+%marker is dropped there too and the fields are left exactly as written.
+%Without this a (data $a $b) case pattern stays a literal three-element list
+%that no constructed value can ever match.
+erased_constructor(C, Fields) :-
+    atom(C),
+    ( builtin_codegen_symbol(C, explicit_data)
+    ; builtin_codegen_symbol(C, explicit_list) ), !,
+    is_list(Fields).
+
+erase_explicit_data(X, X) :- ( var(X) ; atomic(X) ; \+ is_list(X) ), !.
+erase_explicit_data([Q, X], [Q, X]) :- Q == quote, !.
+erase_explicit_data([C|Fields], Out) :- erased_constructor(C, Fields), !,
+                                        maplist(erase_explicit_data, Fields, Out).
+erase_explicit_data(L, Out) :- maplist(erase_explicit_data, L, Out).
 
 %Flatten (= Head Body) MeTTa function into a Prolog clause. Dependencies are
 %those observed by all nested analyses; assertion sites attach them to the real
@@ -257,11 +278,6 @@ function_source_clauses(F, Us) :- findall(Ref-Term,
                                             clause(_, _, Ref) ),
                                           Us).
 
-%Record atoms compiled as plain symbol heads, so late function registrations can be flagged:
-:- dynamic symbol_head/1.
-note_symbol_head(HV) :- atom(HV), \+ symbol_head(HV), !, assertz(symbol_head(HV)).
-note_symbol_head(_).
-
 %Print compiled clause:
 maybe_print_compiled_clause(_, _, _) :- silent(true), !.
 maybe_print_compiled_clause(Label, FormTerm, Clause) :-
@@ -307,6 +323,36 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                           ; % --- Case 3: leave unevaluated ---
                             Out = [F|Args],
                             \+ cyclic_term(Out).
+
+%A statement's value is discarded, so it can only matter through its effects.
+%One headed by a symbol that is not a function builds inert data and does
+%nothing: a call to a helper that is missing, misspelled or not yet defined.
+%The head may still be defined or imported later in the load, which
+%recompiles this clause into a call, so the statement is only recorded here;
+%report_inert_statements/0 judges it once the outermost load is complete.
+:- dynamic inert_statement/2.
+check_statement(Expr) :-
+    ( nonvar(Expr), Expr = [H|Args], atom(H), is_list(Args),
+      \+ fun(H), \+ translator_rule(H), \+ special_builtin_form(H, Args, _)
+      -> length(Args, N),
+         ( current_compiling_caller(F, Arity) -> Where = F/Arity ; Where = toplevel ),
+         ( inert_statement(H/N, Where) -> true ; assertz(inert_statement(H/N, Where)) )
+    ; true ).
+
+%A let binder that occurs nowhere else in its clause discards the value; one
+%shared with the head or a later use is an output or a test.
+singleton_binder(Pat) :-
+    var(Pat),
+    nb_current('$compiling_clause', clause(_, Params, Body)),
+    findall(x, ( sub_term(V, Params-Body), V == Pat ), [_]).
+
+report_inert_statements :-
+    findall(H/N-Where, ( retract(inert_statement(H/N, Where)), \+ fun(H) ), Found),
+    sort(Found, Inert),
+    ( Inert == [] -> true
+    ; strict_mode(true) -> throw(error(inert_statements(Inert), typecheck))
+    ; forall(member(Head-Where, Inert),
+             format(user_error, "Warning: inert statement in ~w: ~w is not a function, so the discarded expression only builds data~n", [Where, Head])) ).
 
 %Calling reduce from aggregate function foldall needs this argument wrapping
 agg_reduce(AF, Acc, Val, NewAcc) :- reduce([AF, Acc, Val], NewAcc).
@@ -522,13 +568,18 @@ bind_typed_space_pattern(Space, Pattern) :-
 elaborate_typed_space_pattern(Space, Pattern, RuntimePattern, Goals) :-
     atom(Space), declared_space_type(Space, _), !,
     constrain_typed_space_args(Pattern, RuntimePattern, Goals).
-elaborate_typed_space_pattern(_, Pattern, Pattern, []).
+elaborate_typed_space_pattern(_, Pattern, RuntimePattern, []) :-
+    erase_explicit_data(Pattern, RuntimePattern).
 
 %A schema-backed functional pattern is an exact-one inverse constraint.
 %Registered nondet functions can also appear as literal payload tags, and
 %executing them would turn inspection into enumeration, so only a unique
 %declared det arrow elaborates.
 constrain_typed_space_args(X, X, []) :- (var(X); atomic(X)), !.
+constrain_typed_space_args([C|Fields], Out, Goals) :-
+    erased_constructor(C, Fields), !,
+    maplist(constrain_typed_space_args, Fields, Out, NestedGoalsList),
+    flatten(NestedGoalsList, Goals).
 constrain_typed_space_args([F, A, B], Out, Goals) :-
     nonvar(F), F == cons, !,
     constrain_typed_space_args(A, A1, G1),
@@ -679,12 +730,15 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                         append(GsH, [transaction(Conj)], Goals)
         %--- Sequential execution ---:
         ; special_builtin_form(HV, T, progn), T = Exprs
-          -> translate_args(Exprs, GsList, Outs),
+          -> append(Statements, [_], Exprs),
+                                    maplist(check_statement, Statements),
+                                    translate_args(Exprs, GsList, Outs),
                                     append(GsH, GsList, Tmp),
                                     last(Outs, Out),
                                     Goals = Tmp
         ; special_builtin_form(HV, T, prog1), T = Exprs
           -> Exprs = [First|Rest],
+                                    maplist(check_statement, Rest),
                                     translate_expr(First, GsF, Out),
                                     translate_args(Rest, GsRest, _),
                                     append(GsH, GsF, Tmp1),
@@ -767,7 +821,8 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                           append(GsH, [(ConjA, GA, (Av == true -> Out = true ; (ConjB, GB, Out = Bv)))], Goals)
         %--- Unification constructs ---:
         ; special_builtin_form(HV, T, let_bind), T = [Pat, Val, In]
-          -> translate_expr(Pat, Gp, Pv),
+          -> ( singleton_binder(Pat) -> check_statement(Val) ; true ),
+                                                           translate_expr(Pat, Gp, Pv),
                                                            translate_let_value(Pat, Val, In, Gv, V),
                                                            note_candidates(Pv, V),        %the bound variable gets the value's type
                                                            bind_pattern_from(Pat, V),     %destructuring patterns type their fields
@@ -872,7 +927,8 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                                              ; Out = partial(F, FreeVars) ),
                                            Goals = GsH
         %--- Spaces ---:
-        ; special_builtin_form(HV, T, typed_space_update), T = [Space, Atom] ->
+        ; special_builtin_form(HV, T, typed_space_update), T = [Space, Atom0] ->
+                                                                   erase_explicit_data(Atom0, Atom),
                                                                    check_typed_space_value(Space, Atom),
                                                                    translate_expr(Space, G1, S),
                                                                    typed_space_update_goal(HV, Space, Atom, Update),
@@ -881,8 +937,9 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                                                    append([GsH,G1,[Goal]], Goals)
         ; special_builtin_form(HV, T, typed_space_match),
           T = [Space, Pattern, Body] -> translate_expr(Space, G1, S),
-                                                     type_match_pattern(Pattern),
-                                                     bind_typed_space_pattern(Space, Pattern),
+                                                     erase_explicit_data(Pattern, ErasedPattern),
+                                                     type_match_pattern(ErasedPattern),
+                                                     bind_typed_space_pattern(Space, ErasedPattern),
                                                      elaborate_typed_space_pattern(
                                                          Space, Pattern,
                                                          RuntimePattern,
@@ -986,6 +1043,10 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
             -> set_out_type(Out, ['|', VT, ['Error', '%Undefined%', '%Undefined%']])
              ; true ),
           append(Inner, [Goal], Goals)
+        %--- and/or evaluate left to right and stop at the deciding operand: ---
+        ; atom(HV), T = [A, B], builtin_codegen_hook(HV, 2, short_circuit_bool), builtin_untouched(HV)
+          -> translate_short_circuit(HV, A, B, Goal, Out),
+             append(GsH, [Goal], Goals)
         %--- Automatic 'smart' dispatch, translator deciding when to create a predicate call, data list, or dynamic dispatch: ---
         %Known function or closure => type-directed call:
         ; ( atom(HV), fun(HV) -> Fun = HV, Bound = []
@@ -993,8 +1054,7 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
           -> translate_typed_call(Fun, Bound, T, GsH, Goals, Out)
         %Literals (numbers, strings, etc.), known non-function atom => data:
         ; ( atomic(HV), \+ atom(HV) ; atom(HV), \+ fun(HV) )
-          -> note_symbol_head(HV),
-             translate_args(T, GsT, AVs),
+          -> translate_args(T, GsT, AVs),
              append(GsH, GsT, Goals),
              Out = [HV|AVs]
         %Plain data list: evaluate inner fun-sublists
@@ -1027,6 +1087,26 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
             -> Out = [HV|AVs],
                Goals = Inner
           ; append(Inner, [reduce([HV|AVs], Out)], Goals) ) ).
+
+%`and` stops at a False left operand and `or` at a True one, so the right
+%operand is evaluated only when the left one leaves the result open: once
+%per left result, in order. An unbound operand still enumerates both Bools,
+%as the relational and/3 and or/3 do, and a non-Bool operand fails.
+translate_short_circuit(Op, A, B, Goal, Out) :-
+    short_circuit_decider(Op, Decided),
+    translate_expr_to_conj(A, ConjA, Av),
+    translate_expr_to_conj(B, ConjB, Bv),
+    check_call_arg(declared, Op, Av, 'Bool', GsA),
+    check_call_arg(declared, Op, Bv, 'Bool', GsB),
+    goals_list_to_conj(GsA, GA),
+    goals_list_to_conj(GsB, GB),
+    set_out_type(Out, 'Bool'),
+    Goal = ( ConjA, GA, bool(Av),
+             ( Av == Decided -> Out = Decided
+             ; ConjB, GB, bool(Bv), Out = Bv ) ).
+
+short_circuit_decider(and, false).
+short_circuit_decider(or, true).
 
 %Values of these types can never dispatch as functions in reduce/2:
 nonfunction_type(K) :- nonvar(K), ( primitive_type(K)
@@ -1300,7 +1380,7 @@ expression_arg_value(A, AV) :- ( maybe_closure_expr(A),
                                          callable_expression_value(AVExpr) ),
                                        error(_, typecheck), fail)
                                  -> AV = AVExpr
-                                  ; AV = A ).
+                                  ; erase_explicit_data(A, AV) ).
 
 %An underapplied call to a known function (would compile to partial(...)):
 maybe_closure_expr([F|Args]) :- atom(F), fun(F), is_list(Args),
@@ -1485,14 +1565,15 @@ translate_case(Pairs, Kv, Expectation, Out, Goal, KGo) :-
         translate_case(Pairs, Kv, Expectation, Out, Goal, KGo, []).
 
 translate_case([[K,VExpr]|Rs], Kv, Expectation, Out, Goal, KGo, Prior) :-
+                                                      erase_explicit_data(K, KTyped),
                                                       ( case_scrutinee_value_type(Kv, KT)
-                                                        -> bind_pattern_typed(K, KT, Prior)
-                                                         ; ctor_pattern_field_types(K) ),
+                                                        -> bind_pattern_typed(KTyped, KT, Prior)
+                                                         ; ctor_pattern_field_types(KTyped) ),
                                                       translate_expr_to_conj(VExpr, Expectation, ConV, VOut),
                                                       constrain_args(K, Kc, Gc),
                                                       build_branch(ConV, VOut, Out, Then),
                                                       ( Rs == [] -> Goal = ((Kv = Kc) -> Then), KGi=[]
-                                                                  ; translate_case(Rs, Kv, Expectation, Out, Next, KGi, [K|Prior]),
+                                                                  ; translate_case(Rs, Kv, Expectation, Out, Next, KGi, [KTyped|Prior]),
                                                                     Goal = ((Kv = Kc) -> Then ; Next) ),
                                                       append([Gc,KGi], KGo).
 

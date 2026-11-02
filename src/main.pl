@@ -21,6 +21,8 @@
 % translator throws.
 prolog:error_message(literal_type_mismatch(Value, Required)) -->
     [ 'Type mismatch: got ~p but expected ~p'-[Value, Required] ].
+prolog:error_message(inert_statements(Inert)) -->
+    [ 'Inert statements (Head-Caller) ~p: the head is not a function after loading, so each discarded expression only builds data; define or import it, or remove the statement'-[Inert] ].
 prolog:error_message(car_atom_empty) -->
     [ 'car-atom expects a non-empty expression' ].
 prolog:error_message(type_conflict(existing(Existing), required(Required))) -->
