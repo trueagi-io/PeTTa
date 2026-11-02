@@ -77,6 +77,7 @@ runtime_add_function_tx(Space, Term, FAtom, W, Snapshot) :-
     assertz(Clause, ClauseRef),
     nb_setarg(2, Refs, ClauseRef),
     assertz(translated_from(ClauseRef, Term)),
+    assert_eta_closure(Clause, N),
     record_compiled_dependencies(ClauseRef, FAtom/N, Dependencies),
     notify_mutation(clause_changed(FAtom/N, runtime)),
     metta_on_function_changed(FAtom),
@@ -134,14 +135,15 @@ snapshot_runtime_function_clauses(F, Clauses) :-
             Clauses).
 
 restore_runtime_function_clauses(F, Clauses) :-
-    findall(Ref,
+    findall(Ref-N,
             ( translated_from(Ref, Source),
-              runtime_source_key(Source, F/_) ),
+              runtime_source_key(Source, F/N) ),
             CurrentRefs),
-    forall(member(Ref, CurrentRefs),
+    forall(member(Ref-N, CurrentRefs),
            ( forget_compiled_dependencies(Ref),
              retractall(translated_from(Ref, _)),
-             ignore(catch(erase(Ref), _, fail)) )),
+             ignore(catch(erase(Ref), _, fail)),
+             erase_eta_closure(F, N) )),
     restore_runtime_compiled_clauses(Clauses).
 
 restore_runtime_compiled_clauses([]).
@@ -151,6 +153,8 @@ restore_runtime_compiled_clauses(
     assertz((Head :- Body), Ref),
     assertz(translated_from(Ref, Source)),
     runtime_source_key(Source, Key),
+    Key = _/N,
+    assert_eta_closure((Head :- Body), N),
     record_compiled_dependencies(Ref, Key, Origin, Dependencies),
     restore_runtime_compiled_clauses(Clauses).
 
@@ -175,9 +179,10 @@ runtime_source_key([Eq, [F|Args], _], F/N) :-
                                               ( forget_compiled_dependencies(Ref),
                                                 erase(Ref) )),
                                        retractall(translated_from(_, Term)),
+                                       length(Args, N),
+                                       refresh_eta_closure(F, N),
                                        metta_on_function_changed(F),
                                        invalidate_specializations(F),
-                                       length(Args, N),
                                        ( \+ ( current_predicate(F/A), functor(H2, F, A), clause(H2, _, _) )
                                          -> retractall(fun(F)), metta_on_function_removed(F)
                                          ; true ),

@@ -257,9 +257,11 @@ stage_function_clauses(F, [Ref-Term|Us],
 swap_staged_function(F, Us, Staged) :-
     forall(member(Ref-_, Us),
            ( clause(_, _, Ref) -> erase(Ref) ; true )),
-    forall(member(Ref-_, Us),
+    forall(member(Ref-[=, [_|Args], _], Us),
            ( retractall(translated_from(Ref, _)),
-             forget_compiled_dependencies(Ref) )),
+             forget_compiled_dependencies(Ref),
+             length(Args, N),
+             erase_eta_closure(F, N) )),
     assert_staged_clauses(Staged),
     invalidate_specializations(F).
 
@@ -269,8 +271,42 @@ assert_staged_clauses([staged(_, Term, OriginFile, Clause, Dependencies)|Ss]) :-
     assertz(translated_from(NewRef, Term)),
     Term = [=, [G|SourceArgs], _],
     length(SourceArgs, N),
+    assert_eta_closure(Clause, N),
     record_compiled_dependencies(NewRef, G/N, OriginFile, Dependencies),
     assert_staged_clauses(Ss).
+
+%%% A clause whose body is a partial application is eta-expanded: the missing
+%%% arguments become extra head arguments, so F/N compiles above arity N+1.
+%%% A call at the source arity then returns the closure, as reduce/2 does for
+%%% any underapplied function. One closure serves all clauses of F/N: a
+%%% closure per clause would apply every clause once per closure.
+assert_eta_closure((Head :- _), N) :-
+    functor(Head, F, A),
+    ( A =:= N + 1 -> true
+    ; eta_closure(F, N, Closure),
+      ( eta_closure_ref(Closure, _) -> true ; assertz(Closure) ) ).
+
+erase_eta_closure(F, N) :-
+    eta_closure(F, N, Closure),
+    forall(eta_closure_ref(Closure, Ref), erase(Ref)).
+
+%The closure stays while some source clause of F/N still compiles above N+1:
+refresh_eta_closure(F, N) :-
+    erase_eta_closure(F, N),
+    ( translated_from(Ref, [=, [F|Args], _]), length(Args, N),
+      clause(Head, _, Ref), functor(Head, _, A), A > N + 1
+      -> eta_closure(F, N, Closure), assertz(Closure)
+    ; true ).
+
+eta_closure(F, N, Closure) :-
+    length(Vs, N),
+    append(Vs, [partial(F, Vs)], Args),
+    Closure =.. [F|Args].
+
+eta_closure_ref(Closure, Ref) :-
+    functor(Closure, F, A), functor(Head, F, A),
+    catch(clause(Head, true, Ref), error(_, _), fail),
+    Head =@= Closure.
 
 %Every compiled clause of F, in the order it was asserted (which is source
 %order - process_form/3 records translated_from/2 as it goes):
@@ -935,6 +971,7 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                            assertz(Clause, LambdaRef),
                                            assertz(translated_from(LambdaRef, IsolatedLambdaSource)),
                                            length(FullArgs, N),
+                                           assert_eta_closure(Clause, N),
                                            record_compiled_dependencies(LambdaRef, F/N, LambdaDependencies),
                                            format(atom(Label), "metta lambda (~w)", [F]),
                                            maybe_print_compiled_clause(Label, ['|->', Args, Body], Clause),

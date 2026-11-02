@@ -4,12 +4,16 @@
 ; call. It used to stay data unless f had been declared first.
 !(import! &self imports/late_definition/early)
 !(test (early-call (1 2)) (later-defined 1))
+!(test (early-partial) (later-defined))
 !(bind! &effects (new-space))
 !(import! &self imports/late_definition/late)
 !(test (early-call (1 2)) 101)
 ; An underapplied caller is recompiled too. Its body is now a partial
-; application, so it takes the missing argument, as when both are in one file:
+; application, so it takes the missing argument, as when both are in one file,
+; and a call at its source arity still returns that closure:
 !(test (early-partial 5) 105)
+!(test (repr (collapse (early-partial))) "((partial early-partial ()))")
+!(test ((early-partial) 5) 105)
 !(test (early-statement 7) done)
 !(test (collapse (match &effects (effect $x) $x)) (7))
 

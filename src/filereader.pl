@@ -167,6 +167,7 @@ process_form(Space, compile_functions, parsed(function, FormStr, Line, Term), []
                                                                   assertz(translated_from(Ref, Term)),
                                                                   Term = [=, [Fn|Args], _],
                                                                   length(Args, N),
+                                                                  assert_eta_closure(Clause, N),
                                                                   record_compiled_dependencies(Ref, Fn/N, Dependencies),
                                                                   notify_mutation(
                                                                       clause_changed(Fn/N,
