@@ -324,9 +324,9 @@ lower_pattern(Source, opaque(Id, pattern_compound(Name), Children), Id, S0, S) :
     lower_patterns(Args, Children, _, S1, S).
 
 % (and A B) is (and-then A B) and (or A B) is (or-else A B): the right operand
-% runs only when the left one leaves the result open. A variable operand is
-% wrapped in the eager (and $x True), which keeps the relational reading of
-% and/or: an unbound operand enumerates both Bools. A literal True right
+% runs only when the left one leaves the result open. A non-literal operand is
+% wrapped in the eager (and X True), which keeps the relational reading of
+% and/or: an operand whose value is unbound enumerates both Bools. A literal True right
 % operand is the eager form itself.
 short_circuit_source([Op, A, B], [Form, A1, B1]) :-
     atom(Op), short_circuit_form(Op, Form), B \== true,
@@ -343,8 +343,8 @@ short_circuit_branch([Op, A, B], Rewritten) :-
     term_variables(B, BVs),
     member(V, BVs), \+ ( member(W, AVs), W == V ), !.
 
-short_circuit_operand(X, [and, X, true]) :- var(X), !.
-short_circuit_operand(X, X).
+short_circuit_operand(X, X) :- ( X == true ; X == false ), !.
+short_circuit_operand(X, [and, X, true]).
 
 short_circuit_form(and, 'and-then').
 short_circuit_form(or, 'or-else').

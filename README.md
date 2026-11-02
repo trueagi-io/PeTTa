@@ -242,7 +242,10 @@ head, a `let` pattern - erases `data` the same way, so the spelling that
 builds a tuple also matches it: `(data $a $b)` is the pattern `($a $b)`, and
 its first field is never a functional pattern. Raw positions keep the literal
 term as before: space rows and `match` patterns, `Atom` arguments, and any
-quoted payload. See `examples/data_pattern.metta`.
+quoted payload. To match a literal `data`-headed value (from `quote`, a
+space row or an `Atom` argument) in a `case` or clause-head pattern, write
+the head explicitly: `(data data $a $b)` matches the literal `(data 1 2)`.
+See `examples/data_pattern.metta`.
 
 Because `list` is already used as data by an existing example,
 `(make-list E1 E2 ...)` is the explicit runtime-list constructor. Under an
@@ -810,7 +813,7 @@ Notes and caveats:
 - `and` and `or` short-circuit: a direct `(and A B)` compiles as
   `(and-then A B)` and `(or A B)` as `(or-else A B)`, so the right operand
   runs only for a left result that does not decide the result, once per left
-  result, in order. A variable operand passes through `(and $x True)`, so an
+  result, in order. A non-literal operand passes through `(and X True)`, so an
   unbound operand still enumerates both Bools. When the right operand has a
   variable the left one lacks, the determinism and unified checkers model the
   same branch, so a binding made only in a skipped operand is never assumed

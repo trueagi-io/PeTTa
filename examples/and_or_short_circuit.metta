@@ -23,3 +23,8 @@
 
 ; An unbound operand still enumerates both Bools:
 !(test (collapse (let $r (and $x True) ($x $r))) ((True True) (False False)))
+
+; So does an operand expression whose value is unbound:
+!(test (collapse (and True (progn $u))) (True False))
+!(test (collapse (or False (progn $v))) (True False))
+!(test (collapse (or (progn $w) False)) (True False))

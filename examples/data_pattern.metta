@@ -32,3 +32,6 @@
 !(test (case (quote (data 1 2)) (((data $a $b) erased) ($_ quoted))) quoted)
 !(test (case (quote (quote (data 1 2))) (((quote (data $a $b)) (matched $a $b)) ($_ fallback)))
        (matched 1 2))
+
+; Migration: a literal data head is matched by spelling it explicitly.
+!(test (case (quote (data 1 2)) (((data data $a $b) (lit $a $b)) ($_ no))) (lit 1 2))
