@@ -830,10 +830,6 @@ deterministic_expr_core([Head|Args], Result) :- var(Head), !,
          ; Result = unknown(dynamic_head(Head)) )
        ; Result = unknown(dynamic_head(Head)) ).
 deterministic_expr_core([collapse, _], ok) :- !.
-%A direct and/or call is the short-circuit form the translator compiles:
-deterministic_expr_core([Op, A, B], Result) :-
-    short_circuit_branch([Op, A, B], Rewritten), builtin_untouched(Op), !,
-    combine_determinism_list([Rewritten], Result).
 deterministic_expr_core(['trace!', A, B], Result) :- !, combine_determinism_list([A, B], Result).
 deterministic_expr_core([once, Expr], Result) :- !, once_determinism(Expr, Result).
 deterministic_expr_core([quote, _], ok) :- !.

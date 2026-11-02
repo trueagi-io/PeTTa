@@ -542,13 +542,6 @@ rewrite_streamops([intersection, [superpose|A], [superpose|B]],
 rewrite_streamops([subtraction, [superpose|A], [superpose|B]],
                   [call, [superpose, ['subtraction-atom', [collapse, [superpose|A]],
                                                           [collapse, [superpose|B]]]]]).
-%and/or short-circuit by lowering to and-then/or-else, the forms the checker
-%models as branches, so a binding made only in a skipped right operand is
-%never assumed afterwards (short_circuit_source/2 in relational_ir, which
-%lowers the same source the same way).
-rewrite_streamops([Op, A, B], Rewritten) :-
-    short_circuit_source([Op, A, B], Rewritten),
-    builtin_untouched(Op), !.
 rewrite_streamops(X, X).
 
 equality_case_shape(T, _) :-

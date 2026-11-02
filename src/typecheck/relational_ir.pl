@@ -1,7 +1,5 @@
 :- module(relational_ir,
           [ lower_expr/4,
-            short_circuit_source/2,
-            short_circuit_branch/2,
             lower_expr_with_origins/5,
             lower_clause_with_origins/5,
             ir_result/2,
@@ -142,14 +140,6 @@ lower_expr_core([Or, A, B], sequence([AIR,
     lower_expr_(A, AIR, AId, S1, S2),
     literal_node(true, ThenIR, S2, S3),
     lower_expr_(B, ElseIR, _, S3, S).
-
-% A direct and/or call short-circuits; it is lowered as a branch when the
-% skipped right operand could leave a binding unmade (short_circuit_branch/2),
-% unless the program redefined the builtin.
-lower_expr_core([Op, A, B], IR, Result, S0, S) :-
-    short_circuit_branch([Op, A, B], Rewritten),
-    catch(user:builtin_untouched(Op), _, true), !,
-    lower_expr_(Rewritten, IR, Result, S0, S).
 
 % First-match case and pattern bindings.
 lower_expr_core([Case, Value, Pairs], sequence([ValueIR, MatchIR], Result),
@@ -322,32 +312,6 @@ lower_pattern(Source, opaque(Id, pattern_compound(Name), Children), Id, S0, S) :
     compound_name_arguments(Source, Name, Args),
     fresh_id(Id, S0, S1),
     lower_patterns(Args, Children, _, S1, S).
-
-% (and A B) is (and-then A B) and (or A B) is (or-else A B): the right operand
-% runs only when the left one leaves the result open. A non-literal operand is
-% wrapped in the eager (and X True), which keeps the relational reading of
-% and/or: an operand whose value is unbound enumerates both Bools. A literal True right
-% operand is the eager form itself.
-short_circuit_source([Op, A, B], [Form, A1, B1]) :-
-    atom(Op), short_circuit_form(Op, Form), B \== true,
-    short_circuit_operand(A, A1),
-    short_circuit_operand(B, B1).
-
-% The checkers model the short circuit as a branch when skipping the right
-% operand can matter for bindings: when it has a variable that the always
-% evaluated left operand does not. Otherwise the eager reading binds nothing
-% more, and its precise and/or edge refinement stays sound.
-short_circuit_branch([Op, A, B], Rewritten) :-
-    short_circuit_source([Op, A, B], Rewritten),
-    term_variables(A, AVs),
-    term_variables(B, BVs),
-    member(V, BVs), \+ ( member(W, AVs), W == V ), !.
-
-short_circuit_operand(X, X) :- ( X == true ; X == false ), !.
-short_circuit_operand(X, [and, X, true]).
-
-short_circuit_form(and, 'and-then').
-short_circuit_form(or, 'or-else').
 
 lower_literal_pattern(Source, IR, Id, S0, S) :-
     is_list(Source), Source \== [], !,

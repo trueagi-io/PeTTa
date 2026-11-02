@@ -114,9 +114,6 @@ builtin_spec('#\\='/2, implementation(metta), typing(untyped), evaluation(eager)
 
 % Boolean generators. Their worst case enumerates unbound Bool operands; the
 % named argument rule upgrades calls whose operands are manifest booleans.
-% A direct and/or call is lowered to and-then/or-else (short_circuit_source/2);
-% these entries describe the eager call that remains: (and X True), and/3 and
-% or/3 as closure values, and a redefined builtin.
 builtin_spec(and/2, implementation(metta), typing(signature(unspecified, ['Bool','Bool'], 'Bool')), evaluation(eager), cardinality(argument_sensitive(manifest_booleans, nondet)), lowering(generic)).
 builtin_spec(or/2, implementation(metta), typing(signature(unspecified, ['Bool','Bool'], 'Bool')), evaluation(eager), cardinality(argument_sensitive(manifest_booleans, nondet)), lowering(generic)).
 builtin_spec(not/1, implementation(metta), typing(signature(unspecified, ['Bool'], 'Bool')), evaluation(eager), cardinality(argument_sensitive(manifest_booleans, nondet)), lowering(generic)).

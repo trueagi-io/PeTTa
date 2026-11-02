@@ -810,17 +810,6 @@ Notes and caveats:
   underapplied closures like `(+ 1)`. A Prolog native imported with
   `import_prolog_function` follows the same rule as a MeTTa function with the
   same declaration (`examples/native_arguments.metta`).
-- `and` and `or` short-circuit: a direct `(and A B)` compiles as
-  `(and-then A B)` and `(or A B)` as `(or-else A B)`, so the right operand
-  runs only for a left result that does not decide the result, once per left
-  result, in order. A non-literal operand passes through `(and X True)`, so an
-  unbound operand still enumerates both Bools. When the right operand has a
-  variable the left one lacks, the determinism and unified checkers model the
-  same branch, so a binding made only in a skipped operand is never assumed
-  afterwards (`examples/fail_strictdet_short_circuit_binding.metta`); otherwise
-  skipping it binds nothing and they keep the eager reading. A redefined
-  `and`/`or`, and `and`/`or` passed as values, stay eager
-  (`examples/and_or_short_circuit.metta`).
 - Interpreters that call `eval` per iteration pay for a (typed) translation
   each time — that pattern was always slow and types do not change it.
 - The executable specification lives in `examples/type_*.metta`,
