@@ -350,11 +350,13 @@ call_goals([G|Gs]) :- call(G),
 %%% Prolog interop: %%%
 argv(K, Arg) :- current_prolog_flag(argv, Argv), nth0(K, Argv, A), ( atom_number(A, N) -> Arg = N ; Arg = A ).
 import_prolog_function(N, true) :-
-    ( fun(N) -> WasCallable = true ; WasCallable = false ),
-    register_fun(N),
-    ( WasCallable == false
-      -> notify_mutation(callable_changed(N))
-    ; true ).
+    with_mutex(petta_definitions, with_definition_update(
+        ( ( fun(N) -> WasCallable = true ; WasCallable = false ),
+          register_fun(N),
+          ( WasCallable == false
+            -> notify_mutation(callable_changed(N))
+          ; true ),
+          refresh_users(N, []) ))).
 'Predicate'([F|Args], Term) :- Term =.. [F|Args].
 callPredicate(G, true) :- call(G).
 assertzPredicate(G, true) :- assertz(G).
@@ -460,14 +462,17 @@ importer_helper(Space, File) :-
 
 %%% Registration: %%%
 :- dynamic fun/1, arity/2.
-register_fun(N) :- fun(N), !.
 %Arities are registered in ascending order: the order current_predicate/1
 %enumerates them in depends on how many atoms the process created before.
-register_fun(N) :- assertz(fun(N)),
-                   findall(Arity, (current_predicate(N/Arity), \+ (current_op(_, _, N), Arity =< 2)), Arities0),
+register_fun(N) :- ( fun(N) -> Existing = true ; Existing = false, assertz(fun(N)) ),
+                   findall(Arity, native_predicate_arity(N, Arity), Arities0),
                    sort(Arities0, Arities),
+                   ( (Existing == false ; Arities \= []), \+ native_function(N)
+                     -> assertz(native_function(N)) ; true ),
                    forall(member(Arity, Arities),
-                          (arity(N, Arity) -> true ; assertz(arity(N, Arity)))).
+                          ( (retract(no_equations_clause(N, Arity, R)) -> erase(R) ; true),
+                            (native_arity(N, Arity) -> true ; assertz(native_arity(N, Arity))),
+                            (arity(N, Arity) -> true ; assertz(arity(N, Arity))) )).
 :- maplist(register_fun, [superpose, empty, let, 'let*', '+','-','*','/', '%', min, max, 'change-state!', 'get-state', 'bind!',
                           '<','>','@<', '@>', '==', '!=', '=', '=?', '<=', '>=', '@<=', '@>=', and, or, xor, implies, not, sqrt, exp, log, cos, sin,
                           'first-from-pair', 'second-from-pair', 'car-atom', 'cdr-atom', 'unique-atom', 'alpha-unique-atom',

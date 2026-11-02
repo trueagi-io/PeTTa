@@ -141,10 +141,9 @@ test(runtime_add_rollback_restores_post_swap_state,
     runtime_add_outcome(AddedSource, Outcome),
     assertion(Outcome \== succeeded),
 
-    % notify_mutation/1 rebuilt the producer before its dependent rejected the
-    % new result shape.  The saved ClauseRef is therefore stale here; this
-    % assertion ensures the test really crosses that post-swap rollback seam.
-    assertion(\+ clause(_, _, OriginalRef)),
+    % Database rollback restores the original clause reference as well as
+    % its source rows and cached summaries after dependent validation fails.
+    assertion(clause(_, _, OriginalRef)),
     source_occurrence_counts(
         OriginalSource, original_counts(OriginalTranslated1, OriginalRaw1)),
     source_occurrence_counts(

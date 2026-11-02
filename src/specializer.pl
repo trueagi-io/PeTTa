@@ -44,24 +44,28 @@ specialize_call(HV, AVs, Out, Goal) :- %1. Retrieve a copy of all meta-clauses s
                                        %4. Specialize, but only if not already specialized:
                                        ( ho_specialization(HV, SpecName)
                                          ; ( %4.1. Otherwise register the specialization:
-                                             register_fun(SpecName),
+                                             ( fun(SpecName) -> true ; assertz(fun(SpecName)) ),
                                              assertz(ho_specialization(HV, SpecName)),
                                              assertz(arity(SpecName, Arity)),
                                              ( %4.2. Re-use the type definition of the parent function for the specialization:
                                                findall(TypeChain, catch(match('&self', [':', HV, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
                                                forall(member(TypeChain, TypeChains), add_sexp('&self', [':', SpecName, TypeChain])),
                                                %4.3 Translate specialized MeTTa clauseses to Prolog, keeping track of the function we are compiling through recursion:
-                                               maplist({SpecName}/[Meta,clause_info(Input,Clause,Dependencies)]>>
+                                               maplist({SpecName}/[Meta,clause_info(Input,Clause,Dependencies,Uses)]>>
                                                        ( Meta = fun_meta(ArgsNorm, BodyExpr, _),
                                                          Input = [=,[SpecName|ArgsNorm],BodyExpr],
                                                          %a typecheck error in the specialized instance just means: don't specialize
-                                                         catch(translate_clause(Input,Clause,false,Dependencies), error(_, typecheck), fail) ), MetaList, ClauseInfos),
+                                                         catch(compile_equation(Input,Clause,false,Dependencies,Uses), error(_, typecheck), fail) ), MetaList, ClauseInfos),
                                                %4.4 Only proceeed specializing if this or any recursive call profited from specialization with the specialized function at head position:
                                                nb_getval(specneeded, true),
+                                               %A cached specialization must keep the caller's interface.
+                                               forall(member(clause_info(_, (H :- _), _, _), ClauseInfos),
+                                                      functor(H, SpecName, Arity)),
                                                %4.5 Assert and print each of the created specializations:
-                                               forall(member(clause_info(Input, Clause, Dependencies), ClauseInfos),
+                                               forall(member(clause_info(Input, Clause, Dependencies, Uses), ClauseInfos),
                                                ( asserta(Clause, Ref),
-                                                 assertz(translated_from(Ref, Input)),
+                                                 assertz(equation_arity(SpecName, Arity, Ref)),
+                                                 record_translation(asserta, Ref, Input, Uses),
                                                  Input = [=, [_|SpecArgs], _],
                                                  length(SpecArgs, SpecN),
                                                  record_compiled_dependencies(Ref, SpecName/SpecN, Dependencies),
@@ -118,15 +122,19 @@ specializable_arg(Arg) :- nonvar(Arg),
 forget_symbol(Name) :- retractall('&self'(=, [Name|_], _)),
                        retractall('&self'(:, Name, _)),
                        forget_symbol_types(Name),
-                       findall(Ref, ( current_predicate(Name/A), functor(H, Name, A), clause(H, _, Ref) ), Refs),
+                       findall(Ref, ( user_dynamic_head(Name, _, H), clause(H, _, Ref) ), Refs),
                        forall(member(R, Refs),
                               ( forget_compiled_dependencies(R),
-                                retractall(translated_from(R, _)),
+                                forget_translation(R),
                                 erase(R) )),
+                       retractall(no_equations_clause(Name, _, _)),
+                       retractall(pending_signature(Name, _, _)),
+                       retractall(native_arity(Name, _)),
+                       retractall(native_function(Name)),
                        metta_on_function_removed(Name),
                        retractall(arity(Name,_)),
                        retractall(fun(Name)),
-                       catch(nb_delete(Name), _, true),
+                       remember_function_metas(Name), catch(nb_delete(Name), _, true),
                        retractall(ho_specialization(Name,_)).
 
 %Invalidate all specializations:

@@ -1,5 +1,49 @@
 :- dynamic translated_from/2.
+:- dynamic translation_use/4.
+:- dynamic translation_decision/3.
+:- dynamic pending_signature/3.
+:- dynamic equation_arity/3.
+:- dynamic no_equations_clause/3.
+:- dynamic native_function/1.
+:- dynamic native_arity/2.
+:- thread_local translation_recording_active/0.
 
+
+%A failed publication restores clauses, analysis records and function metadata.
+%The latter lives in nb_setval, outside Prolog's database transaction. Journal
+%only functions actually touched; nested updates also save their parent's view.
+with_definition_update(Goal) :-
+    ( nb_current(petta_definition_metas, Parent) -> true ; Parent = none ),
+    Box = metas(Parent, []),
+    setup_call_cleanup(nb_linkval(petta_definition_metas, Box),
+        catch(( transaction(Goal) -> true ; restore_definition_metas(Box), fail ),
+              Error, (restore_definition_metas(Box), throw(Error))),
+        ( Parent == none -> nb_delete(petta_definition_metas)
+        ; nb_linkval(petta_definition_metas, Parent) )).
+
+remember_function_metas(F) :-
+    ( nb_current(petta_definition_metas, Box) -> remember_function_metas(Box, F) ; true ).
+remember_function_metas(none, _) :- !.
+remember_function_metas(Box, F) :-
+    arg(2, Box, Saved),
+    ( memberchk(meta(F, _), Saved) -> true
+    ; ( nb_current(F, Previous) -> true ; Previous = '$absent' ),
+      nb_setarg(2, Box, [meta(F, Previous)|Saved]) ),
+    arg(1, Box, Parent), remember_function_metas(Parent, F).
+
+restore_definition_metas(Box) :-
+    arg(2, Box, Saved),
+    forall(member(meta(F, Value), Saved),
+        ( Value == '$absent' -> catch(nb_delete(F), _, true) ; nb_setval(F, Value) )).
+
+%Native predicates retain their primary arity. Ambiguous MeTTa partials keep
+%all larger overloads instead of eta-expanding to just the first one.
+eta_mode(F, native) :- native_function(F), \+ equation_arity(F, _, _),
+                      \+ pending_signature(F, _, _), !.
+eta_mode(_, source).
+eta_expansion_arity(F, N, A) :-
+    findall(M, (callable_arity(F, M), M > N + 1), Ms), sort(Ms, [A|Rest]),
+    ( Rest == [] -> true ; eta_mode(F, native) ).
 
 %Pattern matching, structural and functional/relational constraints on arguments:
 constrain_args(X, X, []) :- (var(X); atomic(X)), !.
@@ -11,9 +55,13 @@ constrain_args([F, A, B], Out, Goals) :- nonvar(F),
                                          append(G1, G2, Goals), !.
 constrain_args(Pattern, Var, Goals) :-
                                         functional_pattern_application(Pattern, F, Args), !,
+                                        note_translation_use(F, pattern),
                                         translate_expr([F|Args], GoalsExpr, Var),
                                         flatten(GoalsExpr, Goals).
-constrain_args(In, Out, Goals) :- maplist(constrain_args, In, Out, NestedGoalsList),
+constrain_args(In, Out, Goals) :- ( In = [F|Args], atom(F), F \== cons, is_list(Args)
+                                    -> note_translation_use(F, pattern)
+                                  ; true ),
+                                  maplist(constrain_args, In, Out, NestedGoalsList),
                                   flatten(NestedGoalsList, Goals), !.
 
 %The single definition of a functional pattern position, matching
@@ -31,7 +79,7 @@ translate_clause(Input, Clause, ConstrainArgs, Dependencies) :-
         Input = [=, [F|Args], BodyExpr],
         atom(F),
         length(Args, N),
-        copy_term_nat(BodyExpr, SourceBody),
+        copy_term_nat(Args-BodyExpr, SourceTerm),
         with_unified_clause_analysis(
             Input,
             analysis_collect(
@@ -39,7 +87,7 @@ translate_clause(Input, Clause, ConstrainArgs, Dependencies) :-
                     F, N,
                     translate_clause_core(Input, Clause, ConstrainArgs)),
                 Events)),
-        analysis_term_dependencies(SourceBody, TermDependencies),
+        analysis_term_dependencies(SourceTerm, TermDependencies),
         analysis_function_decl_dependencies(F, DeclDependencies),
         append([[decl(F/N), clause_set(F/N)],
                 TermDependencies, DeclDependencies],
@@ -48,6 +96,27 @@ translate_clause(Input, Clause, ConstrainArgs, Dependencies) :-
                             ExtraDependencies, Proof),
         analysis_proof_dependencies(Proof, Dependencies),
         analysis_reemit_proof(Proof).
+
+compile_equation(Input, Clause, ConstrainArgs, Dependencies, Uses) :-
+    ( nb_current(petta_translation_uses, Previous) -> true ; Previous = '$absent' ),
+    Box = uses([]),
+    setup_call_cleanup(
+        ( asserta(translation_recording_active, ActiveRef),
+          nb_linkval(petta_translation_uses, Box) ),
+        translate_clause(Input, Clause, ConstrainArgs, Dependencies),
+        ( erase(ActiveRef),
+          ( Previous == '$absent'
+            -> nb_delete(petta_translation_uses)
+          ; nb_linkval(petta_translation_uses, Previous) ) ) ),
+    arg(1, Box, Raw),
+    sort(Raw, Uses).
+
+with_isolated_analysis_events(Goal) :-
+    ( nb_current('$analysis_event_stack', Saved)
+      -> setup_call_cleanup(b_setval('$analysis_event_stack', []),
+                            Goal,
+                            b_setval('$analysis_event_stack', Saved))
+    ; call(Goal) ).
 
 with_compiling_caller(F, N, Goal) :-
     ( nb_current('$compiling_caller', Previous) -> true ; Previous = none ),
@@ -81,6 +150,7 @@ translate_clause_core(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                ( GoalsPrefix == [] -> HeadForm = clean
                                                ; HeadForm = head_goals ),
                                                ( atom(F), nb_current(F, Prev) -> true ; Prev = [] ),
+                                               remember_function_metas(F),
                                                nb_setval(F, [fun_meta(Args1, BodyExpr, HeadForm) | Prev]),
                                                clause_param_types(F, Args1, DeclOut),
                                                %Snapshot the declared arg positions that stay bare type variables after
@@ -110,8 +180,10 @@ translate_clause_core(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                %broke the universality its declaration claims (skip for specialized copies):
                                                ( ConstrainArgs == false -> true
                                                                          ; parametric_param_check(F, ParamVars) ),
-                                               (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
-                                               -> arity(Base, Arity), length(Bound, N), M is (Arity - N) - 1,
+                                               ( nonvar(ExpOut), ExpOut = partial(Base, Bound),
+                                                 length(Bound, N),
+                                                 eta_expansion_arity(Base, N, Arity)
+                                               -> M is (Arity - N) - 1,
                                                   length(ExtraArgs, M), append(Bound, ExtraArgs, CallInArgs),
                                                   resolve_memoization(Base, CallInArgs, Out, Goal),
                                                   append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs),
@@ -191,7 +263,10 @@ function_has_conditional_commit(F, N) :-
 %%% half-recompiled.
 recompile_function_clauses(F) :-
     function_source_clauses(F, Us),
-    ( Us == [] -> true
+    ( Us == []
+      -> retractall(det_bound_proviso(F, _, _, _)),
+         retractall(inferred_fn_type(F, _, _)),
+         remember_function_metas(F), catch(nb_delete(F), _, true)
     ; snapshot_recompile_state(F, Snapshot),
       prepare_recompile_stage(F),
       ( catch(stage_function_clauses(F, Us, Staged), Error,
@@ -208,6 +283,7 @@ snapshot_recompile_state(F, recompile_state(Metas, Provisos, Inferred)) :-
     findall(inferred(ATs, OT), inferred_fn_type(F, ATs, OT), Inferred).
 
 prepare_recompile_stage(F) :-
+    remember_function_metas(F),
     retractall(det_bound_proviso(F, _, _, _)),
     retractall(inferred_fn_type(F, _, _)),
     nb_setval(F, []).
@@ -224,43 +300,293 @@ restore_recompile_state(F, recompile_state(Metas, Provisos, Inferred)) :-
 
 stage_function_clauses(_, [], []).
 stage_function_clauses(F, [Ref-Term|Us],
-                       [staged(Ref, Term, OriginFile, Clause, Dependencies)|Ss]) :-
+                       [staged(Ref, Term, OriginFile, Clause, Dependencies, Uses)|Ss]) :-
     clause(_, _, Ref),
     compiled_dependency_origin(Ref, OriginFile),
     ( ho_specialization(_, F) -> ConstrainArgs = false ; ConstrainArgs = true ),
-    translate_clause(Term, Clause, ConstrainArgs, Dependencies),
+    in_metta_file(OriginFile,
+                  compile_equation(Term, Clause, ConstrainArgs, Dependencies, Uses)),
     stage_function_clauses(F, Us, Ss).
 
 swap_staged_function(F, Us, Staged) :-
+    findall(OldA,
+            ( member(Ref-_, Us),
+              ( equation_arity(F, OldA, Ref) -> true
+              ; clause(OldH, _, Ref), functor(OldH, F, OldA) ) ),
+            OldAs0),
+    sort(OldAs0, OldArities),
     forall(member(Ref-_, Us),
-           ( clause(_, _, Ref) -> erase(Ref) ; true )),
-    forall(member(Ref-_, Us),
-           ( retractall(translated_from(Ref, _)),
+           ( ( clause(_, _, Ref) -> erase(Ref) ; true ),
+             forget_translation(Ref),
              forget_compiled_dependencies(Ref) )),
     assert_staged_clauses(Staged),
-    invalidate_specializations(F).
+    forall(member(OldA, OldArities), no_equations_answer(F, OldA)),
+    sync_function_arities(F),
+    invalidate_specializations(F),
+    forall(metta_on_function_changed(F), true),
+    findall(NewA, equation_arity(F, NewA, _), NewAs0),
+    sort(NewAs0, NewArities),
+    ( NewArities \== OldArities,
+      current_refresh_path(ActivePath),
+      \+ memberchk(F, ActivePath)
+      -> with_refresh_step(F, ActivePath, refresh_users(F, []))
+    ; true ).
 
 assert_staged_clauses([]).
-assert_staged_clauses([staged(_, Term, OriginFile, Clause, Dependencies)|Ss]) :-
-    assertz(Clause, NewRef),
-    assertz(translated_from(NewRef, Term)),
+assert_staged_clauses([staged(_, Term, OriginFile, Clause, Dependencies, Uses)|Ss]) :-
+    assert_equation(Term, Clause, Uses, NewRef),
     Term = [=, [G|SourceArgs], _],
     length(SourceArgs, N),
     record_compiled_dependencies(NewRef, G/N, OriginFile, Dependencies),
     assert_staged_clauses(Ss).
 
-%Every compiled clause of F, in the order it was asserted (which is source
-%order - process_form/3 records translated_from/2 as it goes):
-function_source_clauses(F, Us) :- findall(Ref-Term,
-                                          ( translated_from(Ref, Term), nonvar(Term),
-                                            Term = [=, Head, _], nonvar(Head), Head = [F0|_], F0 == F,
-                                            clause(_, _, Ref) ),
-                                          Us).
+%Saved source order survives clauses moving between executable arities.
+function_source_clauses(F, Us) :-
+    findall(Ref-Term,
+            ( Term = [=, [F|_], _], translated_from(Ref, Term),
+              clause(H, _, Ref), functor(H, F, A), user_dynamic_head(F, A, H) ), Us).
 
-%Record atoms compiled as plain symbol heads, so late function registrations can be flagged:
-:- dynamic symbol_head/1.
-note_symbol_head(HV) :- atom(HV), \+ symbol_head(HV), !, assertz(symbol_head(HV)).
-note_symbol_head(_).
+note_translation_use(F, Use) :-
+    translation_recording_active, !,
+    ( atom(F) -> record_current_use(F, Use) ; true ).
+note_translation_use(_, _).
+
+note_typed_call_use(Fun, CallN) :-
+    translation_recording_active, !,
+    ( atom(Fun) -> record_current_use(Fun, call(CallN)) ; true ).
+note_typed_call_use(_, _).
+
+record_current_use(F, Use) :-
+    nb_getval(petta_translation_uses, Box),
+    arg(1, Box, Old),
+    translation_key(F, Use, Key),
+    nb_setarg(1, Box, [use(F, Use, Key)|Old]).
+
+self_function_types(F, Types) :-
+    findall(decl(N, Scheme, Effect),
+            fn_decl(F, N, Scheme, Effect, _, _),
+            FnDecls0),
+    maplist(copy_term_nat, FnDecls0, FnDecls1),
+    maplist([D]>>numbervars(D, 0, _, [singletons(true)]), FnDecls1),
+    findall(raw(T0),
+            ( catch(match('&self', [':', F, T], T, T), _, fail),
+              copy_term_nat(T, T0),
+              numbervars(T0, 0, _, [singletons(true)]) ),
+            RawDecls),
+    append(FnDecls1, RawDecls, All0),
+    sort(All0, Types).
+
+call_memo_mode(F, N, Memo) :-
+    length(Args, N),
+    resolve_memoization(F, Args, Out, Goal),
+    ( Goal =.. [F|Direct], append(Args, [Out], Direct)
+      -> Memo = direct
+    ; Memo = memo ).
+
+translation_key(F, data, Key) :- ( fun(F) -> Key = function ; Key = data ).
+translation_key(F, pattern, Key) :-
+    ( fun(F) -> findall(A, callable_arity(F, A), As), sort(As, Key) ; Key = data ).
+translation_key(F, call(N), Key) :-
+    ( translator_rule(F) ->
+        self_function_types(F, Types),
+        Key = rule(Types)
+    ; \+ fun(F) ->
+        Key = data
+    ; A is N + 1,
+      self_function_types(F, Types),
+      ( callable_arity(F, A) ->
+          call_memo_mode(F, N, Memo),
+          Key = call(Memo, Types)
+      ; findall(M, (callable_arity(F, M), M > A), Ms),
+        sort(Ms, More),
+        ( More == [] ->
+            ( callable_arity(F, _) -> Key = over(Types) ; Key = partial_any(Types) )
+        ; More = [TargetA|_],
+          TargetN is TargetA - 1,
+          call_memo_mode(F, TargetN, TargetMemo),
+          eta_mode(F, Mode), Key = partial(More, TargetMemo, Types, Mode) ) ) ).
+
+translation_use_valid(F, Use, Key) :-
+    translation_key(F, Use, Now),
+    ( Now =@= Key -> true
+    ; Now == data, Use = call(N), Key == call(direct, []), A is N + 1,
+      no_equations_clause(F, A, _) ).
+
+record_translation(Ref, Term, Uses) :- record_translation(assertz, Ref, Term, Uses).
+record_translation(Insert, Ref, Term, Uses) :-
+    call(Insert, translated_from(Ref, Term)),
+    forall(member(use(F, Use, Key), Uses),
+        ( assertz(translation_use(F, Ref, Use, Key)),
+          ( translation_decision(F, Use, Stored), Stored =@= Key -> true
+          ; assertz(translation_decision(F, Use, Key)) ) )).
+
+forget_translation(Ref) :-
+    findall(use(F, Use, Key), translation_use(F, Ref, Use, Key), Uses),
+    retractall(translated_from(Ref, _)),
+    retractall(translation_use(_, Ref, _, _)),
+    retractall(equation_arity(_, _, Ref)),
+    forall(member(use(F, Use, Key), Uses),
+        ( translation_use(F, _, Use, Remaining), Remaining =@= Key -> true
+        ; forall((clause(translation_decision(F, Use, Stored), true, R), Stored =@= Key), erase(R)) )).
+
+register_signature(Owner, F, A) :-
+    assertz(pending_signature(F, A, Owner)),
+    ( fun(F) -> true ; assertz(fun(F)) ),
+    ( arity(F, A) -> true ; assertz(arity(F, A)) ),
+    no_equations_answer(F, A).
+
+register_file_provisional_signatures(space_only, _, space_only) :- !.
+register_file_provisional_signatures(compile_functions, Forms, compile_functions(Owner, Functions)) :-
+    flag(metta_file_signatures, Owner, Owner + 1),
+    with_mutex(petta_definitions, with_definition_update(
+        ( findall(F-A,
+                  ( member(parsed(function, _, _, [=, [F|Args], _]), Forms),
+                    atom(F),
+                    length(Args, N),
+                    A is N + 1 ),
+                  Signatures),
+          forall(member(F-A, Signatures), register_signature(Owner, F, A)),
+          findall(F, member(F-_, Signatures), Fs0),
+          sort(Fs0, Functions) ))).
+
+refresh_file_provisional_signatures(space_only) :- !.
+refresh_file_provisional_signatures(compile_functions(_, Functions)) :-
+    with_mutex(petta_definitions,
+        with_definition_update(forall(member(F, Functions), refresh_users(F, [])))).
+
+finish_file_signatures(space_only) :- !.
+finish_file_signatures(compile_functions(Owner, _)) :-
+    with_mutex(petta_definitions, with_definition_update(
+        ( findall(F-A, pending_signature(F, A, Owner), Pairs0),
+          ( Pairs0 == [] -> true
+          ; sort(Pairs0, Pairs),
+            retractall(pending_signature(_, _, Owner)),
+            forall(member(F-A, Pairs),
+                   ( ( \+ native_arity(F, A),
+                       \+ pending_signature(F, A, _),
+                       \+ equation_arity(F, A, _),
+                       retract(no_equations_clause(F, A, EmptyRef)) )
+                     -> ignore(catch(erase(EmptyRef), _, fail))
+                   ; true )),
+            findall(F, member(F-_, Pairs), Fs0),
+            sort(Fs0, Fs),
+            forall(member(F, Fs),
+                   ( sync_function_arities(F),
+                     refresh_users(F, []) )) ) ))).
+
+install_file_definition(Space, Owner, Line, FormStr, Term, Clause) :-
+    with_mutex(petta_definitions, with_definition_update(
+        ( Term = [=, [Fn|Args], _],
+          length(Args, N),
+          Arity is N + 1,
+          add_sexp(Space, Term),
+          with_form_location(Line, FormStr,
+                             compile_equation(Term, Clause, true, Dependencies, Uses)),
+          assert_equation(Term, Clause, Uses, Ref),
+          record_compiled_dependencies(Ref, Fn/N, Dependencies),
+          once(retract(pending_signature(Fn, Arity, Owner))),
+          sync_function_arities(Fn),
+          notify_mutation(clause_changed(Fn/N, prevalidated)),
+          refresh_users(Fn, []),
+          forall(metta_on_function_changed(Fn), true) ))).
+
+assert_equation(Term, Clause, Uses, Ref) :-
+    Clause = (Head :- _),
+    functor(Head, F, A),
+    ( retract(no_equations_clause(F, A, Empty)) -> erase(Empty) ; true ),
+    assertz(Clause, Ref),
+    assertz(equation_arity(F, A, Ref)),
+    record_translation(Ref, Term, Uses).
+
+user_dynamic_head(F, A, H) :-
+    current_predicate(F/A),
+    functor(H, F, A),
+    predicate_property(H, dynamic),
+    \+ predicate_property(H, imported_from(_)).
+
+native_predicate_arity(F, A) :-
+    current_predicate(F/A),
+    \+ (current_op(_, _, F), A =< 2),
+    functor(H, F, A),
+    ( user_dynamic_head(F, A, H)
+      -> once((clause(H, _, R), \+ translated_from(R, _), \+ no_equations_clause(F, A, R)))
+    ; predicate_property(H, foreign)
+    ; predicate_property(H, number_of_clauses(K)), K > 0 ).
+
+callable_arity(F, Arity) :-
+    ( nonvar(Arity)
+      -> ( arity(F, Arity), !
+         ; native_function(F),
+           current_predicate(F/Arity),
+           \+ no_equations_clause(F, Arity, _),
+           \+ (current_op(_, _, F), Arity =< 2) )
+    ; arity(F, Arity)
+    ; native_function(F),
+      current_predicate(F/Arity),
+      \+ arity(F, Arity),
+      \+ no_equations_clause(F, Arity, _),
+      \+ (current_op(_, _, F), Arity =< 2) ).
+
+has_equations(F, A) :- equation_arity(F, A, _), !.
+
+no_equations_answer(F, A) :-
+    ( native_arity(F, A) ; has_equations(F, A) ; no_equations_clause(F, A, _) ), !.
+no_equations_answer(F, A) :-
+    N is A - 1,
+    length(Args, N),
+    append(Args, [[F|Args]], HeadArgs),
+    Head =.. [F|HeadArgs],
+    assertz(Head, Ref),
+    assertz(no_equations_clause(F, A, Ref)).
+
+sync_function_arities(F) :-
+    forall(arity(F, A),
+        ( (native_arity(F, A) ; pending_signature(F, A, _) ; equation_arity(F, A, _))
+          -> true ; retractall(arity(F, A)) )),
+    ( ( native_function(F) ; arity(F, _) )
+      -> ( fun(F) -> true ; assertz(fun(F)) )
+    ; retractall(fun(F)) ).
+
+invalidate_function_analysis_caches(G) :-
+    findall(GN,
+            ( compiled_deps(Ref, G/GN, _, _),
+              clause(_, _, Ref) ),
+            GNs0),
+    sort(GNs0, GNs),
+    forall(member(GN, GNs),
+           ( unified_checker_invalidate_event(clause_changed(G/GN, derived)),
+             analysis_cache_invalidate_event(clause_changed(G/GN, derived)) )).
+
+current_refresh_path(Path) :-
+    ( nb_current('$petta_refresh_path', P), is_list(P) -> Path = P ; Path = [] ).
+
+with_refresh_step(G, Path, Goal) :-
+    setup_call_cleanup(
+        b_setval('$petta_refresh_path', [G|Path]),
+        Goal,
+        ( Path == []
+          -> catch(nb_delete('$petta_refresh_path'), _, true)
+        ; b_setval('$petta_refresh_path', Path) )).
+
+refresh_users(F, ExtraPath) :-
+    current_refresh_path(ActivePath),
+    append(ExtraPath, ActivePath, Path),
+    findall(G,
+            ( translation_decision(F, Use, Key),
+              \+ translation_use_valid(F, Use, Key),
+              translation_use(F, Ref, Use, Stored),
+              Stored =@= Key,
+              translated_from(Ref, [=, [G|_], _]),
+              clause(_, _, Ref) ),
+            Raw),
+    sort(Raw, Users),
+    forall(member(G, Users),
+        ( memberchk(G, Path)
+          -> throw(error(domain_error(finite_application_interface, [G|Path]), none))
+        ; with_refresh_step(G, Path,
+              ( invalidate_function_analysis_caches(G),
+                recompile_function_clauses(G),
+                refresh_users(G, []) )) )).
 
 %Print compiled clause:
 maybe_print_compiled_clause(_, _, _) :- silent(true), !.
@@ -295,7 +621,10 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                          -> % --- Case 1: callable predicate ---
                             length(Args, N),
                             Arity is N + 1,
-                            ( current_predicate(F/Arity) , \+ (current_op(_, _, F), Arity =< 2)
+                            ( ( arity(F, Arity)
+                              ; native_function(F), current_predicate(F/Arity),
+                                \+ no_equations_clause(F, Arity, _),
+                                \+ (current_op(_, _, F), Arity =< 2) )
                               -> resolve_memoization(F, Args, Out, Goal),
                                  catch(call(Goal), _, fail)
                             ; incomplete_application_kind(F, Arity, partial)
@@ -542,9 +871,13 @@ constrain_typed_space_args(Pattern, Var, Goals) :-
             ( declared_fn_type(F, ArgTypes, _, Det),
               length(ArgTypes, N) ),
             [det]), !,
+    note_translation_use(F, pattern),
     translate_expr([F|Args], GoalsExpr, Var),
     flatten(GoalsExpr, Goals).
 constrain_typed_space_args(In, Out, Goals) :-
+    ( In = [F|Args], atom(F), F \== cons, is_list(Args)
+      -> note_translation_use(F, pattern)
+    ; true ),
     maplist(constrain_typed_space_args, In, Out, NestedGoalsList),
     flatten(NestedGoalsList, Goals), !.
 
@@ -676,7 +1009,7 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                          append(GsH, [with_mutex(M,Conj)], Goals)
         ; special_builtin_form(HV, T, transaction), T = [X]
           -> translate_expr_to_conj(X, Conj, Out),
-                                        append(GsH, [transaction(Conj)], Goals)
+                                        append(GsH, [with_definition_update(Conj)], Goals)
         %--- Sequential execution ---:
         ; special_builtin_form(HV, T, progn), T = Exprs
           -> translate_args(Exprs, GsList, Outs),
@@ -852,21 +1185,22 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
                                            % A lambda body is deferred code: compile an attributed copy, so
                                            % facts produced inside it do not reach the enclosing expression.
                                            copy_term(LambdaSource, IsolatedLambdaSource),
-                                           with_unified_ad_hoc_clause_analysis(
-                                               IsolatedLambdaSource,
-                                               translate_clause(
-                                                   IsolatedLambdaSource, Clause,
-                                                   true, LambdaDependencies)),
+                                           with_isolated_analysis_events(
+                                               with_unified_ad_hoc_clause_analysis(
+                                                   IsolatedLambdaSource,
+                                                   compile_equation(
+                                                       IsolatedLambdaSource, Clause,
+                                                       true, LambdaDependencies, LambdaUses))),
                                            %translate_clause records arities; keep the function marker idempotent.
-                                           ( fun(F) -> true ; assertz(fun(F)) ),
-                                           assertz(Clause, LambdaRef),
-                                           assertz(translated_from(LambdaRef, IsolatedLambdaSource)),
-                                           length(FullArgs, N),
-                                           record_compiled_dependencies(LambdaRef, F/N, LambdaDependencies),
+                                           with_mutex(petta_definitions,
+                                               ( ( fun(F) -> true ; assertz(fun(F)) ),
+                                                 assert_equation(IsolatedLambdaSource, Clause, LambdaUses, LambdaRef),
+                                                 length(FullArgs, N),
+                                                 record_compiled_dependencies(LambdaRef, F/N, LambdaDependencies),
+                                                 sync_function_arities(F) )),
+                                           ( FreeVars == [] -> true ; note_translation_use(F, pattern) ),
                                            format(atom(Label), "metta lambda (~w)", [F]),
                                            maybe_print_compiled_clause(Label, ['|->', Args, Body], Clause),
-                                           Arity is N + 1,
-                                           (arity(F, Arity) -> true ; assertz(arity(F, Arity))),
                                            % emit closure capturing the environment (free vars)
                                            ( FreeVars == [] -> Out = F
                                                              ; Out = partial(F, FreeVars) ),
@@ -993,7 +1327,7 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
           -> translate_typed_call(Fun, Bound, T, GsH, Goals, Out)
         %Literals (numbers, strings, etc.), known non-function atom => data:
         ; ( atomic(HV), \+ atom(HV) ; atom(HV), \+ fun(HV) )
-          -> note_symbol_head(HV),
+          -> ( atom(HV) -> note_translation_use(HV, data) ; true ),
              translate_args(T, GsT, AVs),
              append(GsH, GsT, Goals),
              Out = [HV|AVs]
@@ -1077,30 +1411,35 @@ closure_apply_goal(HV, [A, B, C], Out, apply_fn3(HV, A, B, C, Out)) :- !.
 closure_apply_goal(HV, AVs, Out, apply_fnN(HV, AVs, Out)).
 
 %Runtime closure application; the last clause keeps reduce/2 semantics for
-%values that are not callable. Errors raised inside the callee propagate:
-apply_fn1(F, A, Out) :- atom(F), fun(F), !, safe_apply(call(F, A, Out)).
-apply_fn1(P, A, Out) :- compound(P), P = partial(F, Bs), !,
+%values that are not callable or whose arities changed. Errors raised inside the callee propagate:
+apply_fn1(F, A, Out) :- atom(F), arity(F, 2), !, safe_apply(call(F, A, Out)).
+apply_fn1(P, A, Out) :- compound(P), P = partial(F, Bs),
                         append(Bs, [A, Out], CallArgs),
-                        Goal =.. [F|CallArgs], safe_apply(Goal).
+                        Goal =.. [F|CallArgs], functor(Goal, F, Arity), arity(F, Arity), !,
+                        safe_apply(Goal).
 apply_fn1(F, A, Out) :- reduce([F, A], Out).
 
-apply_fn2(F, A, B, Out) :- atom(F), fun(F), !, safe_apply(call(F, A, B, Out)).
-apply_fn2(P, A, B, Out) :- compound(P), P = partial(F, Bs), !,
+apply_fn2(F, A, B, Out) :- atom(F), arity(F, 3), !, safe_apply(call(F, A, B, Out)).
+apply_fn2(P, A, B, Out) :- compound(P), P = partial(F, Bs),
                            append(Bs, [A, B, Out], CallArgs),
-                           Goal =.. [F|CallArgs], safe_apply(Goal).
+                           Goal =.. [F|CallArgs], functor(Goal, F, Arity), arity(F, Arity), !,
+                           safe_apply(Goal).
 apply_fn2(F, A, B, Out) :- reduce([F, A, B], Out).
 
-apply_fn3(F, A, B, C, Out) :- atom(F), fun(F), !, safe_apply(call(F, A, B, C, Out)).
-apply_fn3(P, A, B, C, Out) :- compound(P), P = partial(F, Bs), !,
+apply_fn3(F, A, B, C, Out) :- atom(F), arity(F, 4), !, safe_apply(call(F, A, B, C, Out)).
+apply_fn3(P, A, B, C, Out) :- compound(P), P = partial(F, Bs),
                               append(Bs, [A, B, C, Out], CallArgs),
-                              Goal =.. [F|CallArgs], safe_apply(Goal).
+                              Goal =.. [F|CallArgs], functor(Goal, F, Arity), arity(F, Arity), !,
+                              safe_apply(Goal).
 apply_fn3(F, A, B, C, Out) :- reduce([F, A, B, C], Out).
 
-apply_fnN(F, Args, Out) :- atom(F), fun(F), !, append(Args, [Out], CallArgs),
-                           Goal =.. [F|CallArgs], safe_apply(Goal).
-apply_fnN(P, Args, Out) :- compound(P), P = partial(F, Bs), !,
+apply_fnN(F, Args, Out) :- atom(F), append(Args, [Out], CallArgs),
+                           Goal =.. [F|CallArgs], functor(Goal, F, Arity), arity(F, Arity), !,
+                           safe_apply(Goal).
+apply_fnN(P, Args, Out) :- compound(P), P = partial(F, Bs),
                            append(Bs, Args, All), append(All, [Out], CallArgs),
-                           Goal =.. [F|CallArgs], safe_apply(Goal).
+                           Goal =.. [F|CallArgs], functor(Goal, F, Arity), arity(F, Arity), !,
+                           safe_apply(Goal).
 apply_fnN(F, Args, Out) :- reduce([F|Args], Out).
 
 safe_apply(Goal) :- catch(Goal, error(existence_error(procedure, _), _), fail).
@@ -1110,6 +1449,7 @@ safe_apply(Goal) :- catch(Goal, error(existence_error(procedure, _), _), fail).
 %stay unresolved (see AGENTS.md).
 translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
         length(Args, NProv), length(Bound, NB), NTotal is NProv + NB,
+        note_typed_call_use(Fun, NTotal),
         findall(ft(ATs, OT), fn_decl_arity(Fun, NTotal, ATs, OT), FullDecls),
         ( FullDecls \== []
           -> eff_arg_types(FullDecls, NB, NProv, EffTs),
@@ -1305,8 +1645,7 @@ expression_arg_value(A, AV) :- ( maybe_closure_expr(A),
 %An underapplied call to a known function (would compile to partial(...)):
 maybe_closure_expr([F|Args]) :- atom(F), fun(F), is_list(Args),
                                 length(Args, N), Arity is N + 1,
-                                \+ ( ( current_predicate(F/Arity) ; catch(arity(F, Arity), _, fail) ),
-                                     \+ ( current_op(_, _, F), Arity =< 2 ) ).
+                                \+ callable_arity(F, Arity).
 
 trivial_goals([]).
 trivial_goals([true|Gs]) :- trivial_goals(Gs).
@@ -1378,14 +1717,15 @@ cmp_native('!=', A, B, (A \== B)).
 %Src are the call's arguments as the determinism analysis reads them: the
 %source expressions where the caller has them, otherwise the values AVs.
 build_call_or_partial(Fun, Src, AVs, Out, Inner, Extra, Goals) :- ( maybe_specialize_call(Fun, AVs, Out, Goal)
-                                                                    -> commit_call(Fun, Src, AVs, Out, Goal, Goal1),
-                                                                       append(Inner, [Goal1|Extra], Goals)
+                                                                    -> ( Goal == true
+                                                                         -> append(Inner, Extra, Goals)
+                                                                       ; commit_call(Fun, Src, AVs, Out, Goal, Goal1),
+                                                                         append(Inner, [Goal1|Extra], Goals) )
                                                                      ; build_direct_call(Fun, Src, AVs, Out, Inner, Extra, Goals) ).
 
 build_direct_call(Fun, Src, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                               Arity is N + 1,
-                                                              ( ( current_predicate(Fun/Arity) ; catch(arity(Fun, Arity), _, fail) ),
-                                                                \+ ( current_op(_, _, Fun), Arity =< 2 )
+                                                              ( callable_arity(Fun, Arity)
                                                                 -> resolve_memoization(Fun, AVs, Out, Goal0),
                                                                    commit_call(Fun, Src, AVs, Out, Goal0, Goal),
                                                                    append(Inner, [Goal|Extra], Goals)
@@ -1416,8 +1756,10 @@ translate_args_by_type([A|As], [T|Ts], GsOut, [AV|AVs]) :-
 
 %Handle data list:
 eval_data_term(X, [], X) :- (var(X); atomic(X)), !.
-eval_data_term([F|As], Goals, Val) :- ( atom(F), fun(F) -> translate_expr([F|As], Goals, Val)
-                                                         ; eval_data_list([F|As], Goals, Val) ).
+eval_data_term([F|As], Goals, Val) :- ( atom(F), fun(F)
+                                        -> translate_expr([F|As], Goals, Val)
+                                      ; ( atom(F) -> note_translation_use(F, data) ; true ),
+                                        eval_data_list([F|As], Goals, Val) ).
 
 %Handle data list entry:
 eval_data_list([], [], []).
