@@ -348,8 +348,8 @@ translate_expr([H0|T0], Goals, Out) :-
                     Arity is InputArity + 1,
                     ( incomplete_application_kind(Fun, Arity, ApplicationKind), ApplicationKind == overapplied
                       -> append(GsH, [throw_function_overapplication(Fun, InputArity)], Goals)
-                       ; maplist({Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
-                                 typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), UniqueTypeChains, Branches),
+                       ; maplist({Fun,TypeChains,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
+                                 typed_functioncall_branch(Fun, TypeChains, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), UniqueTypeChains, Branches),
                          disj_list(Branches, Disj),
                          Goals = [Disj] )
               ; build_call_or_partial(Fun, AllAVs, Out, Inner, [], Goals))
@@ -377,13 +377,23 @@ build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                              ).
 
 %Type function call generation, returns function call plus typechecks for input and output:
-typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal) :-
+typed_functioncall_branch(Fun, TypeChains, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal) :-
     TypeChain = [->|Xs],
     append(ArgTypes, [OutType], Xs),
-    translate_args_by_type(T, ArgTypes, GsT2, AVsTmp0),
+    % A closure does not store an overload choice or type-variable assignment.
+    % Only one fixed signature lets us reuse its captured argument checks.
+    ( ground(TypeChain), forall(member(Declared, TypeChains), Declared == TypeChain)
+      -> Fixed = true ; Fixed = false ),
+    ( IsPartial, Fixed == true
+      -> same_length(Bound, CapturedTypes), append(CapturedTypes, CallTypes, ArgTypes)
+       ; CallTypes = ArgTypes ),
+    translate_args_by_type(T, CallTypes, GsT2, AVsTmp0),
     ( IsPartial -> append(Bound, AVsTmp0, AVsTmp) ; AVsTmp = AVsTmp0 ),
     append(GsH, GsT2, InnerTmp),
-    ( (OutType == '%Undefined%' ; OutType == '_' ; OutType == 'Atom')
+    % A fixed result check belongs to the complete call, not its closure.
+    ( Fixed == true, length([_|AVsTmp], CallArity), \+ arity(Fun, CallArity)
+       -> Extra = []
+    ; (OutType == '%Undefined%' ; OutType == '_' ; OutType == 'Atom')
        -> Extra = [] ; Extra = [('get-type'(Out, OutType) *-> true ; 'get-metatype'(Out, OutType))] ),
     build_call_or_partial(Fun, AVsTmp, Out, InnerTmp, Extra, GoalsList),
     goals_list_to_conj(GoalsList, BranchGoal).
