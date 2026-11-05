@@ -105,11 +105,12 @@ infix_arrow_misuse(T) :- is_list(T), T = [H|_], nonvar(H), infix_arrow_misuse(H)
 
 %Normalize nested arrow types to canonical prefix form and expand aliases.
 %Nondeterministic arrows keep their marker so closure parameters carry the
-%commitment. Mode `syntax` canonicalizes arrows only, reconstructing the exact
+%commitment. Mode `syntax` canonicalizes built-in spellings only, reconstructing the exact
 %type cached before a source-local alias was visible.
 normalize_type(T, TN) :- normalize_type(aliases, T, TN).
 
 normalize_type(_, T, T) :- var(T), !.
+normalize_type(_, '_', '%Undefined%') :- !.
 normalize_type(aliases, T, R) :- atom(T), !,
                                  analysis_emit(dependency(declaration(alias, T))),
                                  ( declared_type_alias(T, Alias) -> R = Alias ; R = T ).

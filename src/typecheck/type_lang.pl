@@ -2,7 +2,7 @@
 %%% attributed-variable hooks. type_unify/2 is the single compatibility
 %%% relation; it binds type variables (polymorphism), so wrap it in
 %%% type_compat_soft/2 for a side-effect-free check.
-wildcard_type(T) :- atom(T), memberchk(T, ['%Undefined%', 'Atom', 'Expression']).
+wildcard_type(T) :- atom(T), memberchk(T, ['%Undefined%', '_', 'Atom', 'Expression']).
 
 type_unify(A, B) :- ( var(A) ; var(B) ), !, A = B.
 %A wildcard means "nothing is stated here", not "every type at once". The
