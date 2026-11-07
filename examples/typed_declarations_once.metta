@@ -1,0 +1,116 @@
+; A typed call runs its body once for each tuple of argument values.
+; Declarations decide whether it runs and which results are kept; they never
+; multiply answers or effects.
+
+; Two declarations of the same arity that both accept the call.
+(: either (-> Atom %Undefined%))
+(: either (-> Number %Undefined%))
+(= (either $x) (called $x))
+!(test (collapse (either 7)) ((called 7)))
+; An argument stays unevaluated only when every declaration takes it as Atom.
+!(test (collapse (either (+ 1 2))) ((called 3)))
+
+; The body's effects happen once.
+!(bind! &once-count (new-state 0))
+(: count-call (-> Atom %Undefined%))
+(: count-call (-> Symbol %Undefined%))
+(= (count-call $x) (change-state! &once-count (+ 1 (get-state &once-count))))
+!(count-call a)
+!(test (get-state &once-count) 1)
+
+; A value with two types under one parametric declaration.
+(: two-typed A)
+(: two-typed B)
+(: one-typed B)
+(: poly (-> $a Number))
+(= (poly $x) 1)
+!(test (collapse (poly two-typed)) (1))
+; The type variable must agree across arguments: only B fits both.
+(: same-type (-> $a $a Number))
+(= (same-type $x $y) 2)
+!(test (collapse (same-type two-typed one-typed)) (2))
+(: echo (-> $a $a))
+(= (echo $x) $x)
+!(test (collapse (echo two-typed)) (two-typed))
+(: echo-b (-> $a $a))
+(= (echo-b $x) one-typed)
+!(test (collapse (echo-b two-typed)) (one-typed))
+
+; Overloads still select by type, and each result is kept once.
+(: pick (-> Number Number))
+(: pick (-> String String))
+(= (pick $x) $x)
+!(test (collapse (pick 1)) (1))
+!(test (collapse (pick "s")) ("s"))
+!(test (collapse (pick True)) ())
+!(test (collapse (pick (superpose (1 "a")))) (1 "a"))
+; Results are checked against every declaration that accepted the arguments.
+(: both-results (-> Number Number))
+(: both-results (-> Number String))
+(= (both-results $x) $x)
+(= (both-results $x) "s")
+!(test (collapse (both-results 1)) (1 "s"))
+
+; Input type evidence is taken at call entry, not after body mutations.
+(: input-a A)
+(: output-a A)
+(: output-b B)
+(: flip (-> $a $a))
+(= (flip $x) (let $_ (add-atom &self (: input-a B)) output-b))
+!(test (collapse (flip input-a)) ())
+(: input-drop A)
+(: drop-in (-> $a $a))
+(= (drop-in $x) (let $_ (remove-atom &self (: input-drop A)) output-a))
+!(test (collapse (drop-in input-drop)) (output-a))
+(: starred *)
+(: star-id (-> $a $a))
+(= (star-id $x) "not-starred")
+!(test (collapse (star-id starred)) ())
+(: star-multi (-> $a $a))
+(: star-multi (-> Number %Undefined%))
+(= (star-multi $x) "not-starred")
+!(test (collapse (star-multi starred)) ())
+!(test (collapse (star-multi 1)) ("not-starred"))
+
+; An earlier argument rejected by every declaration stops later argument evaluation.
+!(bind! &arg-count (new-state 0))
+(: reject-early (-> Number Number %Undefined%))
+(: reject-early (-> String Number %Undefined%))
+(= (reject-early $x $y) ok)
+(= (tick-arg) (let $_ (change-state! &arg-count (+ 1 (get-state &arg-count))) 1))
+!(test (collapse (reject-early True (tick-arg))) ())
+!(test (get-state &arg-count) 0)
+
+; Each argument's type evidence is fixed when that argument is checked, not re-queried after later arguments.
+(: earlier-add A)
+(: same-arg-type (-> $t $t Number))
+(= (same-arg-type $x $y) 9)
+(= (promote-earlier) (let $_ (add-atom &self (: earlier-add B)) output-b))
+!(test (collapse (same-arg-type earlier-add (promote-earlier))) ())
+(: earlier-drop A)
+(= (drop-earlier) (let $_ (remove-atom &self (: earlier-drop A)) output-a))
+!(test (collapse (same-arg-type earlier-drop (drop-earlier))) (9))
+
+; Open variables in arguments keep bindings established by type checks without duplicating identical bindings.
+(: (box good) BoxA)
+(: (box other) BoxA)
+(: take-box (-> BoxA Number %Undefined%))
+(: take-box (-> BoxB Number %Undefined%))
+(= (take-box (box $x) $n) $x)
+!(test (collapse (take-box (box $free) 0)) (good other))
+!(test (collapse (let $x $free (let $r (take-box (box $x) 0) (let $x bad $r)))) ())
+(: unbox (-> BoxA %Undefined%))
+(= (unbox (box $x)) $x)
+!(test (collapse (unbox (box $free))) (good other))
+(: (wrap $x) (Wrap $x))
+(: same-wrap (-> (Wrap $t) (Wrap $t) Number))
+(: same-wrap (-> String String Number))
+(= (same-wrap $a $b) 1)
+!(test (collapse (let $x $free (let $r (same-wrap (wrap $x) (wrap good)) (let $x bad $r)))) ())
+!(test (collapse (let $x $free (let $r (same-wrap (wrap $x) (wrap good)) $x))) (good))
+(: (pair $x $y) (PairT $x $y))
+(: either-order (-> (PairT $a $b) (PairT $a $b)))
+(: either-order (-> (PairT $a $b) (PairT $b $a)))
+(= (either-order $p) (pair $u $v))
+!(test (collapse (let $x $free1 (let $y $free2 (let $r (either-order (pair $x $y)) (let $x left (let $y right $r)))))) ((pair left right) (pair right left)))
+!(test (collapse (let $x $free1 (let $r (either-order (pair $x $x)) (let $x left $r)))) ((pair left left)))
