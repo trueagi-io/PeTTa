@@ -342,11 +342,14 @@ translate_expr([H0|T0], Goals, Out) :-
             ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
             ) % Check for type definition [:,HV,TypeChain]
             -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
-               list_to_set(TypeChains, UniqueTypeChains),
+               list_to_set(TypeChains, DeclaredChains),
+               length(AllAVs, InputArity),
+               Arity is InputArity + 1,
+               ( arity(Fun, Arity)
+                 -> exclude(type_chain_too_long(InputArity), DeclaredChains, UniqueTypeChains)
+                  ; UniqueTypeChains = DeclaredChains ),
                ( UniqueTypeChains \= []
-                 -> length(AllAVs, InputArity),
-                    Arity is InputArity + 1,
-                    ( incomplete_application_kind(Fun, Arity, ApplicationKind), ApplicationKind == overapplied
+                 -> ( incomplete_application_kind(Fun, Arity, ApplicationKind), ApplicationKind == overapplied
                       -> append(GsH, [throw_function_overapplication(Fun, InputArity)], Goals)
                        ; maplist({Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
                                  typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal)), UniqueTypeChains, Branches),
@@ -375,6 +378,10 @@ build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                                   append(Inner, Extra, Goals)
                                                                 ; append(Inner, [throw_function_overapplication(Fun, N)], Goals)
                                                              ).
+
+%A declaration with more inputs than a complete call has arguments does not describe that call:
+type_chain_too_long(N, TypeChain) :- is_list(TypeChain), TypeChain = [Arrow|Xs], Arrow == (->),
+                                     length(Xs, L), L > N + 1.
 
 %Type function call generation, returns function call plus typechecks for input and output:
 typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal) :-
