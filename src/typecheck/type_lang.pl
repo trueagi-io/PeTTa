@@ -90,7 +90,10 @@ mreq:attr_unify_hook(Rs, Other) :-
     ( var(Other) -> ( get_attr(Other, mreq, R2) -> variant_union(Rs, R2, U),
                                                    put_attr(Other, mreq, U)
                                                  ; put_attr(Other, mreq, Rs) )
-                  ; forall(member(R, Rs), typecheck_or_error(Other, R)) ).
+                  ; check_mreqs(Rs, Other) ).
+
+check_mreqs([], _).
+check_mreqs([R|Rs], Other) :- typecheck_or_error(Other, R), check_mreqs(Rs, Other).
 
 %Analysis-only shape evidence: unlike a declared (List T), it records that the
 %value-producing expression constructs a closed list spine.

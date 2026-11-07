@@ -1136,10 +1136,9 @@ translate_typed_call(Fun, Bound, Args, GsH, Goals, Out) :-
                     -> set_call_out_type(Out, ATs, OT)
                   ; true )
                 ; Chosen = multi(Survs),
-                  maplist(overload_branch(Fun, AVs, Out), Survs, Branches),
-                  disj_list(Branches, Disj),
+                  overload_call(Fun, AVs, Out, Survs, Dispatch),
                   append(GsH, GsT, Pre),
-                  append(Pre, [goal_or_throw(Disj, error(no_matching_overload(Fun), typecheck))], Goals) )
+                  append(Pre, [goal_or_throw(Dispatch, error(no_matching_overload(Fun), typecheck))], Goals) )
         ; findall(pt(PTs, RTs, OT), fn_decl_partial(Fun, NTotal, PTs, RTs, OT, _), PartDecls),
           PartDecls = [pt(PTs, _, _)]
           -> translate_args(Args, GsT, AVs0),                      %typed partial application
@@ -1314,12 +1313,59 @@ trivial_goals([true|Gs]) :- trivial_goals(Gs).
 callable_expression_value(AV) :- atom(AV), fun(AV).
 callable_expression_value(partial(Fun, Bound)) :- atom(Fun), ground(Bound).
 
-%One dispatch branch per surviving overload: non-throwing guards, then the call:
-overload_branch(Fun, AVs, Out, ft(ATs, OT), Branch) :- maplist(overload_branch_guard(Fun), AVs, ATs, Gss),
-                                                       append(Gss, GuardGs),
-                                                       overload_out_guard(true, Fun, Out, OT, Extra),
-                                                       build_direct_call(Fun, AVs, AVs, Out, GuardGs, Extra, BranchGoals),
-                                                       goals_list_to_conj(BranchGoals, Branch).
+%An overloaded call runs its body once: the surviving declarations decide whether it
+%runs and which results are kept, but never multiply them. The first declaration
+%whose guards accept the arguments runs the call, and a result is kept if that
+%declaration, or a later declaration accepting the arguments, accepts it:
+overload_call(Fun, AVs, Out, Survs, Dispatch) :-
+        maplist(overload_guards(Fun, AVs, Out), Survs, Guards, OutGuards),
+        build_direct_call(Fun, AVs, AVs, Out, [], [], CallGoals),
+        goals_list_to_conj(CallGoals, Call),
+        ( maplist(==(true), OutGuards)
+          -> ( memberchk(true, Guards) -> Dispatch = Call
+             ; first_success(Guards, Accepted),
+               ( ground(AVs)
+                 -> Dispatch = (Accepted, Call)
+                  ; Dispatch = (ground(AVs) -> Accepted, Call ; overload_keep(Guards, AVs), Call) ) )
+           ; overload_chain(Out, Guards, OutGuards, Call, FastChain),
+             ( ground(AVs)
+               -> Dispatch = FastChain
+                ; maplist(joint_guard, Guards, OutGuards, Joint),
+                  ( memberchk(true, Guards)
+                    -> OpenDispatch = (Call, overload_keep(Joint, AVs-Out))
+                     ; OpenDispatch = (overload_enter(Guards, AVs, State), Call, overload_exit(State, Joint, AVs-Out)) ),
+                  Dispatch = (ground(AVs) -> FastChain ; OpenDispatch) ) ).
+
+overload_guards(Fun, AVs, Out, ft(ATs, OT), Guard, OutGuard) :-
+        maplist(overload_branch_guard(Fun), AVs, ATs, Gss),
+        append(Gss, GuardGs), goals_list_to_conj(GuardGs, Guard),
+        overload_out_guard(true, Fun, Out, OT, Extra), goals_list_to_conj(Extra, OutGuard).
+
+overload_chain(_, [], [], _, fail).
+overload_chain(Out, [Guard|Guards], [OutGuard|OutGuards], Call, Chain) :-
+        ( OutGuard == true
+          -> Branch = Call
+           ; maplist(joint_guard, Guards, OutGuards, Later),
+             ( memberchk(true, Later)
+               -> Branch = Call
+                ; first_success([OutGuard|Later], FastKept),
+                  ( Later == []
+                    -> Kept = FastKept
+                     ; Kept = (ground(Out) -> FastKept ; overload_keep([OutGuard|Later], Out)) ),
+                  Branch = (Call, Kept) ) ),
+        ( Guard == true
+          -> Chain = Branch
+           ; overload_chain(Out, Guards, OutGuards, Call, Rest),
+             Chain = (Guard -> Branch ; Rest) ).
+
+joint_guard(true, OutGuard, OutGuard) :- !.
+joint_guard(Guard, true, Guard) :- !.
+joint_guard(Guard, OutGuard, (Guard, OutGuard)).
+
+%Succeeds once if one of the goals succeeds:
+first_success([], fail).
+first_success([G], (G -> true)) :- !.
+first_success([G|Gs], (G -> true ; Rest)) :- first_success(Gs, Rest).
 
 overload_out_guard(MultiDecl, Fun, Out, OT, Extra) :- ( MultiDecl == true, ground(OT), \+ wildcard_type(OT)
                                                         -> ( strict_mode(true)
