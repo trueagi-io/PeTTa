@@ -1,7 +1,7 @@
 ;Migrate atoms to another space:
 (: migrateAtoms (-> %Undefined% %Undefined% Atom %Undefined%))
 (= (migrateAtoms $FromSpace $ToSpace $Pattern)
-   (match $FromSpace $Pattern ((add-atom $FromSpace $Pattern)
+   (match $FromSpace $Pattern ((add-atom $ToSpace $Pattern)
                                (remove-atom $FromSpace $Pattern))))
 
 ;Like unify-space case of Minimal MeTTa:
