@@ -431,26 +431,47 @@ overload_exit(State, Joint, VarsTerm) :-
          member(G, Joint), call(G), !
        ; overload_update(State, Joint, VarsTerm) ).
 
-overload_keep(Guards, VarsTerm) :-
+% Caller-owned type variables remain rigid. Only the translator can identify
+% fresh declaration variables which have no caller outside this obligation.
+overload_keep(Guards, VarsTerm) :- overload_keep(Guards, VarsTerm, shared).
+
+overload_keep(Guards, VarsTerm, Scope) :-
     ( ground(VarsTerm)
       -> member(G, Guards), call(G), !
        ; include(guard_succeeds_soft, Guards, Surviving),
          Surviving \== [],
-         ( same_sealed_requirement(VarsTerm, Surviving)
+         ( same_sealed_requirement(VarsTerm, Surviving, Scope)
            -> ( Surviving = [G] -> (call(G) -> true) ; true )
             ; next_overload_id(Id),
-              State = state(sealed(Id), VarsTerm, []),
+              State = state(sealed(Id, Scope), VarsTerm, []),
               attach_surviving(State, VarsTerm, Surviving) ) ).
 
-same_sealed_requirement(VarsTerm, Guards) :-
+same_sealed_requirement(VarsTerm, Guards, Scope) :-
     term_variables(VarsTerm, [Anchor|_]),
     get_attr(Anchor, mreq, Requirements),
     member(Requirement, Requirements),
     nonvar(Requirement), Requirement = '$overload'(Existing),
     Existing = state(Tag, ExistingVars, ExistingGuards),
-    nonvar(Tag), Tag = sealed(_),
+    nonvar(Tag), Tag = sealed(_, ExistingScope),
     ExistingVars == VarsTerm,
-    ExistingGuards == Guards, !.
+    ( ExistingGuards == Guards
+    ; same_private_guards(VarsTerm, ExistingGuards, ExistingScope, Guards, Scope)
+    ), !.
+
+same_private_guards(VarsTerm, Old, OldScope, New, Scope) :-
+    nonvar(OldScope), OldScope = private(OldPrivate), is_list(OldPrivate),
+    nonvar(Scope), Scope = private(Private), is_list(Private),
+    term_attvars(OldPrivate, []), term_attvars(Private, []),
+    term_variables(Old, OldVars), exclude(private_type_var(OldPrivate), OldVars, OldShared),
+    term_variables(New, NewVars), exclude(private_type_var(Private), NewVars, Shared),
+    OldShared == Shared,
+    % The live variables must be identical before comparing alpha-equivalent
+    % schemas. Strip attributes only in this comparison copy; original values
+    % and their obligations remain untouched.
+    copy_term_nat(VarsTerm-Shared-Old-New, Context-Anchors-OldCopy-NewCopy),
+    Context-Anchors-OldCopy =@= Context-Anchors-NewCopy.
+
+private_type_var(Vars, V) :- member(W, Vars), V == W, !.
 
 overload_update(State, Guards, VarsTerm) :-
     include(guard_succeeds_soft, Guards, Surviving),

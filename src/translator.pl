@@ -1318,6 +1318,9 @@ callable_expression_value(partial(Fun, Bound)) :- atom(Fun), ground(Bound).
 %whose guards accept the arguments runs the call, and a result is kept if that
 %declaration, or a later declaration accepting the arguments, accepts it:
 overload_call(Fun, AVs, Out, Survs, Dispatch) :-
+        % These variables belong to the fresh declaration instances, not to
+        % the argument values. Input-only obligations may rename them on reuse.
+        term_variables(Survs, PrivateTypes),
         maplist(overload_guards(Fun, AVs, Out), Survs, Guards, OutGuards),
         build_direct_call(Fun, AVs, AVs, Out, [], [], CallGoals),
         goals_list_to_conj(CallGoals, Call),
@@ -1326,7 +1329,7 @@ overload_call(Fun, AVs, Out, Survs, Dispatch) :-
              ; first_success(Guards, Accepted),
                ( ground(AVs)
                  -> Dispatch = (Accepted, Call)
-                  ; Dispatch = (ground(AVs) -> Accepted, Call ; overload_keep(Guards, AVs), Call) ) )
+                  ; Dispatch = (ground(AVs) -> Accepted, Call ; overload_keep(Guards, AVs, private(PrivateTypes)), Call) ) )
            ; overload_chain(Out, Guards, OutGuards, Call, FastChain),
              ( ground(AVs)
                -> Dispatch = FastChain
