@@ -1,0 +1,8 @@
+(: grab (-> Atom %Undefined%))
+(: grab (-> Atom Atom %Undefined%))
+(= (grab $k) (once (match &self (item $v) (remove-atom &self (item $v)))))
+(= (grab $k $m) (once (match &self (item $v) (remove-atom &self (item $v)))))
+(item 1)
+(item 2)
+!(grab go)
+!(test (collapse (match &self (item $v) $v)) (2))

@@ -342,7 +342,10 @@ translate_expr([H0|T0], Goals, Out) :-
             ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
             ) % Check for type definition [:,HV,TypeChain]
             -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
-               list_to_set(TypeChains, UniqueTypeChains),
+               list_to_set(TypeChains, AllTypeChains),
+               length(AllAVs, CallArity),
+               include(type_chain_takes(CallArity), AllTypeChains, ArityChains),
+               ( ArityChains == [] -> UniqueTypeChains = AllTypeChains ; UniqueTypeChains = ArityChains ),
                ( UniqueTypeChains \= []
                  -> length(AllAVs, InputArity),
                     Arity is InputArity + 1,
@@ -375,6 +378,10 @@ build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
                                                                   append(Inner, Extra, Goals)
                                                                 ; append(Inner, [throw_function_overapplication(Fun, N)], Goals)
                                                              ).
+
+%A declared type chain (-> T1 ... Tn Out) only fits a call with N arguments
+%when it takes exactly N inputs:
+type_chain_takes(N, [->|Xs]) :- length(Xs, L), N =:= L - 1.
 
 %Type function call generation, returns function call plus typechecks for input and output:
 typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal) :-
