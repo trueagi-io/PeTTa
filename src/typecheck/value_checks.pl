@@ -410,9 +410,108 @@ paired_unverified_obligation([AV|AVs], [T|Ts]) :-
 %%% Runtime residual guards (only emitted where types stay unresolved).
 %%% Bound values are checked via the user-extensible get-type reflection, so
 %%% runtime refinement types (see examples/types_dependent.metta) keep working:
+typecheck_or_error(V, Req) :-
+    nonvar(Req), Req = '$overload'(State), !,
+    ( var(V) -> constrain_var_type(V, Req)
+    ; check_overload_req(V, State) ).
 typecheck_or_error(V, T) :- ( var(V) -> constrain_var_type(V, T)
                             ; runtime_type_ok(V, T) -> true
                             ; throw(error(literal_type_mismatch(V, T), typecheck)) ).
+
+%For an overloaded call with open arguments or result, attach the disjunctive
+%input obligation before the body runs and refine it with output guards after:
+overload_enter(Guards, VarsTerm, State) :-
+    next_overload_id(Id),
+    State = state(Id, VarsTerm, []),
+    overload_update(State, Guards, VarsTerm).
+
+overload_exit(State, Joint, VarsTerm) :-
+    ( ground(VarsTerm)
+      -> setarg(3, State, [true]),
+         member(G, Joint), call(G), !
+       ; overload_update(State, Joint, VarsTerm) ).
+
+% Caller-owned type variables remain rigid. Only the translator can identify
+% fresh declaration variables which have no caller outside this obligation.
+overload_keep(Guards, VarsTerm) :- overload_keep(Guards, VarsTerm, shared).
+
+overload_keep(Guards, VarsTerm, Scope) :-
+    ( ground(VarsTerm)
+      -> member(G, Guards), call(G), !
+       ; include(guard_succeeds_soft, Guards, Surviving),
+         Surviving \== [],
+         ( same_sealed_requirement(VarsTerm, Surviving, Scope)
+           -> ( Surviving = [G] -> (call(G) -> true) ; true )
+            ; next_overload_id(Id),
+              State = state(sealed(Id, Scope), VarsTerm, []),
+              attach_surviving(State, VarsTerm, Surviving) ) ).
+
+same_sealed_requirement(VarsTerm, Guards, Scope) :-
+    term_variables(VarsTerm, [Anchor|_]),
+    get_attr(Anchor, mreq, Requirements),
+    member(Requirement, Requirements),
+    nonvar(Requirement), Requirement = '$overload'(Existing),
+    Existing = state(Tag, ExistingVars, ExistingGuards),
+    nonvar(Tag), Tag = sealed(_, ExistingScope),
+    ExistingVars == VarsTerm,
+    ( ExistingGuards == Guards
+    ; same_private_guards(VarsTerm, ExistingGuards, ExistingScope, Guards, Scope)
+    ), !.
+
+same_private_guards(VarsTerm, Old, OldScope, New, Scope) :-
+    nonvar(OldScope), OldScope = private(OldPrivate), is_list(OldPrivate),
+    nonvar(Scope), Scope = private(Private), is_list(Private),
+    term_attvars(OldPrivate, []), term_attvars(Private, []),
+    term_variables(Old, OldVars), exclude(private_type_var(OldPrivate), OldVars, OldShared),
+    term_variables(New, NewVars), exclude(private_type_var(Private), NewVars, Shared),
+    OldShared == Shared,
+    % The live variables must be identical before comparing alpha-equivalent
+    % schemas. Strip attributes only in this comparison copy; original values
+    % and their obligations remain untouched.
+    copy_term_nat(VarsTerm-Shared-Old-New, Context-Anchors-OldCopy-NewCopy),
+    Context-Anchors-OldCopy =@= Context-Anchors-NewCopy.
+
+private_type_var(Vars, V) :- member(W, Vars), V == W, !.
+
+overload_update(State, Guards, VarsTerm) :-
+    include(guard_succeeds_soft, Guards, Surviving),
+    Surviving \== [],
+    setarg(2, State, VarsTerm),
+    attach_surviving(State, VarsTerm, Surviving).
+
+attach_surviving(State, VarsTerm, [SingleG]) :- !,
+    setarg(3, State, [SingleG]),
+    term_variables(VarsTerm, Vars),
+    constrain_vars(Vars, '$overload'(State)),
+    ( call(SingleG) -> true ).
+attach_surviving(State, VarsTerm, Surviving) :-
+    setarg(3, State, Surviving),
+    term_variables(VarsTerm, Vars),
+    constrain_vars(Vars, '$overload'(State)).
+
+next_overload_id(Id) :- flag('$overload_id', Id, Id + 1).
+
+guard_succeeds_soft(G) :- \+ \+ call(G).
+
+check_overload_req(Other, State) :-
+    State = state(_Id, VarsTerm, Guards),
+    ( Guards == [true]
+      -> true
+       ; include(guard_succeeds_soft, Guards, Surviving),
+         ( Surviving == []
+           -> ( Guards = [FirstG|_], enforce_guard(FirstG), fail
+              ; throw(error(literal_type_mismatch(Other, Guards), typecheck)) )
+         ; ground(VarsTerm)
+           -> setarg(3, State, [true]),
+              member(G, Surviving), call(G), !
+          ; attach_surviving(State, VarsTerm, Surviving) ) ).
+
+enforce_guard((A, B)) :- !, enforce_guard(A), enforce_guard(B).
+enforce_guard(typecheck_match(V, T)) :- !, typecheck_or_error(V, T).
+enforce_guard(G) :- call(G).
+
+constrain_vars([], _).
+constrain_vars([V|Vs], Req) :- constrain_var_type(V, Req), constrain_vars(Vs, Req).
 
 %Non-throwing variant used inside overload dispatch branches:
 typecheck_match(V, T) :- ( var(V) -> constrain_var_type(V, T)
@@ -430,7 +529,10 @@ runtime_type_ok(V, T) :- is_arrow_type(T), !,
                          runtime_callable_at_arrow_arity(V, T),
                          \+ value_definitely_mismatch(V, T).
 runtime_type_ok(V, T) :- is_union(T), !, T = ['|'|Ms],
-                         member(M, Ms), runtime_type_ok(V, M), !.
+                         ( ground(V)
+                           -> member(M, Ms), runtime_type_ok(V, M), !
+                            ; maplist(union_member_guard(V), Ms, Guards),
+                              overload_keep(Guards, V) ).
 %Newtypes are erased: at runtime only the representation exists.
 runtime_type_ok(V, T) :- atom(T), declared_newtype(T, R), !, runtime_type_ok(V, R).
 runtime_type_ok(V, T) :- tagged_tuple_type(T, Tag, FieldTs), !,
@@ -450,6 +552,8 @@ runtime_type_ok(_, _) :- nb_current('$in_typecheck', true), !.
 runtime_type_ok(V, T) :- setup_call_cleanup(nb_setval('$in_typecheck', true),
                                             ( 'get-type'(V, T) *-> true ; 'get-metatype'(V, T) ),
                                             nb_setval('$in_typecheck', false)).
+
+union_member_guard(V, M, typecheck_match(V, M)).
 
 %Arrow guards require positive callable evidence: reduce/2 returns an
 %arbitrary atom's application unchanged, which must not satisfy a function type.
