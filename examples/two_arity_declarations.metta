@@ -1,0 +1,6 @@
+(: two-arity (-> Number Number))
+(: two-arity (-> Number Number Number))
+(= (two-arity $x) (+ $x 1))
+(= (two-arity $x $y) (+ $x $y))
+!(test (collapse (two-arity 1)) (2))
+!(test (collapse (two-arity 1 2)) (3))
