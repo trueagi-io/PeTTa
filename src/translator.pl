@@ -96,8 +96,9 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
 agg_reduce(AF, Acc, Val, NewAcc) :- reduce([AF, Acc, Val], NewAcc).
 
 %Combined expr translation to goals list
-translate_expr_to_conj(Input, Conj, Out) :- translate_expr(Input, Goals, Out),
-                                            goals_list_to_conj(Goals, Conj).
+translate_expr_to_conj(Input, Conj, Out) :- translate_expr_to_conj(Input, Conj, Out, _).
+translate_expr_to_conj(Input, Conj, Out, Evidence) :- translate_expr(Input, Goals, Out, Evidence),
+                                                      goals_list_to_conj(Goals, Conj).
 
 %Special stream operation rewrite rules before main translation
 rewrite_streamops(['trace!', Arg1, Arg2],
@@ -122,10 +123,11 @@ safe_rewrite_streamops(In, Out) :- ( compound(In), In = [Op|_], atom(Op) -> rewr
                                                                           ; Out = In).
 
 %Turn MeTTa code S-expression into goals list:
-translate_expr(X, [], X)          :- ((var(X) ; atomic(X)) ; X = partial(_,_)), !.
-translate_expr([H0|T0], Goals, Out) :-
+translate_expr(In, Goals, Out) :- translate_expr(In, Goals, Out, _).
+translate_expr(X, [], X, none)          :- ((var(X) ; atomic(X)) ; X = partial(_,_)), !.
+translate_expr([H0|T0], Goals, Out, Evidence) :-
         safe_rewrite_streamops([H0|T0],[H|T]),
-        translate_expr(H, GsH, HV),
+        translate_expr(H, GsH, HV, HeadEvidence),
         %--- Translator rules ---:
         ( nonvar(HV), translator_rule(HV) -> ( catch(match('&self', [':', HV, TypeChain], TypeChain, TypeChain), _, fail)
                                                -> TypeChain = [->|Xs],
@@ -135,7 +137,7 @@ translate_expr([H0|T0], Goals, Out) :-
                                              append(T1,[Gs],Args),
                                              HookCall =.. [HV|Args],
                                              call(HookCall),
-                                             translate_expr(Gs, GsE, Out),
+                                             translate_expr(Gs, GsE, Out, Evidence),
                                              append([GsH,GsT,GsE],Goals)
         %--- Non-determinism ---:
         ; HV == superpose, T = [Args], is_list(Args) -> build_superpose_branches(Args, Out, Branches),
@@ -153,7 +155,7 @@ translate_expr([H0|T0], Goals, Out) :-
                                               append(GsH, [Goal1], G1),
                                               append(G1, GsE, G2),
                                               append(G2, [test(Actual, ExpVal, Out)], Goals)
-        ; HV == once, T = [X] -> translate_expr_to_conj(X, Conj, Out),
+        ; HV == once, T = [X] -> translate_expr_to_conj(X, Conj, Out, Evidence),
                                  append(GsH, [once(Conj)], Goals)
         ; HV == hyperpose, T = [L]
           -> ( nonvar(L), is_list(L)
@@ -162,17 +164,17 @@ translate_expr([H0|T0], Goals, Out) :-
                ; translate_expr(L, GsL, LV),
                  append(GsH, GsL, Inner),
                  append(Inner, [hyperpose_runtime(LV, Out)], Goals) )
-        ; HV == with_mutex, T = [M,X] -> translate_expr_to_conj(X, Conj, Out),
+        ; HV == with_mutex, T = [M,X] -> translate_expr_to_conj(X, Conj, Out, Evidence),
                                          append(GsH, [with_mutex(M,Conj)], Goals)
-        ; HV == transaction, T = [X] -> translate_expr_to_conj(X, Conj, Out),
+        ; HV == transaction, T = [X] -> translate_expr_to_conj(X, Conj, Out, Evidence),
                                         append(GsH, [transaction(Conj)], Goals)
         %--- Sequential execution ---:
-        ; HV == progn, T = Exprs -> translate_args(Exprs, GsList, Outs),
+        ; HV == progn, T = Exprs -> translate_progn(Exprs, GsList, Outs, Evidence),
                                     append(GsH, GsList, Tmp),
                                     last(Outs, Out),
                                     Goals = Tmp
         ; HV == prog1, T = Exprs -> Exprs = [First|Rest],
-                                    translate_expr(First, GsF, Out),
+                                    translate_expr(First, GsF, Out, Evidence),
                                     translate_args(Rest, GsRest, _),
                                     append(GsH, GsF, Tmp1),
                                     append(Tmp1, GsRest, Goals)
@@ -212,10 +214,10 @@ translate_expr([H0|T0], Goals, Out) :-
         %--- Unification constructs ---:
         ; (HV == let ; HV == chain), T = [Pat, Val, In] -> translate_expr(Pat, Gp, Pv),
                                                            translate_expr(Val, Gv, V),
-                                                           translate_expr(In,  Gi, Out),
+                                                           translate_expr(In,  Gi, Out, Evidence),
                                                            append([GsH,[(Pv=V)],Gp,Gv,Gi], Goals)
         ; HV == 'let*', T = [Binds, Body] -> letstar_to_rec_let(Binds,Body,RecLet),
-                                             translate_expr(RecLet,  Goals, Out)
+                                             translate_expr(RecLet, Goals, Out, Evidence)
         ; HV == sealed, T = [Vars, Expr] -> translate_expr_to_conj(Expr, Con, Val),
                                             Goals = [copy_term(Vars,[Con,Val],_,[Ncon,Out]),Ncon]
         %--- Iterating over non-deterministic generators without reification ---:
@@ -295,7 +297,7 @@ translate_expr([H0|T0], Goals, Out) :-
                                                                    Goal =.. [HV,S,Atom,Out],
                                                                    append([GsH,G1,[Goal]], Goals)
         ; HV == match, T = [Space, Pattern, Body] -> translate_expr(Space, G1, S),
-                                                     translate_expr(Body, GsB, Out),
+                                                     translate_expr(Body, GsB, Out, Evidence),
                                                      append(G1, [match(S, Pattern, Out, Out)], G2),
                                                      append(G2, GsB, Goals)
         %--- Predicate to compiled goal ---:
@@ -341,8 +343,8 @@ translate_expr([H0|T0], Goals, Out) :-
         ; translate_args(T, GsT, AVs),
           append(GsH, GsT, Inner),
           %Known function => direct call:
-          ( is_list(AVs), 
-            ( atom(HV), fun(HV), Fun = HV, AllAVs = AVs, IsPartial = false
+          ( is_list(AVs),
+            ( atom(HV), fun(HV), Fun = HV, Bound = [], AllAVs = AVs, IsPartial = false
             ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
             ) % Check for type definition [:,HV,TypeChain]
             -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
@@ -356,7 +358,7 @@ translate_expr([H0|T0], Goals, Out) :-
                ( UniqueTypeChains \= []
                  -> ( incomplete_application_kind(Fun, Arity, ApplicationKind), ApplicationKind == overapplied
                       -> append(GsH, [throw_function_overapplication(Fun, InputArity)], Goals)
-                       ; typed_functioncall(Fun, UniqueTypeChains, T, GsH, IsPartial, Bound, Out, Goal),
+                       ; typed_functioncall(Fun, UniqueTypeChains, T, GsH, IsPartial, Bound, HeadEvidence, Out, Goal, Evidence),
                          Goals = [Goal] )
               ; build_call_or_partial(Fun, AllAVs, Out, Inner, [], Goals))
           %Literals (numbers, strings, etc.), known non-function atom => data:
@@ -368,7 +370,9 @@ translate_expr([H0|T0], Goals, Out) :-
                            append(Inner, Gd, Goals),
                            Out = [HV1|AVs]
           %Unknown head (var/compound) => runtime dispatch:
-          ; append(Inner, [reduce([HV|AVs], Out)], Goals) )).
+          ; append(Inner, [reduce([HV|AVs], Out)], Goals) ),
+        %Other expressions conservatively recheck captured values.
+        ( var(Evidence) -> Evidence = none ; true ) ).
 
 %Generate actual function call or partial if arity not complete:
 build_call_or_partial(Fun, AVs, Out, Inner, Extra, Goals) :- length(AVs, N),
@@ -389,31 +393,63 @@ type_chain_too_short(N, TypeChain) :- is_list(TypeChain), TypeChain = [Arrow|Xs]
 %A declaration with more inputs than a complete call has arguments does not describe that call:
 type_chain_too_long(N, TypeChain) :- is_list(TypeChain), TypeChain = [Arrow|Xs], Arrow == (->),
                                      length(Xs, L), L > N + 1.
+
 %A typed call runs its body once for each tuple of argument values: the declarations
 %decide whether it runs and which results it keeps, but never multiply them.
-%One declaration without type variables keeps the direct translation:
-typed_functioncall(Fun, [TypeChain], T, GsH, IsPartial, Bound, Out, Goal) :-
-    ground(TypeChain), !,
-    typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, Goal).
+%Only a complete, non-partial call with one ground declaration keeps the direct translation:
+typed_functioncall(Fun, [TypeChain], T, GsH, false, _, _, Out, Goal, _) :-
+    ground(TypeChain), length(T, NA), Arity is NA + 1, arity(Fun, Arity), !,
+    typed_functioncall_branch(Fun, TypeChain, T, GsH, Out, Goal).
 %Otherwise each argument is evaluated once and checked at that point, carrying the
 %surviving declarations and type-variable bindings forward to the call and output check:
-typed_functioncall(Fun, TypeChains, T, GsH, IsPartial, Bound, Out, Goal) :-
+typed_functioncall(Fun, TypeChains, T, GsH, IsPartial, Bound, TypeEvidence, Out, Goal, Evidence) :-
     maplist(initial_type_chain, TypeChains, Chains0),
     ( ground(TypeChains) -> GroundChains = true ; GroundChains = false ),
-    ( IsPartial -> Seen0 = Bound ; Seen0 = [] ),
-    translate_args_chain(T, 0, GroundChains, Chains0, Chains0, Seen0, SeenFinal, GsT, AVs0, FinalChains),
+    length(Bound, NB), length(T, NA), Arity is NB + NA + 1,
+    ( arity(Fun, Arity) -> Complete = true ; Complete = false ),
+    maplist(drop_arg_specs(NB), Chains0, RemainingChains),
+    ( TypeEvidence = evidence(Partial, EvidenceChains, Seen1), Partial == partial(Fun, Bound)
+      -> CapturedGoals = [evidence_chains_for_call(RemainingChains, EvidenceChains, CapturedChains)]
+       ; captured_type_checks(Bound, GroundChains, Chains0, [], Seen1, CapturedChains, CapturedGoals) ),
+    translate_args_chain(T, 0, GroundChains, RemainingChains, CapturedChains, Seen1, SeenFinal, GsT, AVs0, FinalChains),
     ( IsPartial -> append(Bound, AVs0, AVs) ; AVs = AVs0 ),
-    append(GsH, GsT, Inner),
-    ( forall(member(chain(_, OutSpec), Chains0), unchecked_spec(OutSpec))
-      -> Extra = []
+    append(GsH, CapturedGoals, HeadGoals), append(HeadGoals, GsT, Inner),
+    ( Complete == false -> Extra = []
+     ; forall(member(chain(_, OutSpec), Chains0), unchecked_spec(OutSpec))
+       -> Extra = []
        ; Extra = [output_chains_accept(Out, SeenFinal, FinalChains)] ),
     build_call_or_partial(Fun, AVs, Out, Inner, Extra, GoalsList),
-    goals_list_to_conj(GoalsList, Goal).
+    goals_list_to_conj(GoalsList, Goal),
+    ( Complete == false
+      -> Evidence = evidence(Out, FinalChains, SeenFinal)
+       ; true ).
 
 initial_type_chain([->|Xs], chain(ArgSpecs, OutSpec)) :-
     append(ArgTypes, [OutType], Xs),
     maplist(type_spec, ArgTypes, ArgSpecs),
     type_spec(OutType, OutSpec).
+
+drop_arg_specs(N, chain(ArgSpecs, OutSpec), chain(Rest, OutSpec)) :-
+    length(Captured, N), append(Captured, Rest, ArgSpecs).
+
+evidence_chains_for_call(RemainingChains, EvidenceChains, CapturedChains) :-
+    maplist(chain_remaining_arity, RemainingChains, Arities0),
+    sort(Arities0, Arities),
+    include(evidence_remaining_arity(Arities), EvidenceChains, CapturedChains),
+    CapturedChains = [_|_].
+
+chain_remaining_arity(chain(Specs, _), N) :- length(Specs, N).
+evidence_remaining_arity(Arities, Chain) :- chain_remaining_arity(Chain, N), memberchk(N, Arities).
+
+%Captured expressions were evaluated when the closure was created. At completion,
+%recheck their values to restore declaration correlations before checking new args.
+captured_type_checks([], _, Chains, Seen, Seen, Chains, []).
+captured_type_checks([AV|AVs], GroundChains, InChains, Seen0, SeenFinal, OutChains, [StepGoal|Goals]) :-
+    ( Seen0 == [] -> Seen1 = AV ; Seen1 = [AV|Seen0] ),
+    ( GroundChains == true
+      -> StepGoal = step_ground_type_chains(AV, Seen1, InChains, NextChains)
+       ; StepGoal = step_type_chains(AV, Seen1, InChains, NextChains) ),
+    captured_type_checks(AVs, GroundChains, NextChains, Seen1, SeenFinal, OutChains, Goals).
 
 type_spec(T, atom) :- T == 'Atom', !.
 type_spec(T, unchecked) :- ( T == '%Undefined%' ; T == '_' ), !.
@@ -551,11 +587,10 @@ unique_type_match(V, T) :-
     member(V, Vs).
 
 %Type function call generation, returns function call plus typechecks for input and output:
-typed_functioncall_branch(Fun, TypeChain, T, GsH, IsPartial, Bound, Out, BranchGoal) :-
+typed_functioncall_branch(Fun, TypeChain, T, GsH, Out, BranchGoal) :-
     TypeChain = [->|Xs],
     append(ArgTypes, [OutType], Xs),
-    translate_args_by_type(T, ArgTypes, GsT2, AVsTmp0),
-    ( IsPartial -> append(Bound, AVsTmp0, AVsTmp) ; AVsTmp = AVsTmp0 ),
+    translate_args_by_type(T, ArgTypes, GsT2, AVsTmp),
     append(GsH, GsT2, InnerTmp),
     ( (OutType == '%Undefined%' ; OutType == '_' ; OutType == 'Atom')
        -> Extra = []
@@ -619,6 +654,11 @@ translate_args([], [], []).
 translate_args([X|Xs], Goals, [V|Vs]) :- translate_expr(X, G1, V),
                                          translate_args(Xs, G2, Vs),
                                          append(G1, G2, Goals).
+
+translate_progn([X], Goals, [V], Evidence) :- !, translate_expr(X, Goals, V, Evidence).
+translate_progn([X|Xs], Goals, [V|Vs], Evidence) :- translate_expr(X, G1, V),
+                                                    translate_progn(Xs, G2, Vs, Evidence),
+                                                    append(G1, G2, Goals).
 
 %Build A ; B ; C ... from a proper list into a fresh output goal:
 disj_list([], fail).

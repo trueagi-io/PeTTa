@@ -47,4 +47,38 @@ test(attributed_keys) :-
 test(cyclic_keys) :-
     X=loop(X), Y=loop(Y), check_groups([X-a,Y-b]).
 
+test(partial_translation_leaves_no_choice_point) :-
+    setup_call_cleanup(
+        ( assertz(user:'&self'(':', tc_partial_det, [->, A, A, 'Bool'])),
+          assertz(user:fun(tc_partial_det)),
+          assertz(user:arity(tc_partial_det, 3)) ),
+        ( findall(Out-Goals, user:translate_expr([tc_partial_det, 1], Goals, Out), Translations),
+          assertion(Translations = [partial(tc_partial_det, [1])-_]),
+          Translations = [_-Goals],
+          assertion(\+ ( sub_term(Sub, Goals), compound(Sub),
+                         functor(Sub, with_type_evidence, 2) )),
+          findall(Out, user:eval([tc_partial_det, 1], Out), Outs),
+          assertion(Outs == [partial(tc_partial_det, [1])]) ),
+        ( retractall(user:'&self'(':', tc_partial_det, _)),
+          retractall(user:fun(tc_partial_det)),
+          retractall(user:arity(tc_partial_det, _)) )).
+
+test(evidence_arity_filter_preserves_bindings) :-
+    Evidence = [chain([checked(type(X))], checked(out(X))),
+                chain([checked(other), checked(extra)], checked('Bool'))],
+    Remaining = [chain([checked(fresh)], checked('Bool'))],
+    user:evidence_chains_for_call(Remaining, Evidence, Selected),
+    assertion(Selected == [chain([checked(type(X))], checked(out(X)))]),
+    X = bound,
+    assertion(Selected == [chain([checked(type(bound))], checked(out(bound)))]),
+    findall(SelectedAgain, user:evidence_chains_for_call(Remaining, Evidence, SelectedAgain), Solutions),
+    assertion(Solutions == [[chain([checked(type(bound))], checked(out(bound)))]]).
+
+test(evidence_arity_filter_rejects_empty_selection) :-
+    Evidence = [chain([checked(type(X))], checked(out(X)))],
+    Remaining = [chain([checked(first), checked(second)], checked('Bool'))],
+    findall(Selected, user:evidence_chains_for_call(Remaining, Evidence, Selected), Solutions),
+    assertion(Solutions == []),
+    assertion(var(X)).
+
 :- end_tests(type_chains).
