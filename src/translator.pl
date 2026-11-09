@@ -7,10 +7,12 @@ constrain_args([F, A, B], Out, Goals) :- nonvar(F),
                                          Out = [A1|B1],
                                          append(G1, G2, Goals), !.
 constrain_args([F|Args], Var, Goals) :- atom(F),
+                                        note_translation_use(F, pattern),
                                         fun(F), !,
                                         translate_expr([F|Args], GoalsExpr, Var),
                                         flatten(GoalsExpr, Goals).
-constrain_args(In, Out, Goals) :- maplist(constrain_args, In, Out, NestedGoalsList),
+constrain_args(In, Out, Goals) :- ( In = [F|_], atom(F) -> note_translation_use(F, pattern) ; true ),
+                                  maplist(constrain_args, In, Out, NestedGoalsList),
                                   flatten(NestedGoalsList, Goals), !.
 
 %Flatten (= Head Body) MeTTa function into Prolog Clause:
@@ -24,8 +26,10 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                  -> GoalsBody = [],
                                                     ExpOut = BodyExpr
                                                   ; translate_expr(BodyExpr, GoalsBody, ExpOut) ),
-                                               (  nonvar(ExpOut) , ExpOut = partial(Base,Bound)
-                                               -> arity(Base, Arity), length(Bound, N), M is (Arity - N) - 1,
+                                               (  nonvar(ExpOut), ExpOut = partial(Base,Bound),
+                                                  length(Bound, N),
+                                                  eta_expansion_arity(Base, N, Arity)
+                                               -> M is (Arity - N) - 1,
                                                   length(ExtraArgs, M), append(Bound, ExtraArgs, CallInArgs),
                                                   resolve_memoization(Base, CallInArgs, Out, Goal),
                                                   append(GoalsBody,[Goal],FinalGoals), append(Args1,ExtraArgs,HeadArgs)
@@ -37,10 +41,172 @@ translate_clause(Input, (Head :- BodyConj), ConstrainArgs) :-
                                                append(GoalsPrefix, FinalGoals, Goals),
                                                goals_list_to_conj(Goals, BodyConj).
 
-%Record atoms compiled as plain symbol heads, so late function registrations can be flagged:
-:- dynamic symbol_head/1.
-note_symbol_head(HV) :- atom(HV), \+ symbol_head(HV), !, assertz(symbol_head(HV)).
-note_symbol_head(_).
+%Native procedures keep their existing primary arity (notably / and yall's
+%extra / arities). A MeTTa function with several larger arities stays partial.
+eta_mode(F, native) :- native_function(F), \+ equation_arity(F, _, _),
+                      \+ pending_signature(F, _, _), !.
+eta_mode(_, source).
+
+eta_expansion_arity(F, N, A) :-
+    findall(M, (arity(F, M), M > N + 1), Ms), sort(Ms, [A|Rest]),
+    ( Rest == [] -> true ; eta_mode(F, native) ).
+
+% Dependencies describe translation decisions, not occurrences in quoted data.
+% A nested lambda records its own decisions, independently of its creator.
+:- dynamic translated_from/2, translation_use/4, translation_decision/3, pending_signature/3,
+           no_equations_clause/3, native_function/1, native_arity/2, equation_arity/3.
+
+compile_equation(Term, Clause, Uses) :-
+    ( nb_current(petta_translation_uses, Previous) -> true ; Previous = '$absent' ),
+    Box = uses([]),
+    setup_call_cleanup(nb_linkval(petta_translation_uses, Box),
+        ( copy_term(Term, Input), once(translate_clause(Input, Clause)), arg(1, Box, Raw), sort(Raw, Uses) ),
+        ( Previous == '$absent' -> nb_delete(petta_translation_uses)
+        ; nb_linkval(petta_translation_uses, Previous) )).
+
+note_translation_use(F, Use) :-
+    ( atom(F), nb_current(petta_translation_uses, Box), Box = uses(Old)
+      -> translation_key(F, Use, Key), nb_setarg(1, Box, [use(F, Use, Key)|Old])
+    ; true ).
+
+translation_key(F, data, Key) :- ( fun(F) -> Key = function ; Key = data ).
+translation_key(F, pattern, Key) :-
+    ( fun(F) -> findall(A, arity(F, A), As), sort(As, Key) ; Key = data ).
+translation_key(F, call(N), Key) :-
+    ( \+ fun(F) -> Key = data
+    ; A is N + 1,
+      findall(T, catch(match('&self', [':', F, T], T, T), _, fail), Ts), sort(Ts, Types),
+      ( arity(F, A)
+        -> length(Args, N), resolve_memoization(F, Args, Out, Goal),
+           ( Goal =.. [F|Direct], append(Args, [Out], Direct) -> Memo = direct ; Memo = memo ),
+           Key = call(Memo, Types)
+      ; findall(M, (arity(F, M), M > A), Ms), sort(Ms, More),
+        ( More \= [] -> eta_mode(F, Mode), Key = partial(More, Types, Mode)
+        ; arity(F, _) -> Key = over(Types)
+        ; Key = partial_any(Types) ) ) ).
+
+translation_use_valid(F, Use, Key) :- translation_key(F, Use, Now),
+    ( Now =@= Key -> true
+    % An old complete, untyped call can keep calling a data-returning fallback.
+    ; Now == data, Use = call(N), Key == call(direct, []), A is N + 1,
+      no_equations_clause(F, A, _) ).
+
+record_translation(Ref, Term, Uses) :- assertz(translated_from(Ref, Term)),
+    forall(member(use(F, Use, Key), Uses),
+        ( assertz(translation_use(F, Ref, Use, Key)),
+          ( translation_decision(F, Use, Stored), Stored =@= Key -> true
+          ; assertz(translation_decision(F, Use, Key)) ) )).
+forget_translation(Ref) :-
+    findall(use(F, Use, Key), translation_use(F, Ref, Use, Key), Uses),
+    retractall(translated_from(Ref, _)), retractall(translation_use(_, Ref, _, _)),
+    retractall(equation_arity(_, _, Ref)),
+    forall(member(use(F, Use, Key), Uses),
+        ( translation_use(F, _, Use, Remaining), Remaining =@= Key -> true
+        ; forall((clause(translation_decision(F, Use, Stored), true, R), Stored =@= Key), erase(R)) )).
+
+% Only registration/publication changes the program. Compiled calls have no
+% runtime lookup added to them. SWI's logical update view still applies at
+% each callee entry, including in an already-running caller.
+register_signature(Owner, F, A) :-
+    assertz(pending_signature(F, A, Owner)),
+    ( fun(F) -> true ; assertz(fun(F)) ),
+    ( arity(F, A) -> true ; assertz(arity(F, A)) ),
+    no_equations_answer(F, A).
+
+register_file_signatures(space_only, _, space_only) :- !.
+register_file_signatures(compile_functions, Forms, compile_functions(Owner)) :-
+    flag(metta_file_signatures, Owner, Owner + 1),
+    with_mutex(petta_definitions, transaction(
+        ( findall(F-A, ( member(parsed(function, _, [=, [F|Args], _]), Forms),
+                         length(Args, N), A is N + 1 ), Signatures),
+          forall(member(F-A, Signatures), register_signature(Owner, F, A)),
+          findall(F, member(F-_, Signatures), Fs), sort(Fs, Functions),
+          forall(member(F, Functions), refresh_users(F, [])) ) )).
+
+% A failed/aborted load must not leave provisional arities for forms it never
+% reached. Nested imports have independent owners.
+finish_file_signatures(space_only) :- !.
+finish_file_signatures(compile_functions(Owner)) :- with_mutex(petta_definitions, transaction(
+    ( findall(F, pending_signature(F, _, Owner), Raw), sort(Raw, Fs),
+      retractall(pending_signature(_, _, Owner)),
+      forall(member(F, Fs), (sync_function_arities(F), refresh_users(F, []))) ) )).
+
+install_definition(Space, Term, Owner, Clause) :-
+    with_mutex(petta_definitions, transaction(
+        ( Term = [=, [F|Args], _], length(Args, N), A is N + 1,
+          ( Owner == runtime -> register_signature(Owner, F, A) ; true ),
+          add_sexp(Space, Term),
+          compile_equation(Term, Clause, Uses),
+          assert_equation(Term, Clause, Uses, _),
+          once(retract(pending_signature(F, A, Owner))),
+          sync_function_arities(F), refresh_users(F, []),
+          notify_translation_change(F) ) )).
+
+assert_equation(Term, Clause, Uses, Ref) :-
+    Clause = (Head :- _), functor(Head, F, A),
+    ( retract(no_equations_clause(F, A, Empty)) -> erase(Empty) ; true ),
+    assertz(Clause, Ref), assertz(equation_arity(F, A, Ref)), record_translation(Ref, Term, Uses).
+
+install_lambda(Term, Clause) :- with_mutex(petta_definitions, transaction(
+    ( compile_equation(Term, Clause, Uses), assert_equation(Term, Clause, Uses, _),
+      Term = [=, [F|_], _], sync_function_arities(F) ) )).
+
+user_dynamic_head(F, A, H) :- current_predicate(F/A), functor(H, F, A),
+    predicate_property(H, dynamic), \+ predicate_property(H, imported_from(_)).
+
+has_equations(F, A) :- equation_arity(F, A, _), !.
+
+no_equations_answer(F, A) :-
+    ( native_arity(F, A) ; has_equations(F, A) ; no_equations_clause(F, A, _) ), !.
+no_equations_answer(F, A) :-
+    N is A - 1, length(Args, N),
+    append(Args, [[F|Args]], HeadArgs), Head =.. [F|HeadArgs],
+    assertz(Head, Ref), assertz(no_equations_clause(F, A, Ref)).
+
+sync_function_arities(F) :-
+    % Registration/translation add candidate arities. Probe each candidate once
+    % rather than enumerating every equation of a large multi-clause function.
+    forall(arity(F, A),
+        ( (native_arity(F, A); pending_signature(F, A, _); equation_arity(F, A, _))
+          -> true ; retractall(arity(F, A)) )),
+    ( ( native_function(F) ; arity(F, _) )
+      -> ( fun(F) -> true ; assertz(fun(F)) )
+    ; retractall(fun(F)) ).
+
+refresh_users(F, Path) :-
+    % Check each distinct decision once, even when thousands of callers share it.
+    findall(G, ( translation_decision(F, Use, Key), \+ translation_use_valid(F, Use, Key),
+                 translation_use(F, Ref, Use, Stored), Stored =@= Key,
+                 translated_from(Ref, [=, [G|_], _]) ), Raw),
+    sort(Raw, Users),
+    forall(member(G, Users),
+        ( memberchk(G, Path) -> throw(error(domain_error(finite_application_interface, [G|Path]), none))
+        ; recompile_function(G), refresh_users(G, [G|Path]) )).
+
+% Rebuild a whole predicate in clause order; publication and its metadata are
+% one transaction. Never inspect native or imported clauses with clause/3.
+recompile_function(F) :-
+    %Source records preserve order even when clauses move between arities.
+    findall(Ref-Term, ( Term = [=, [F|_], _], translated_from(Ref, Term),
+                       clause(H, _, Ref), functor(H, F, A), user_dynamic_head(F, A, H) ), Pairs),
+    findall(A, equation_arity(F, A, _), OldArities),
+    maplist(recompile_equation, Pairs, Compiled),
+    forall(member(Ref-_, Pairs), ( erase(Ref), forget_translation(Ref) )),
+    forall(member(compiled(Term, Clause, Uses), Compiled),
+           assert_equation(Term, Clause, Uses, _)),
+    forall(member(A, OldArities), no_equations_answer(F, A)),
+    sync_function_arities(F), notify_translation_change(F).
+
+notify_translation_change(F) :-
+    forall(metta_on_function_changed(F), true).
+
+recompile_equation(_-Term, compiled(Term, Clause, Uses)) :- compile_equation(Term, Clause, Uses).
+
+removed_equations(F, Refs) :-
+    forall(member(Ref-A, Refs), ( erase(Ref), forget_translation(Ref), no_equations_answer(F, A) )),
+    sync_function_arities(F), refresh_users(F, []),
+    notify_translation_change(F),
+    ( fun(F) -> true ; forall(metta_on_function_removed(F), true) ).
 
 %Print compiled clause:
 maybe_print_compiled_clause(_, _, _) :- silent(true), !.
@@ -75,7 +241,10 @@ reduce([F|Args], Out) :- nonvar(F), atom(F), fun(F)
                          -> % --- Case 1: callable predicate ---
                             length(Args, N),
                             Arity is N + 1,
-                            ( current_predicate(F/Arity) , \+ (current_op(_, _, F), Arity =< 2)
+                            ( ( arity(F, Arity)
+                              ; native_function(F), current_predicate(F/Arity),
+                                \+ no_equations_clause(F, Arity, _) ),
+                              \+ (current_op(_, _, F), Arity =< 2)
                               -> resolve_memoization(F, Args, Out, Goal),
                                  catch(call(Goal), _, fail)
                             ; incomplete_application_kind(F, Arity, partial)
@@ -272,15 +441,11 @@ translate_expr([H0|T0], Goals, Out) :-
                                            exclude({ArgVars}/[V]>>memberchk_eq(V, ArgVars), AllVars, FreeVars),
                                            append(FreeVars, Args, FullArgs),
                                            % compile clause with all bound + free vars
-                                           translate_clause([=, [F|FullArgs], Body], Clause),
-                                           %translate_clause records arities; keep the function marker idempotent.
-                                           ( fun(F) -> true ; assertz(fun(F)) ),
-                                           assertz(Clause),
+                                           Lambda = [=, [F|FullArgs], Body],
+                                           install_lambda(Lambda, Clause),
+                                           ( FreeVars == [] -> true ; note_translation_use(F, pattern) ),
                                            format(atom(Label), "metta lambda (~w)", [F]),
                                            maybe_print_compiled_clause(Label, ['|->', Args, Body], Clause),
-                                           length(FullArgs, N),
-                                           Arity is N + 1,
-                                           (arity(F, Arity) -> true ; assertz(arity(F, Arity))),
                                            % emit closure capturing the environment (free vars)
                                            ( FreeVars == [] -> Out = F
                                                              ; Out = partial(F, FreeVars) ),
@@ -341,11 +506,11 @@ translate_expr([H0|T0], Goals, Out) :-
             ( atom(HV), fun(HV), Fun = HV, AllAVs = AVs, IsPartial = false
             ; compound(HV), HV = partial(Fun, Bound), append(Bound,AVs,AllAVs), IsPartial = true
             ) % Check for type definition [:,HV,TypeChain]
-            -> findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
+            -> length(AllAVs, InputArity), note_translation_use(Fun, call(InputArity)),
+               findall(TypeChain, catch(match('&self', [':', Fun, TypeChain], TypeChain, TypeChain), _, fail), TypeChains),
                list_to_set(TypeChains, UniqueTypeChains),
                ( UniqueTypeChains \= []
-                 -> length(AllAVs, InputArity),
-                    Arity is InputArity + 1,
+                 -> Arity is InputArity + 1,
                     ( incomplete_application_kind(Fun, Arity, ApplicationKind), ApplicationKind == overapplied
                       -> append(GsH, [throw_function_overapplication(Fun, InputArity)], Goals)
                        ; maplist({Fun,T,GsH,IsPartial,Bound,Out}/[TypeChain,BranchGoal]>>(
@@ -354,7 +519,7 @@ translate_expr([H0|T0], Goals, Out) :-
                          Goals = [Disj] )
               ; build_call_or_partial(Fun, AllAVs, Out, Inner, [], Goals))
           %Literals (numbers, strings, etc.), known non-function atom => data:
-          ; ( atomic(HV), \+ atom(HV) ; atom(HV), \+ fun(HV) ) -> note_symbol_head(HV),
+          ; ( atomic(HV), \+ atom(HV) ; atom(HV), \+ fun(HV) ) -> note_translation_use(HV, data),
                                                                   Out = [HV|AVs],
                                                                   Goals = Inner
           %Plain data list: evaluate inner fun-sublists
@@ -403,7 +568,8 @@ translate_args_by_type([A|As], [T|Ts], GsOut, [AV|AVs]) :-
 %Handle data list:
 eval_data_term(X, [], X) :- (var(X); atomic(X)), !.
 eval_data_term([F|As], Goals, Val) :- ( atom(F), fun(F) -> translate_expr([F|As], Goals, Val)
-                                                         ; eval_data_list([F|As], Goals, Val) ).
+                                                         ; note_translation_use(F, data),
+                                                           eval_data_list([F|As], Goals, Val) ).
 
 %Handle data list entry:
 eval_data_list([], [], []).

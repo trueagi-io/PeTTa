@@ -58,25 +58,16 @@ process_metta_string(S, Results, Space, Mode) :- string_codes(S, Cs),
                                                  strip(Cs, 0, Codes),
                                                  phrase(top_forms(Forms, 1), Codes),
                                                  maplist(parse_form, Forms, ParsedForms),
-                                                 maplist(process_form(Space, Mode), ParsedForms, ResultsList), !,
+                                                 setup_call_cleanup(
+                                                     register_file_signatures(Mode, ParsedForms, Registered),
+                                                     maplist(process_form(Space, Registered), ParsedForms, ResultsList),
+                                                     finish_file_signatures(Registered)), !,
                                                  append(ResultsList, Results).
 
-register_function_signature(F, Arity) :- warn_if_used_as_symbol(F),
-                                         register_fun(F),
-                                         ( catch(arity(F, Arity), _, fail) -> true ; assertz(arity(F, Arity)) ).
-
-%A function arriving after expressions already compiled its name as a plain symbol
-%cannot be called by those expressions anymore, which usually means an import came too late:
-warn_if_used_as_symbol(F) :- \+ fun(F), symbol_head(F), !,
-                             format(user_error, "Warning: ~w is defined or imported after already being used; earlier expressions treat it as a plain symbol. Move the import or definition above the first use.~n", [F]).
-warn_if_used_as_symbol(_).
-
-%First pass to convert MeTTa to Prolog Terms and register functions:
+% Parse the whole file before registering any of its signatures. A space-only
+% import stores rows without changing the compiled program.
 parse_form(form(S), parsed(T, S, Term)) :- sread(S, Term),
-                                           ( Term = [=, [F|W], _], atom(F) -> length(W, N),
-                                                                              Arity is N + 1,
-                                                                              register_function_signature(F, Arity),
-                                                                              T=function
+                                           ( Term = [=, [F|_], _], atom(F) -> T=function
                                                                             ; T=expression ).
 parse_form(runnable(S), parsed(runnable, S, Term)) :- sread(S, Term).
 
@@ -91,14 +82,9 @@ process_form(_, _, parsed(runnable, FormStr, Term), Result) :- translate_expr([c
                                                                                      format("\e[33m^^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ),
                                                             call_goals(Goals).
 process_form(Space, space_only, parsed(function, _, Term), []) :- add_sexp(Space, Term).
-process_form(Space, compile_functions, parsed(function, FormStr, Term), []) :- add_sexp(Space, Term),
-                                                            Term = [=, [F|_], _],
-                                                            translate_clause(Term, Clause),
-                                                            assertz(Clause, Ref),
-                                                            assertz(translated_from(Ref, Term)),
-                                                            metta_on_function_changed(F),
+process_form(Space, compile_functions(Owner), parsed(function, FormStr, Term), []) :-
+                                                            install_definition(Space, Term, Owner, (Head :- Body)),
                                                             ( silent(true) -> true ; format("\e[33m--> metta function -->~n\e[36m~w~n\e[33m--> prolog clause -->~n\e[32m", [FormStr]),
-                                                                                     clause(Head, Body, Ref),
                                                                                      ( Body == true -> Show = Head; Show = (Head :- Body) ),
                                                                                      portray_clause(current_output, Show),
                                                                                      format("\e[33m^^^^^^^^^^^^^^^^^^^^^^~n\e[0m") ).
