@@ -28,6 +28,10 @@
 % Tracks keys currently being computed (avoids duplicate recursive probes)
 :- dynamic metta_memo_in_progress/4.
 
+% Cache misses being computed, including ground calls. These are observers
+% even before an answer exists; each scope owns its exact clause reference.
+:- dynamic metta_memo_active/3.
+
 % Coarse function-level dependency graph: Caller -> Callee
 :- dynamic metta_memo_dep/4.
 
@@ -165,30 +169,28 @@ bump_metta_memo_generation(Fun, Arity) :-
     assertz(metta_memo_generation(Fun, Arity, Next)).
 
 impacted_functions(SeedFun, Impacted) :-
-    impacted_functions([SeedFun], [], Raw),
-    sort(Raw, Impacted).
+    % Generations index actual memo users, not every stored key or definition.
+    findall(Fun, memo_live_arity(Fun, _), Raw),
+    sort(Raw, Roots),
+    include(memo_depends_on(SeedFun), Roots, Impacted).
 
-impacted_functions([], Seen, Seen).
-impacted_functions([Fun|Rest], Seen, Impacted) :-
-    ( memberchk(Fun, Seen)
-    -> impacted_functions(Rest, Seen, Impacted)
-    ; findall(Caller, metta_memo_dep(Caller, _, Fun, _), Callers),
-      append(Rest, Callers, Next),
-      impacted_functions(Next, [Fun|Seen], Impacted)
-    ).
+memo_live_arity(Fun, Arity) :-
+    metta_memo_generation(Fun, Arity, Gen),
+    once((metta_memo_entry(Fun, Arity, Gen, _, _); metta_memo_active(Fun, Arity, Gen))).
+
+memo_depends_on(Target, Root) :- memo_reaches([Root], Target, []).
+memo_reaches([Fun|_], Target, _) :- Fun == Target, !.
+memo_reaches([Fun|Rest], Target, Seen) :-
+    ( memberchk(Fun, Seen) -> memo_reaches(Rest, Target, Seen)
+    ; findall(Callee,
+              ( metta_memo_dep(Fun, _, Callee, _)
+              ; current_predicate(translation_use/4),
+                translated_from(Ref, [=, [Fun|_], _]),
+                translation_use(Callee, Ref, _, _) ), Callees),
+      append(Rest, Callees, Next), memo_reaches(Next, Target, [Fun|Seen]) ).
 
 cache_invalidate_single(Fun) :-
-    findall(Arity,
-        ( arity(Fun, Arity)
-        ; metta_memo_generation(Fun, Arity, _)
-        ; metta_memo_entry(Fun, Arity, _, _, _)
-        ; metta_memo_count(Fun, Arity, _)
-        ; metta_memo_head(Fun, Arity, _)
-        ; metta_memo_tail(Fun, Arity, _)
-        ; metta_memo_q(Fun, Arity, _, _)
-        ; current_predicate(Fun/Arity)
-        ),
-        RawArities),
+    findall(Arity, memo_live_arity(Fun, Arity), RawArities),
     sort(RawArities, Arities),
     ( Arities == []
     -> true
@@ -201,19 +203,27 @@ cache_invalidate_single(Fun) :-
               retractall(metta_memo_head(Fun, Arity, _)),
               retractall(metta_memo_tail(Fun, Arity, _)),
               retractall(metta_memo_q(Fun, Arity, _, _)),
-              retractall(metta_memo_in_progress(Fun, Arity, _, _))
+              retractall(metta_memo_in_progress(Fun, Arity, _, _)),
+              drop_idle_memo_generation(Fun, Arity)
             )))
     ),
     retractall(metta_memo_dep(Fun, _, _, _)),
     retractall(metta_memo_dep(_, _, Fun, _)).
 
 cache_invalidate(Fun) :-
+    with_mutex(petta_definitions, cache_invalidate_locked(Fun)).
+
+cache_invalidate_locked(Fun) :-
     impacted_functions(Fun, Impacted),
-    forall(member(F, Impacted), cache_invalidate_single(F)).
+    forall(member(F, Impacted), cache_invalidate_single(F)),
+    retractall(metta_memo_dep(Fun, _, _, _)),
+    retractall(metta_memo_dep(_, _, Fun, _)).
 
 cache_clear :-
+    with_mutex(petta_definitions, cache_clear_locked).
+
+cache_clear_locked :-
     retractall(metta_memo_entry(_, _, _, _, _)),
-    retractall(metta_memo_generation(_, _, _)),
     retractall(metta_memo_count(_, _, _)),
     retractall(metta_memo_head(_, _, _)),
     retractall(metta_memo_tail(_, _, _)),
@@ -225,7 +235,11 @@ cache_clear :-
     retractall(metta_memo_stat(_, _)),
     ( catch(nb_current(metta_cms, _), _, fail) -> nb_delete(metta_cms) ; true ),
     ( catch(nb_current(metta_cms_size, _), _, fail) -> nb_delete(metta_cms_size) ; true ),
-    ( catch(nb_current(metta_memo_accesses, _), _, fail) -> nb_delete(metta_memo_accesses) ; true ).
+    ( catch(nb_current(metta_memo_accesses, _), _, fail) -> nb_delete(metta_memo_accesses) ; true ),
+    % An active probe may still try to store. Keep its generation distinct
+    % from an invalidated one even when clearing all cached answers.
+    findall(F-A, metta_memo_generation(F,A,_), Generations),
+    forall(member(F-A,Generations), drop_idle_memo_generation(F,A)).
 
 'clear-memoize'(true) :-
     cache_clear.
@@ -647,6 +661,24 @@ truncate_answers(Answers, Answers).
 
 % Runtime Dispatch
 
+% Register before entering the source predicate. Definition publication uses
+% this mutex too, so it either sees this observer or finishes before it starts.
+begin_memo_probe(Fun, Arity, Gen, Ref) :-
+    with_mutex(petta_definitions,
+        ( ( metta_memo_generation(Fun, Arity, Gen) -> true
+          ; Gen = 0, assertz(metta_memo_generation(Fun, Arity, Gen)) ),
+          assertz(metta_memo_active(Fun, Arity, Gen), Ref) )).
+
+end_memo_probe(Fun, Arity, Ref) :-
+    with_mutex(petta_definitions,
+        ( erase(Ref), drop_idle_memo_generation(Fun, Arity) )).
+
+% Called under the definition mutex: no new probe can start during this test.
+drop_idle_memo_generation(Fun, Arity) :-
+    ( ( metta_memo_active(Fun, Arity, _) ; metta_memo_entry(Fun, Arity, _, _, _) )
+      -> true
+    ; retractall(metta_memo_generation(Fun, Arity, _)) ).
+
 memo_probe_results(Fun, AVs, ProbeResults) :-
     memo_answer_limit(Limit),
     append(AVs, [Result], RawArgs),
@@ -713,19 +745,26 @@ cache_call_cached_ground(Fun, Arity, CurGen, KeyAVs, Out) :-
 cache_call_cached_ground(_, _, _, _, _) :-
     fail.
 
-cache_call_store_ground(Fun, Arity, CurGen, KeyAVs, AVs, Goal, Out) :-
+cache_call_store_ground(Fun, Arity, KeyAVs, AVs, Goal, Out) :-
     _ = Goal,
     % For ground+quantized keys, collisions are intentional. Guarding "in-progress"
     % entries here can cause large duplicate recomputation in recursive workloads
     % Keep the ground path as direct probe/store.
-    memo_probe_ground_results(Fun, AVs, ProbeResults),
-    apply_aggregate_mode(ProbeResults, FinalResults),
-    cache_store(Fun, Arity, CurGen, KeyAVs, FinalResults),
+    setup_call_cleanup(begin_memo_probe(Fun, Arity, CurGen, Ref),
+        ( memo_probe_ground_results(Fun, AVs, ProbeResults),
+          apply_aggregate_mode(ProbeResults, FinalResults),
+          cache_store(Fun, Arity, CurGen, KeyAVs, FinalResults) ),
+        end_memo_probe(Fun, Arity, Ref)),
     memo_stat_inc(cache_miss),
     member(Answer, FinalResults),
     replay_ground_answer(Out, Answer).
 
-cache_call_store_variant(Fun, Arity, CurGen, KeyAVs, AVs, Goal, Out) :-
+cache_call_store_variant(Fun, Arity, KeyAVs, AVs, Goal, Out) :-
+    setup_call_cleanup(begin_memo_probe(Fun, Arity, CurGen, Ref),
+        cache_call_store_variant_active(Fun, Arity, CurGen, KeyAVs, AVs, Goal, Out),
+        end_memo_probe(Fun, Arity, Ref)).
+
+cache_call_store_variant_active(Fun, Arity, CurGen, KeyAVs, AVs, Goal, Out) :-
     start_in_progress(Fun, Arity, CurGen, KeyAVs, Started),
     ( Started == true
     -> cache_probe_and_store_variant(Fun, Arity, CurGen, KeyAVs, AVs, ProbeResults),
@@ -752,11 +791,11 @@ cache_call(Fun, AVs, Out) :-
         ( ground(AVs)
         -> ( cache_lookup(Fun, Arity, CurGen, KeyAVs, CachedResults)
            -> cache_replay_hit_ground(Fun, Arity, KeyAVs, CachedResults, Out)
-           ; cache_call_store_ground(Fun, Arity, CurGen, KeyAVs, AVs, Goal, Out)
+           ; cache_call_store_ground(Fun, Arity, KeyAVs, AVs, Goal, Out)
            )
         ; ( cache_lookup(Fun, Arity, CurGen, KeyAVs, CachedResults)
           -> cache_replay_hit_variant(Fun, Arity, KeyAVs, CachedResults, AVs, Out)
-          ; cache_call_store_variant(Fun, Arity, CurGen, KeyAVs, AVs, Goal, Out)
+          ; cache_call_store_variant(Fun, Arity, KeyAVs, AVs, Goal, Out)
           )
         )
     ; memo_stat_inc(cache_bypass),
