@@ -199,7 +199,7 @@ member(X, L, true) :- member(X, L).
 'is-member'(X, List, true) :- member(X, List).
 'is-member'(X, List, false) :- \+ member(X, List).
 
-member_alpha(X, [H|_]) :- (var(X) -> var(H) ; true), X = H, !.
+member_alpha(X, [H|_]) :- attribute_free_variant(X, H), !.
 member_alpha(X, [_|T]) :- member_alpha(X, T).
 
 'is-alpha-member'(X, List, true) :- member_alpha(X, List), !.

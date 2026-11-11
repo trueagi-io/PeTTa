@@ -27,7 +27,8 @@
 !(test (is-alpha-member 99 (1 2 42 3) ) false)  
   
 ;;; Test 8: Nested lists  
-!(test (is-alpha-member (1 $x) ((1 2) (3 4)) ) true)  
+!(test (is-alpha-member (1 $x) ((1 2) (3 4)) ) false)
+!(test (is-alpha-member (1 $x) ((1 $y) (3 4)) ) true)
 !(test (is-alpha-member (1 $x) ((2 3) (4 5)) ) false)  
   
 ;;; Test 9: Multiple occurrences  
@@ -62,3 +63,31 @@
     )
     ()
 )
+
+;;; Test 16: Variable preservation - probe variable must not be bound by membership check
+!(let* (($probe (f $var))
+        ($res (is-alpha-member $probe ((f 1)))))
+    (test (is-var $var) true))
+!(let* (($probe (f $var))
+        ($res (is-alpha-member $probe ((f 1)))))
+    (test (is-ground $probe) false))
+!(let* (($probe (f $var))
+        ($res (is-alpha-member $probe ((f 1)))))
+    (test $res false))
+!(let* (($probe (f $var))
+        ($res (is-alpha-member $probe ((g 1) (f $other)))))
+    (test (is-var $var) true))
+!(let* (($probe (f $var))
+        ($res (is-alpha-member $probe ((g 1) (f $other)))))
+    (test $res true))
+
+;;; Test 17: Repeated variable relationships must be respected
+!(test (is-alpha-member (f $x $x) ((f $a $b))) false)
+!(test (is-alpha-member (f $x $x) ((f $a $a))) true)
+!(test (is-alpha-member (f $x $y) ((f $a $a))) false)
+!(test (is-alpha-member (f (g $x) $x) ((f (g $a) $b))) false)
+!(test (is-alpha-member (f (g $x) $x) ((f (g $a) $a))) true)
+
+;;; Test 18: Multiple candidates with different variable structures
+!(test (is-alpha-member (f $x $x) ((f 1 2) (f $a $b) (f $c $c))) true)
+!(test (is-alpha-member (f $x $x) ((f 1 2) (f $a $b) (f $c $d))) false)
