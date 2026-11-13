@@ -422,10 +422,10 @@ translate_pattern(X, X) :- atomic(X), !.
 translate_pattern([H|T], [P|Ps]) :- !, translate_pattern(H, P),
                                        translate_pattern(T, Ps).
 
-% Constructs the goal for a single branch of an if-then-else/case.
+% Connect a branch's result only when it runs. Val may also occur in sibling
+% branches or the caller, so aliasing it with Out here can constrain them.
 build_branch(true, Val, Out, (Out = Val)) :- !.
-build_branch(Con, Val, Out, Goal) :- var(Val) -> Val = Out, Goal = Con
-                                               ; Goal = (Val = Out, Con).
+build_branch(Con, Val, Out, (Val = Out, Con)).
 
 %Translate case expression recursively into nested if:
 translate_case([[K,VExpr]|Rs], Kv, Out, Goal, KGo) :- translate_expr_to_conj(VExpr, ConV, VOut),
