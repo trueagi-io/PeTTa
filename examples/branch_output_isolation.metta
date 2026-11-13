@@ -8,9 +8,14 @@
 
 !(test (if False (let $x 4 $x) (let $x 1 3)) 3)
 !(test (if True (let $x 1 3) (let $x 4 $x)) 3)
+!(test (collapse (superpose
+         ((let $x 1 3) (if False (let $x 4 $x)))))
+       (3))
 !(test (msort (collapse (superpose ((let $x 1 3) (let $x 4 $x)))))
        (3 4))
 !(test (case b ((a (let $x 4 $x)) (b (let $x 1 3)))) 3)
+!(test (case a ((a (let $x 1 3)) (Empty (let $x 4 $x)))) 3)
+!(test (case (empty) ((a (let $x 4 $x)) (Empty (let $x 1 3)))) 3)
 
 ; Selected branches still share their bindings with the surrounding call.
 !(test (let $answer (if False (let $x 4 $x) (let $x 1 3))
