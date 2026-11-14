@@ -25,12 +25,12 @@ def test_stack_overflow_while_loading_keeps_its_message(repo_root, tmp_path):
 
 
 def test_error_without_context_names_the_file(repo_root, tmp_path):
-    program = tmp_path / "empty_car.metta"
-    program.write_text("!(car-atom ())\n")
+    program = tmp_path / "overapplied.metta"
+    program.write_text("!(id 1 2)\n")
 
     result = run_petta(repo_root, program)
 
     assert result.returncode != 0
-    assert "car-atom expects a non-empty expression" in result.stderr
+    assert "function_input_arities(id,[1])" in result.stderr
     assert f"'{program}'" in result.stderr
     assert "while loading MeTTa file" in result.stderr
