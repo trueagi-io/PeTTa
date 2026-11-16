@@ -170,7 +170,7 @@ analysis_term_dependencies(Term, Dependencies) :-
     sort(Ds0, Dependencies).
 
 analysis_symbol_dependency(S, late_symbol(S)) :-
-    \+ fun(S), fn_decl(S, _, _, _, _, _).
+    S \== cons, \+ fun(S).
 %A bare value-symbol lookup also consumes the absence of a value declaration:
 analysis_symbol_dependency(S, declaration(value, S)).
 
@@ -180,7 +180,7 @@ analysis_call_dependency(F, N, D) :-
                output_cert(proper_list, F/N),
                output_cert(bound_bool, F/N)]).
 analysis_call_dependency(F, N, late_call(F/N)) :-
-    fn_decl(F, N, _, _, _, _).
+    F \== cons.
 
 analysis_known_type_dependencies(Term, Dependencies) :-
     term_variables(Term, Vars),
@@ -230,6 +230,10 @@ analysis_term_inventory(Term, Calls-CallsTail, Symbols-SymbolsTail) :-
     ; atom(Term)
       -> Calls = CallsTail, Symbols = [Term|SymbolsTail]
     ; atomic(Term)
+      -> Calls = CallsTail, Symbols = SymbolsTail
+    ; Term = [Q, _], Q == quote
+      -> Calls = CallsTail, Symbols = SymbolsTail
+    ; Term = [Lam, _, _], Lam == '|->'
       -> Calls = CallsTail, Symbols = SymbolsTail
     ; Term = [F|Args], atom(F), is_list(Args)
       -> length(Args, N),
