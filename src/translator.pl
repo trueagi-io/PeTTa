@@ -997,12 +997,10 @@ translate_expr([H0|T0], Expectation, Goals, Out) :-
              translate_args(T, GsT, AVs),
              append(GsH, GsT, Goals),
              Out = [HV|AVs]
-        %Plain data list: evaluate inner fun-sublists
+        %The head is already translated; re-evaluation would run quoted data.
         ; is_list(HV) -> translate_args(T, GsT, AVs),
-                         append(GsH, GsT, Inner),
-                         eval_data_term(HV, Gd, HV1),
-                         append(Inner, Gd, Goals),
-                         Out = [HV1|AVs]
+                         append(GsH, GsT, Goals),
+                         Out = [HV|AVs]
         %Unknown head (var/compound) => runtime dispatch, with a lean closure
         %application when the head's arrow type is known or assumed. A head
         %whose known type is provably not a function (e.g. Number) makes the
