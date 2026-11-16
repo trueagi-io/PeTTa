@@ -121,6 +121,7 @@ builtin_spec(xor/2, implementation(metta), typing(signature(unspecified, ['Bool'
 builtin_spec(implies/2, implementation(metta), typing(signature(unspecified, ['Bool','Bool'], 'Bool')), evaluation(eager), cardinality(argument_sensitive(manifest_booleans, nondet)), lowering(generic)).
 
 % Nondeterminism, spaces and reflection.
+builtin_spec('new-space'/0, implementation(spaces), typing(signature(unspecified, [], 'Symbol')), evaluation(eager), cardinality(fixed(det)), lowering(generic)).
 builtin_spec(superpose/1, implementation(metta), typing(signature(unspecified, [['List',T]], T)), evaluation(special), cardinality(fixed(nondet)), lowering(special(superpose_literal))).
 builtin_spec(empty/0, implementation(metta), typing(signature(unspecified, [], _)), evaluation(eager), cardinality(fixed(semidet)), lowering(generic)).
 builtin_spec('get-atoms'/1, implementation(spaces), typing(untyped), evaluation(eager), cardinality(fixed(nondet)), lowering(generic)).
