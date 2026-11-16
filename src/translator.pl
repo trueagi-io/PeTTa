@@ -1436,18 +1436,12 @@ translate_pattern(X, X) :- atomic(X), !.
 translate_pattern([H|T], [P|Ps]) :- !, translate_pattern(H, P),
                                        translate_pattern(T, Ps).
 
-% Constructs the goal for one branch of an if-then-else/case. An untyped
-% branch value aliased onto the shared Out would inherit an earlier branch's
-% candidates, so its ignorance is recorded first (note_unknown_candidate/1):
+% Connect the result only inside the selected branch. Transfer candidate
+% types without aliasing source values to the shared output at compile time.
 build_branch(true, Val, Out, (Out = Val)) :- !, note_candidates(Out, Val).
-build_branch(Con, Val, Out, Goal) :- var(Val) -> ( known_candidates(Val, _) -> true
-                                                                             ; Unknown = yes ),
-                                                 Val = Out,
-                                                 ( Unknown == yes -> note_unknown_candidate(Out)
-                                                                   ; true ),
-                                                 Goal = Con
-                                               ; note_candidates(Out, Val),
-                                                 Goal = (Val = Out, Con).
+build_branch(Con, Val, Out, (Val = Out, Con)) :-
+    ( var(Val) -> join_isolated_branch_candidates(Out, Val)
+    ; note_candidates(Out, Val) ).
 
 % Edge-scoped translation restores every source variable after an arm, so a
 % variable-valued arm is not aliased onto the result at compile time (restoring
