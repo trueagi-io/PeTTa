@@ -357,10 +357,8 @@ translate_expr([H0|T0], Goals, Out) :-
           ; ( atomic(HV), \+ atom(HV) ; atom(HV), \+ fun(HV) ) -> note_symbol_head(HV),
                                                                   Out = [HV|AVs],
                                                                   Goals = Inner
-          %Plain data list: evaluate inner fun-sublists
-          ; is_list(HV) -> eval_data_term(HV, Gd, HV1),
-                           append(Inner, Gd, Goals),
-                           Out = [HV1|AVs]
+          %The head is already translated; re-evaluation would run quoted data.
+          ; is_list(HV) -> Out = [HV|AVs], Goals = Inner
           %Unknown head (var/compound) => runtime dispatch:
           ; append(Inner, [reduce([HV|AVs], Out)], Goals) )).
 
@@ -399,18 +397,6 @@ translate_args_by_type([A|As], [T|Ts], GsOut, [AV|AVs]) :-
                                                 ; append(GsA1, [('get-type'(AV, T) *-> true ; 'get-metatype'(AV, T))], GsA))),
                                              translate_args_by_type(As, Ts, GsRest, AVs),
                                              append(GsA, GsRest, GsOut).
-
-%Handle data list:
-eval_data_term(X, [], X) :- (var(X); atomic(X)), !.
-eval_data_term([F|As], Goals, Val) :- ( atom(F), fun(F) -> translate_expr([F|As], Goals, Val)
-                                                         ; eval_data_list([F|As], Goals, Val) ).
-
-%Handle data list entry:
-eval_data_list([], [], []).
-eval_data_list([E|Es], Goals, [V|Vs]) :- ( is_list(E) -> eval_data_term(E, G1, V) ; V = E, G1 = [] ),
-                                         eval_data_list(Es, G2, Vs),
-                                         append(G1, G2, Goals).
-
 
 %Convert let* to recusrive let:
 letstar_to_rec_let([[Pat,Val]],Body,[let,Pat,Val,Body]).
