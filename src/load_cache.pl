@@ -26,6 +26,8 @@ while loading is not replayed, so a cached load suits library files.
 A load whose effect cannot be stored, such as one leaving a stream handle in
 the database, runs as usual and writes no snapshot; a snapshot that cannot
 be written is reported as a warning.
+Loads allocating fresh spaces also run normally: their allocator counter is
+outside the recorded state, so replaying their handles would not be safe.
 */
 
 :- use_module(library(sha)).
@@ -59,9 +61,12 @@ load_metta_file_cached(File, Results, Space) :-
     Header = header(Format, Version, Runtime, Fingerprint),
     (   replay_snapshot(SnapshotFile, Header, Results)
     ->  true
-    ;   user:load_metta_file(Path, Results, Space),
-        runtime_state(State1),
-        (   state_effect(State0, State1, Results, Effect)
+    ;   flag('$metta_space_id', SpaceId0, SpaceId0),
+        user:load_metta_file(Path, Results, Space),
+        flag('$metta_space_id', SpaceId1, SpaceId1),
+        (   SpaceId0 == SpaceId1,
+            runtime_state(State1),
+            state_effect(State0, State1, Results, Effect)
         ->  load_inputs(Path, State0, State1, Inputs),
             catch(write_snapshot(SnapshotFile, Header, Inputs, Effect), Error,
                   print_message(warning, Error))

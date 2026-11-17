@@ -82,3 +82,40 @@ def test_predicate_larger_than_a_chunk_replays(repo_root, tmp_path):
 
     assert cold == warm == ["results []", "value ['0', '999', '1000', '2499']"]
     assert len(list(cache.iterdir())) == 1
+
+
+def test_load_allocating_spaces_is_not_snapshotted(repo_root, tmp_path):
+    library = tmp_path / "allocated-space.metta"
+    library.write_text(
+        "!(println! creating-space)\n"
+        "!(bind! cached-space (new-state (new-space)))\n"
+    )
+    cache = tmp_path / "cache"
+    query = (
+        "!(let $old (get-state cached-space) "
+        "(let $fresh (new-space) (== $old $fresh)))"
+    )
+
+    cold = load_in_fresh_process(repo_root, library, cache, query)
+    warm = load_in_fresh_process(repo_root, library, cache, query)
+
+    assert cold == warm == [
+        "creating-space", "results ['true', 'true']", "value ['false']"
+    ]
+    assert not list(cache.glob("*.snapshot"))
+
+
+def test_defining_a_space_factory_can_be_snapshotted(repo_root, tmp_path):
+    library = tmp_path / "space-factory.metta"
+    library.write_text("(= (allocate-space) (new-space))\n")
+    cache = tmp_path / "cache"
+    query = (
+        "!(let $first (allocate-space) "
+        "(let $second (allocate-space) (== $first $second)))"
+    )
+
+    cold = load_in_fresh_process(repo_root, library, cache, query)
+    warm = load_in_fresh_process(repo_root, library, cache, query)
+
+    assert cold == warm == ["results []", "value ['false']"]
+    assert len(list(cache.glob("*.snapshot"))) == 1
