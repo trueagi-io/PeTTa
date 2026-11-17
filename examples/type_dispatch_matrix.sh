@@ -43,6 +43,14 @@ assert_contains() {
     fi
 }
 
+assert_matches() {
+    if ! grep -E "$2" "$TMP_DIR/$1.out" >/dev/null; then
+        echo "[FAIL] $1: missing pattern: $2"
+        cat "$TMP_DIR/$1.out"
+        exit 1
+    fi
+}
+
 assert_not_contains() {
     name=$1
     pattern=$2
@@ -127,7 +135,8 @@ assert_status inferred_fib 0
 assert_not_contains inferred_fib "typecheck_or_error"
 assert_not_contains inferred_fib "typecheck_match"
 assert_contains inferred_fib "A<2"
-assert_contains inferred_fib "B is D+F"
+# Branch-local result aliases may change the printed temporary names.
+assert_matches inferred_fib '[A-Z_][A-Za-z0-9_]* is [A-Z_][A-Za-z0-9_]*\+[A-Z_][A-Za-z0-9_]*'
 
 # Inference semantics: knowledge only (never rejects), taint on conflicting
 # use, and the closure fast path from head-use arrow inference.
