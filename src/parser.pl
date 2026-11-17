@@ -1,6 +1,7 @@
 :- use_module(library(dcg/basics)). %blanks/0, number/1, string_without/2
 
-%Generate a MeTTa S-expression string from the Prolog list (inverse parsing):
+%Format a PeTTa value for display. sread/2 reads MeTTa source syntax.
+%For example, a native cell printed as (cons H T) reads as an expression.
 %Variable names are minted from a per-call counter in first-occurrence order and
 %cached on the variable itself (an attribute travels with the variable through
 %GC, unlike SWI's internal display name, and lookup is O(1)).  Counter names

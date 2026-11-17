@@ -15,6 +15,44 @@ Example run:
 
 `time sh run.sh ./examples/nars_tuffy.metta`
 
+### List shape and term text
+
+`get-metatype` reports `Expression` for a finite outer list ending in `()`.
+`is-expr` checks the same shape. The expression `(quote (1 $x))` has a
+complete outer list and an unknown element. The cell `(cons 1 $tail)` has an
+open tail, so `is-expr` returns `False` and `get-metatype` has no result.
+Use `is-ground` to check for unbound variables anywhere in a value. It
+returns `False` for both examples and `True` for the improper cell
+`(cons 1 2)`.
+
+`decons-atom` exposes the head and tail of an existing cell. On an open
+list, `size-atom` enumerates completions of increasing length.
+`(once (size-atom (cons 1 $tail)))` returns `1` and binds the tail to `()`
+in that solution.
+
+`repr` formats values for display. The native cell `(cons 1 2)` and the
+quoted expression `(quote (cons 1 2))` both display as `(cons 1 2)`.
+`parse` reads that text as a three-element MeTTa expression.
+
+To read back plain finite data, pair `repra` with SWI-Prolog's
+[`atom_to_term/3`](https://www.swi-prolog.org/pldoc/doc_for?object=atom_to_term/3).
+The writer and reader use Prolog term syntax and preserve the cell shape and
+sharing of ordinary variables within the value.
+
+```metta
+!(import_prolog_function atom_to_term)
+(= (read-repra $text)
+   (let $_ (atom_to_term $text $value) $value))
+
+!(test (read-repra (repra (cons 1 2))) (cons 1 2))
+!(test (read-repra (repra (quote (cons 1 2)))) (quote (cons 1 2)))
+```
+
+Read the text with compatible Prolog syntax settings. Constraints and live
+resources such as spaces require their own representation. See the
+[runnable example](examples/list_shape_and_term_text.metta) for a round trip
+with an open tail and shared variables.
+
 ### MORK and FAISS spaces
 
 If MORK and FAISS is installed, execute `sh build.sh` to support MORK-based atom spaces and FAISS-based atom-vector spaces.
