@@ -1,3 +1,4 @@
+from functools import lru_cache
 import json
 import os
 import urllib.request
@@ -31,3 +32,16 @@ def openrouter_embed(model, text):
     )
     response = urllib.request.urlopen(req).read()
     return json.loads(response)['data'][0]['embedding']
+
+
+@lru_cache(maxsize=1)
+def get_openai_client():
+    """Create the shared OpenAI client only when an OpenAI operation is requested."""
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError(
+            "OpenAI support requires the 'openai' Python package."
+        ) from exc
+
+    return OpenAI()
