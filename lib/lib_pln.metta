@@ -291,16 +291,16 @@
        (($LinkType $C $B) $T2))
    (if (SyllogisticRuleGuard $LinkType)
        (($LinkType $A $B) (Truth_Induction (STV $A)
-                                           (STV $B)
-                                           (STV $C) $T1 $T2)) (empty)))
+                                           (STV $C)
+                                           (STV $B) $T1 $T2)) (empty)))
 
 ; Abduction rule, see https://github.com/opencog/pln/blob/master/opencog/pln/rules/wip/abduction.scm
 (= (|- (($LinkType $A $C) $T1)
        (($LinkType $B $C) $T2))
    (if (SyllogisticRuleGuard $LinkType)
        (($LinkType $A $B) (Truth_Abduction (STV $A)
-                                           (STV $B)
-                                           (STV $C) $T1 $T2)) (empty)))
+                                           (STV $C)
+                                           (STV $B) $T1 $T2)) (empty)))
 
 ;Usage of inheritance for predicates
 ;unary arg
