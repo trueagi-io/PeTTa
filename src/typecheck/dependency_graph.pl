@@ -79,6 +79,17 @@ notify_mutation(Event) :-
     notify_mutations([Event]).
 
 notify_mutations(Events) :-
+    with_mutex(petta_definitions,
+        ( Events \== [], translation_decision('$program', generation, _)
+          -> ( nb_current(petta_definition_metas, _) -> notify_program_mutations(Events)
+             ; with_definition_update(notify_program_mutations(Events)) )
+        ; revalidate_program(Events) )).
+
+notify_program_mutations(Events) :-
+    mark_program_change,
+    revalidate_program(Events).
+
+revalidate_program(Events) :-
     mutation_seed_functions_all(Events, Seed),
     State0 = graph_state(Seed, []),
     maplist(invalidate_mutation_event, Events),

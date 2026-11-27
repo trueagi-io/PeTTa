@@ -24,6 +24,32 @@ Load order is semantically significant — a declaration or a constructor that
 arrives in a later file cannot retroactively inform code already compiled from
 an earlier one.
 
+### Staging
+
+Code runs as it was translated, and every call is a fresh start:
+
+- A file's function names and arities are registered before its forms run.
+  A `!` query is translated when the loader reaches it.
+- A function call runs the function as translated against the program at
+  that call. Edits of equations, declarations and translator rules
+  translate again the stored code that depended on what they changed. A
+  translator rule rewrites an application only while it has code at that
+  arity. Program edits refresh stored rule expansions even when the rule
+  chooses a callee dynamically. Rule execution samples ordinary space rows
+  and mutable state at expansion time. Writes to those rows or that state
+  alone leave stored expansions in place.
+- Declarations have a literal `:` tag and a nonvariable target. Rows with
+  an unbound tag are stored as data.
+- Code that is already running keeps its translation. A plain application
+  translated as data stays data in that unit after `add-atom` defines its
+  head, and backtracking resumes a call with the clause alternatives it
+  entered with.
+- `eval` translates its operand when it runs. `call` invokes a predicate,
+  and `reduce` dispatches on run-time values.
+
+Use `(eval (f))` to translate an occurrence after `f` is defined. See the
+[runnable example](examples/callquoteevalreduce.metta).
+
 ### MORK and FAISS spaces
 
 If MORK and FAISS is installed, execute `sh build.sh` to support MORK-based atom spaces and FAISS-based atom-vector spaces.
