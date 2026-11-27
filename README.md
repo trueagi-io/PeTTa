@@ -15,6 +15,31 @@ Example run:
 
 `time sh run.sh ./examples/nars_tuffy.metta`
 
+### Staging
+
+Code runs as it was translated, and every call is a fresh start:
+
+- A file's function names and arities are registered before its forms run.
+  A `!` query is translated when the loader reaches it.
+- A function call runs the function as translated against the program at
+  that call. The program is its equations `(= (f ...) ...)`, its
+  declarations `(: f type)` and its translator rules. An edit of any of
+  them translates again the stored code whose translation read what it
+  changed, and a translator rule's expansions are computed again after
+  every such edit. A translator rule rewrites an application only while it
+  has code at that arity. Other space rows, including rows with a variable
+  in place of `=` or `:` or of the name, are data: a translator rule reads
+  them when it runs, and editing them translates nothing again.
+- Code that is already running keeps its translation. A plain application
+  translated as data stays data in that unit after `add-atom` defines its
+  head, and backtracking resumes a call with the clause alternatives it
+  entered with.
+- `eval` translates its operand when it runs. `call` invokes a predicate,
+  and `reduce` dispatches on run-time values.
+
+Use `(eval (f))` to translate an occurrence after `f` is defined. See the
+[runnable example](examples/callquoteevalreduce.metta).
+
 ### MORK and FAISS spaces
 
 If MORK and FAISS is installed, execute `sh build.sh` to support MORK-based atom spaces and FAISS-based atom-vector spaces.
