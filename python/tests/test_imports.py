@@ -94,7 +94,7 @@ def test_nested_import_does_not_fall_back_to_cwd(
         petta_instance.load_metta_file(str(root_file))
 
 
-def test_import_after_use_warns(petta_instance, tmp_path, capfd):
+def test_import_after_use_refreshes_compiled_callers(petta_instance, tmp_path, capfd):
     fn = f"late_inc_{uuid.uuid4().hex}"
     root_file = tmp_path / "root.metta"
     dependency_file = tmp_path / "dependency.metta"
@@ -109,8 +109,16 @@ def test_import_after_use_warns(petta_instance, tmp_path, capfd):
     results = petta_instance.load_metta_file(str(root_file))
     stderr = capfd.readouterr().err
 
-    # The definition compiled before the import treats the name as a plain symbol...
-    assert f"({fn} 41)" in results
-    # ...and the late registration is called out.
-    assert fn in stderr
-    assert "Move the import or definition above the first use" in stderr
+    assert results == ["true", "42"]
+    assert "Move the import or definition above the first use" not in stderr
+
+
+def test_unresolved_callee_remains_data(petta_instance, tmp_path):
+    fn = f"unresolved_{uuid.uuid4().hex}"
+    root_file = tmp_path / "root.metta"
+    root_file.write_text(
+        f"(= (uses-{fn} $x) ({fn} $x))\n"
+        f"!(uses-{fn} 41)\n"
+    )
+
+    assert petta_instance.load_metta_file(str(root_file)) == [f"({fn} 41)"]
