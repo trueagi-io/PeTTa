@@ -8,8 +8,12 @@ add_sexp(Space, TermIn) :-
         instantiation_error(TermIn)
     ; is_list(TermIn), TermIn = [Rel|Args] ->
         Term =.. [Space, Rel | Args],
-        assertz(Term),
-        maybe_cache_type_decl(Space, [Rel|Args])
+        ( Space == '&self', Rel == (:), Args = [Name, Type]
+          -> ( atom(Name)
+               -> with_mutex(petta_definitions, with_definition_update(
+                      ( assertz(Term), mark_program_change, cache_named_type_decl(Name, Type) ) ))
+               ; assertz(Term), maybe_cache_type_decl(Space, TermIn) )
+        ; assertz(Term) )
     ;
         must_be(atom, Space),
         assertz(space_primitive(Space, TermIn))
@@ -21,186 +25,157 @@ remove_sexp(Space, TermIn) :-
         instantiation_error(TermIn)
     ; is_list(TermIn), TermIn = [Rel|Args] ->
         Term =.. [Space, Rel | Args],
-        retractall(Term),
-        maybe_uncache_type_decl(Space, [Rel|Args])
+        remove_expression(Space, Term, _)
     ;
         must_be(atom, Space),
         retractall(space_primitive(Space, TermIn))
     ).
 
+remove_expression(Space, Term, Removed) :-
+    ( Space == '&self', functor(Term, _, 3), arg(1, Term, Tag), ( var(Tag) ; Tag == (:) )
+      -> with_mutex(petta_definitions, with_definition_update(
+          ( removed_declarations(Term, Declarations),
+            retract_reporting(Term, Removed),
+            ( Removed == true, Declarations \== []
+              -> mark_program_change,
+                 forall(member(Decl, Declarations), maybe_uncache_type_decl(Space, Decl))
+            ; true ) ) ))
+    ; retract_reporting(Term, Removed) ).
+
+%Inspect the stored tag and target before applying the caller's unification.
+declared_row(Target, Type) :-
+    current_predicate('&self'/3),
+    copy_term_nat(Target-Type, IndexTarget-IndexType),
+    clause('&self'(':', IndexTarget, IndexType), true, Ref),
+    literal_declaration(Ref, StoredTarget, StoredType),
+    Target-Type = StoredTarget-StoredType.
+
+literal_declaration(Ref, Target, Type) :-
+    clause('&self'(Colon, Target, Type), true, Ref), Colon == (:), nonvar(Target).
+
+%The literal declarations (: Name Type) among the rows a removal matches, read by
+%reference so that the pattern's variables stay unbound:
+removed_declarations(Term, Declarations) :-
+    findall([:, Name, Type],
+            ( copy_term(Term, Copy), clause(Copy, true, Ref),
+              literal_declaration(Ref, Name, Type), atom(Name) ),
+            Declarations).
+
+%The first retract decides the report atomically, so of several threads removing
+%the same row exactly one is told true. Pattern variables stay unbound.
+retract_reporting(Term, Removed) :-
+    ( \+ \+ retract(Term) -> retractall(Term), Removed = true
+                          ; Removed = false ).
+
 %%An unbound atom would match every row, so it is not added:
 'add-atom'(_, Term, _) :- var(Term), !, instantiation_error(Term).
 
-%Add a function atom. On failure or exception it rolls back its staged raw
-%atom, registration, metadata and compiled-dependency state; concurrent
-%observers can still see the interval between staging and cleanup.
-'add-atom'(Space, Term, true) :- Term = [=,[FAtom|W],_], atom(FAtom), !,
-                                 length(W, SourceArity),
-                                 snapshot_runtime_function_add(
-                                     FAtom, SourceArity, Snapshot),
-                                 catch(
-                                     ( runtime_add_function_tx(
-                                           Space, Term, FAtom, W, Snapshot)
-                                       -> true
-                                       ; cleanup_runtime_function_add(
-                                           FAtom, Snapshot),
-                                       fail ),
-                                     Error,
-                                     ( cleanup_runtime_function_add(
-                                           FAtom, Snapshot),
-                                       throw(Error) )).
+%Publish a function and all refreshed dependents together, or roll back.
+'add-atom'(Space, Term, true) :- equation_form(Term, FAtom, W), !,
+    must_be(list, W),
+    with_mutex(petta_definitions,
+        with_definition_update(runtime_add_function_tx(Space, Term, FAtom, W))).
 
 %Add an atom to the space:
 'add-atom'(Space, Term, true) :-
     typed_space_runtime_value_ok(Space, Term),
     add_sexp(Space, Term).
 
-runtime_add_function_tx(Space, Term, FAtom, W, Snapshot) :-
-    Term = [=, [FAtom|W], TermBody],
-    RawTerm =.. [Space, '=', [FAtom|W], TermBody],
-    assertz(RawTerm, RawRef),
-    % Bindings are undone when a later goal fails or throws, so the staged refs
-    % are stored non-backtrackably in the snapshot for the cleanup to erase.
-    arg(7, Snapshot, Refs),
-    nb_setarg(1, Refs, RawRef),
-    maybe_cache_type_decl(Space, Term),
-    register_fun(FAtom),
-    length(W, N),
-    Arity is N + 1,
-    assertz(arity(FAtom, Arity)),
-    % A runtime clause is translated before its normal mutation notification.
-    % Drop any old unified self-summary now so recursive validation cannot
-    % consume the pre-add contract from an enclosing batch scope.
-    unified_checker_invalidate_event(
-        clause_changed(FAtom/N, runtime_preparing)),
-    once(translate_clause(Term, Clause, true, Dependencies)),
-    assertz(Clause, ClauseRef),
-    nb_setarg(2, Refs, ClauseRef),
-    assertz(translated_from(ClauseRef, Term)),
+runtime_add_function_tx(Space, Term, FAtom, W) :-
+    add_sexp(Space, Term),
+    length(W, N), Arity is N + 1,
+    register_signature(runtime, FAtom, Arity),
+    unified_checker_invalidate_event(clause_changed(FAtom/N, runtime_preparing)),
+    once(compile_equation(Term, Clause, true, Dependencies, Uses)),
+    assert_equation(Term, Clause, Uses, ClauseRef),
     record_compiled_dependencies(ClauseRef, FAtom/N, Dependencies),
+    once(retract(pending_signature(FAtom, Arity, runtime))),
+    sync_function_arities(FAtom),
     notify_mutation(clause_changed(FAtom/N, runtime)),
-    metta_on_function_changed(FAtom),
+    refresh_users(FAtom, []),
+    forall(metta_on_function_changed(FAtom), true),
     invalidate_specializations(FAtom),
     maybe_print_compiled_clause("added function", Term, Clause).
 
-snapshot_runtime_function_add(F, N,
-        runtime_add_snapshot(N, FunFacts, Arities, Recompile,
-                             CompiledClauses, CacheEntries,
-                             runtime_add_refs(none, none))) :-
-    findall(true, fun(F), FunFacts),
-    findall(A, arity(F, A), Arities),
-    snapshot_recompile_state(F, Recompile),
-    snapshot_runtime_function_clauses(F, CompiledClauses),
-    unified_checker_cache:unified_summary_cache_snapshot_event(
-        clause_changed(F/N, runtime_preparing), CacheEntries).
+%An open tag may match equations. Require a known name when it can do so.
+'remove-atom'(_, Term, _) :-
+    equation_pattern(Term, Head, _),
+    ( var(Head) -> Bad = Head ; Head = [Bad|_], var(Bad) ), !,
+    instantiation_error(Bad).
 
-cleanup_runtime_function_add(F,
-        runtime_add_snapshot(N, FunFacts, Arities, Recompile, CompiledClauses,
-                             CacheEntries, runtime_add_refs(RawRef, ClauseRef))) :-
-    ( ClauseRef \== none
-      -> forget_compiled_dependencies(ClauseRef),
-         retractall(translated_from(ClauseRef, _)),
-         ignore(catch(erase(ClauseRef), _, fail))
-    ; true ),
-    ( RawRef \== none
-      -> ignore(catch(erase(RawRef), _, fail))
-    ; true ),
-    restore_runtime_function_clauses(F, CompiledClauses),
-    restore_recompile_state(F, Recompile),
-    retractall(fun(F)),
-    forall(member(true, FunFacts), assertz(fun(F))),
-    retractall(arity(F, _)),
-    forall(member(A, Arities), assertz(arity(F, A))),
-    % notify_mutation/1 may already have swapped the staged clause and rebuilt
-    % callers before a later hook throws.  Replaying the mutation after the
-    % exact pre-add source clauses are back brings that dependent cascade into
-    % agreement with the restored program.  The cache snapshot is installed
-    % afterwards so the original closed contracts survive the failed add.
-    ignore(catch(notify_mutation(clause_changed(F/N, runtime)), _, fail)),
-    % Recompile analysis may have staged post-add summaries before a later
-    % operation failed.  The rollback restored the old program state, so make
-    % that failure boundary explicit and conservative.
-    unified_checker_cache:unified_summary_cache_store_many(CacheEntries).
-
-snapshot_runtime_function_clauses(F, Clauses) :-
-    findall(runtime_compiled_clause(Source, Head, Body, Origin, Dependencies),
-            ( translated_from(Ref, Source),
-              runtime_source_key(Source, F/_),
-              clause(Head, Body, Ref),
-              compiled_dependency_origin(Ref, Origin),
-              ( compiled_deps(Ref, _, _, StoredDependencies)
-                -> Dependencies = StoredDependencies
-              ; Dependencies = [] ) ),
-            Clauses).
-
-restore_runtime_function_clauses(F, Clauses) :-
-    findall(Ref,
-            ( translated_from(Ref, Source),
-              runtime_source_key(Source, F/_) ),
-            CurrentRefs),
-    forall(member(Ref, CurrentRefs),
-           ( forget_compiled_dependencies(Ref),
-             retractall(translated_from(Ref, _)),
-             ignore(catch(erase(Ref), _, fail)) )),
-    restore_runtime_compiled_clauses(Clauses).
-
-restore_runtime_compiled_clauses([]).
-restore_runtime_compiled_clauses(
-        [runtime_compiled_clause(Source, Head, Body, Origin, Dependencies)
-         |Clauses]) :-
-    assertz((Head :- Body), Ref),
-    assertz(translated_from(Ref, Source)),
-    runtime_source_key(Source, Key),
-    record_compiled_dependencies(Ref, Key, Origin, Dependencies),
-    restore_runtime_compiled_clauses(Clauses).
-
-runtime_source_key([Eq, [F|Args], _], F/N) :-
-    Eq == (=), atom(F), is_list(Args), length(Args, N).
-
-%%A removal with an unknown function name must not erase program rows:
-'remove-atom'(_, Term, _) :- Term = [=,[F|_],_], var(F), !, instantiation_error(F).
-
-%%Remove a function atom:
-'remove-atom'(Space, Term, Removed) :- Term = [=,[F|Args],Body], atom(F), !,
-                                       remove_sexp(Space, Term),
-                                       ( atom(F), nb_current(F, Prev) -> true ; Prev = [] ),
-                                       (   select(Meta, Prev, Rest),
-                                           Meta = fun_meta(Args0, Body0, _),
-                                           Args0 =@= Args,
-                                           Body0 =@= Body
-                                           -> ( Rest == [] -> nb_delete(F)
-                                                            ; nb_setval(F, Rest) ) ; true ),
-                                       findall(Ref, translated_from(Ref, Term), Refs),
-                                       forall(member(Ref, Refs),
-                                              ( forget_compiled_dependencies(Ref),
-                                                erase(Ref) )),
-                                       retractall(translated_from(_, Term)),
-                                       metta_on_function_changed(F),
-                                       invalidate_specializations(F),
-                                       length(Args, N),
-                                       ( \+ ( current_predicate(F/A), functor(H2, F, A), clause(H2, _, _) )
-                                         -> retractall(fun(F)), metta_on_function_removed(F)
-                                         ; true ),
-                                       % Callable classification is part of the
-                                       % unified call contract.  Drop the last
-                                       % fun/1 marker before rebuilding callers
-                                       % so they see data syntax, not a stale
-                                       % unknown function call.
-                                       notify_mutation(clause_changed(F/N, runtime)),
-                                       ( Refs = [] -> Removed = false ; Removed = true ).
+'remove-atom'(Space, Term, Removed) :-
+    equation_pattern(Term, Head, Body), nonvar(Head), Head = [F|_], atom(F), !,
+    with_mutex(petta_definitions, with_definition_update(
+        ( Equation = [=, Head, Body],
+          ( matches_equation(Space, Equation)
+            -> remove_sexp(Space, Term),
+               retire_equations(Equation, Removed)
+          ; typed_space_runtime_value_ok(Space, Term), remove_sexp(Space, Term), Removed = false ) ))).
 
 %Remove all same atoms:
 'remove-atom'(Space, Term, true) :-
     typed_space_runtime_value_ok(Space, Term),
     remove_sexp(Space, Term).
 
+equation_pattern(Term, Head, Body) :-
+    is_list(Term), Term = [Tag, Head, Body], ( Tag == (=) ; var(Tag) ).
+
+equation_form(Term, F, Args) :-
+    is_list(Term), Term = [Tag, Head, _], Tag == (=),
+    nonvar(Head), Head = [F|Args], atom(F).
+
+matches_equation(Space, Equation) :-
+    copy_term(Equation, Pattern), Probe =.. [Space|Pattern],
+    clause(Probe, true, Ref),
+    clause(Stored, true, Ref), Stored =.. [Space|Row], equation_form(Row, _, _), !.
+
+%Retire the compiled equations of a removed equation row; Removed says whether there were any:
+retire_equations(Equation, Removed) :-
+    Equation = [=, [F|Args], Body],
+    remember_function_metas(F),
+    ( atom(F), nb_current(F, Prev) -> true ; Prev = [] ),
+    (   select(Meta, Prev, Rest),
+        Meta = fun_meta(Args0, Body0, _),
+        Args0 =@= Args,
+        Body0 =@= Body
+        -> ( Rest == [] -> nb_delete(F)
+                         ; nb_setval(F, Rest) ) ; true ),
+    findall(Ref-A,
+            ( translated_from(Ref, Equation),
+              ( equation_arity(F, A, Ref) -> true
+              ; clause(H, _, Ref), functor(H, F, A) ) ),
+            Refs),
+    forall(member(Ref-A, Refs),
+           ( forget_compiled_dependencies(Ref),
+             forget_translation(Ref),
+             ignore(catch(erase(Ref), _, fail)),
+             no_equations_answer(F, A) )),
+    sync_function_arities(F),
+    invalidate_specializations(F),
+    length(Args, N),
+    ( \+ ( equation_arity(F, RemA, _), RemA is N + 1 )
+      -> retractall(det_bound_proviso(F, N, _, _)),
+         forall(( inferred_fn_type(F, InfATs, InfOT), length(InfATs, N) ),
+                retractall(inferred_fn_type(F, InfATs, InfOT)))
+    ; true ),
+    % Callable classification is part of the unified call contract.
+    % sync_function_arities/1 drops the last fun/1 marker before
+    % rebuilding callers so they see data syntax, not a stale call.
+    notify_mutation(clause_changed(F/N, runtime)),
+    refresh_users(F, []),
+    forall(metta_on_function_changed(F), true),
+    ( fun(F)
+      -> true
+      ; forall(metta_on_function_removed(F), true) ),
+    ( Refs == [] -> Removed = false ; Removed = true ).
+
 %Updates whose row the translator proved against the space's declared schema
 %(typed_space_update_goal/4). A function atom keeps its own clause.
-'add-atom-proven'(Space, Term, true) :- ( var(Term) -> true ; Term = [=,_,_] ), !,
+'add-atom-proven'(Space, Term, true) :- ( var(Term) ; is_list(Term), Term = [Tag,_,_], Tag == (=) ), !,
                                         'add-atom'(Space, Term, true).
 'add-atom-proven'(Space, Term, true) :- add_sexp(Space, Term).
 
-'remove-atom-proven'(Space, Term, Removed) :- Term = [=,_,_], !,
+'remove-atom-proven'(Space, Term, Removed) :- equation_pattern(Term, _, _), !,
                                               'remove-atom'(Space, Term, Removed).
 'remove-atom-proven'(Space, Term, true) :- remove_sexp(Space, Term).
 

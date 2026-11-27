@@ -110,25 +110,21 @@ maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C
                                       format(user_error,
                                              "Warning: type declaration name (~w) is an expression; write (: ~w ...) to declare the function~n",
                                              [Name, Name]).
-maybe_cache_type_decl(Space, Term) :- Space == '&self', is_list(Term), Term = [C, Name, Type],
-                                      C == (:), atom(Name), kind_decl(Type, Keyword, Value), !,
-                                      with_decl_transaction(Name,
-                                          cache_kind_decl(Name, Type, Keyword, Value)).
 maybe_cache_type_decl(Space, Term) :- ( Space == '&self', is_list(Term), Term = [C, Name, Type],
                                         C == (:), atom(Name)
-                                        -> ( nonvar(Type), infix_arrow_misuse(Type)
-                                             -> throw(error(infix_arrow_syntax(Name, Type), typecheck))
-                                           ; nonvar(Type), fn_type_shape(Type, ATs, OT, Det)
-                                              -> with_decl_transaction(
-                                                     Name,
-                                                     ( prepare_decl_origin(Name, Type, Origin),
-                                                       current_fn_decl_provenance(Type, Provenance),
-                                                       cache_fn_type_decl(Name, Type, ATs, OT, Det,
-                                                                          Origin, Provenance) ))
-                                              ; with_decl_transaction(
-                                                    Name,
-                                                    cache_value_decl(Name, Type)) )
+                                        -> with_decl_transaction(Name, cache_named_type_decl(Name, Type))
                                         ; true ).
+
+%Runtime space edits call this inside the transaction that stores the raw row.
+cache_named_type_decl(Name, Type) :-
+    ( kind_decl(Type, Keyword, Value) -> cache_kind_decl(Name, Type, Keyword, Value)
+    ; nonvar(Type), infix_arrow_misuse(Type)
+      -> throw(error(infix_arrow_syntax(Name, Type), typecheck))
+    ; nonvar(Type), fn_type_shape(Type, ATs, OT, Det)
+      -> prepare_decl_origin(Name, Type, Origin),
+         current_fn_decl_provenance(Type, Provenance),
+         cache_fn_type_decl(Name, Type, ATs, OT, Det, Origin, Provenance)
+    ; cache_value_decl(Name, Type) ).
 
 %%% Kind declarations (: Name (Keyword ...)), each kind in its own store keyed
 %%% by name. Erased nominal newtypes (: KB (Newtype Expression)) declare a
@@ -215,9 +211,7 @@ existing_space_row(Name, Row) :-
     catch(clause(Head, true), _, fail),
     Head =.. [Name|Row].
 
-%A declaration-driven graph revalidation is transactional over the declaration
-%state: executable clauses, declarations, origins and inferred types are
-%restored together. The raw source atom of a runtime add-atom stays outside it.
+%Restore declaration state if a cache-only update fails.
 with_decl_transaction(Name, Goal) :-
     snapshot_decl_transaction(Name, Snapshot),
     catch(( Goal -> true
