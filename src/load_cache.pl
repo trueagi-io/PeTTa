@@ -102,6 +102,7 @@ predicate_state(M:F/A, pred(M:F/A, Props, Refs)) :-
     findall(R, clause(M:H, _, R), Refs).
 
 volatile_flag(pid, _).
+volatile_flag(system_thread_id, _).
 volatile_flag(_, V) :- blob(V, Type), \+ memberchk(Type, [text, reserved_symbol]).
 
 % The fingerprint covers the stored form of every clause and global variable,
